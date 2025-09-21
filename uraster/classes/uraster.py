@@ -27,16 +27,25 @@ class uraster:
             else:
                 print('The raster file does not exist:', sFilename_raster_in)
                 return False
+
+        aFilename_source_raster_out = list
+        #create a WGS84 spatial reference in the WKT format for comparison
+        pSpatialRef_wgs84 = osr.SpatialReference()
+        pSpatialRef_wgs84.ImportFromEPSG(4326)
+        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
         #uset the sraster class the check the raster
         for sFilename_raster_in in aFilename_source_raster_in:
             pRaster = sraster(sFilename_raster_in)
             pRaster.read_metadata()
-            
+            if pRaster.pSpatialRef_wkt == wkt_wgs84:
+                print('The raster file is in WGS84 geographic coordinate system:', sFilename_raster_in)
+                aFilename_source_raster_out.append(sFilename_raster_in)
+            else:
+                #need conversion
+                pRaster_wgs84 = pRaster.convert_to_wgs84()
+                aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
 
-
-
-        return True
-
+        return aFilename_source_raster_out
 
 
     def remap_raster_to_uraster(self, aFilename_source_raster_in,    sFilename_target_mesh_in ,
@@ -234,21 +243,9 @@ class uraster:
                 if not pPolygon or pPolygon.IsEmpty() or not pPolygon.IsValid():
                     pFeature_subset = pLayer_subset.GetNextFeature()
                     continue
-                #create the temporary shapefile
-                #pDataset3 = pDriver_shapefile.CreateDataSource(sFilename_shapefile_cut)
-                #pLayerOut3 = pDataset3.CreateLayer('cell', pSpatialRef_target, ogr.wkbPolygon)
-                #pLayerDefn3 = pLayerOut3.GetLayerDefn()
-                #pFeatureOut3 = ogr.Feature(pLayerDefn3)
-                #pFeatureOut3.SetGeometry(pPolygon)
-                #pLayerOut3.CreateFeature(pFeatureOut3)
-                #pDataset3.FlushCache()
-                #pWrapOption = gdal.WarpOptions( cropToCutline=True,cutlineDSName = sFilename_shapefile_cut , \
-                #        width=iNewWidth, \
-                #            height=iNewHeigh, \
-                #                dstSRS=pProjection , format = sDriverName )
+
                 pPolygonWKT = pPolygon.ExportToWkt()
                 pWrapOption = gdal.WarpOptions(cropToCutline=True,
-                                                #cutlineDSName = sFilename_shapefile_cut ,#could be true if vector file is provided
                                                 cutlineWKT=pPolygonWKT,
                                     xRes=dPixelWidth,
                                    yRes=abs(pPixelHeight),
