@@ -58,7 +58,8 @@ class sraster:
         self.iWidth = pDataset.RasterXSize
         self.iHeight = pDataset.RasterYSize
         self.iBandCount = pDataset.RasterCount
-        self.sDtype = gdal.GetDataTypeName(pDataset.GetRasterBand(1).DataType) if self.iBandCount > 0 else None
+        self.eType = pDataset.GetRasterBand(1).DataType if self.iBandCount > 0 else None
+        self.sDtype = gdal.GetDataTypeName(self.eType) if self.iBandCount > 0 else None
         self.pTransform = pDataset.GetGeoTransform()
         self.dNoData = pDataset.GetRasterBand(1).GetNoDataValue() if self.iBandCount > 0 else None
         self.sCrs = pDataset.GetProjection()
@@ -66,11 +67,18 @@ class sraster:
         self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
         pDataset = None
 
+
+
         #obtain the spatial extent
         self.aExtent = (self.pTransform[0], self.pTransform[3], self.pTransform[1], self.pTransform[4])
 
+        #create the wkt for WGS84
+        pSpatialRef_wgs84 = osr.SpatialReference()
+        pSpatialRef_wgs84.ImportFromEPSG(4326)
+        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
+
         #if the spatial reference is not in WGS84, transform the extent to WGS84
-        if not self.pSpatialRef.IsSame(osr.SRS_WKT_WGS84):
+        if not self.pSpatialRef_wkt == wkt_wgs84:
             transform = osr.CoordinateTransformation(self.pSpatialRef, osr.SpatialReference().ImportFromEPSG(4326))
             (minX, maxY, _) = transform.TransformPoint(self.aExtent[0], self.aExtent[1])
             (maxX, minY, _) = transform.TransformPoint(self.aExtent[0] + self.aExtent[2], self.aExtent[1] + self.aExtent[3])
@@ -78,6 +86,28 @@ class sraster:
         else:
             self.aExtent_wgs84 = self.aExtent
 
+        self.dLongitude_left = self.aExtent_wgs84[0]
+        self.dLongitude_right = self.aExtent_wgs84[2]
+        self.dLatitude_bottom = self.aExtent_wgs84[1]
+        self.dLatitude_top = self.aExtent_wgs84[3]
+
+        return
+
+    def print_info(self):
+        """
+        Print raster metadata information.
+        """
+        print(f"Filename: {self.sFilename}")
+        print(f"Width: {self.iWidth}")
+        print(f"Height: {self.iHeight}")
+        print(f"Band Count: {self.iBandCount}")
+        print(f"Data Type: {self.sDtype}")
+        print(f"NoData Value: {self.dNoData}")
+        print(f"CRS: {self.sCrs}")
+        print(f"Spatial Reference WKT: {self.pSpatialRef_wkt}")
+        print(f"Affine Transform: {self.pTransform}")
+        print(f"Extent: {self.aExtent}")
+        print(f"WGS84 Extent: {self.aExtent_wgs84}")
         return
 
     def create_raster_mesh(self):

@@ -182,9 +182,9 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#  and can be added to the global gitignore or merged into this file. However, if you prefer,
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
@@ -205,3 +205,83 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Geospatial / GIS / Raster Processing
+# GDAL temporary files
+*.aux.xml
+*.ovr
+*.cpg
+*.dbf
+*.prj
+*.qpj
+*.shx
+
+# Raster files (uncomment if you don't want to track them)
+# *.tif
+# *.tiff
+# *.img
+# *.nc
+# *.hdf
+# *.h5
+# *.he5
+
+# Temporary raster outputs
+*_clip_*.tif
+*_clip_*.tiff
+*_warped.tif
+*_reprojected.tif
+temp_*.tif
+tmp_*.tif
+
+# GDAL virtual file system
+/vsimem/
+
+# Shapefile components (if generated dynamically)
+*_temp.shp
+*_temp.shx
+*_temp.dbf
+*_temp.prj
+*_transformed.shp
+*_transformed.shx
+*_transformed.dbf
+*_transformed.prj
+
+# Mesh/polygon processing outputs
+*_clipped.geojson
+*_processed.geojson
+*_output.shp
+
+# Log files from processing
+processing.log
+gdal_*.log
+uraster_*.log
+
+# Data directories (uncomment if you don't want to track data)
+# data/
+# examples/data/
+# test_data/
+
+# Crash dump files
+*.dmp
+*.dump
+*.mdmp
+core
+core.*
+vgcore.*
+*.stackdump
+*.crash
+*.crashlog
+crash_*.txt
+crash_*.log
+coredump
+memory.dmp
+python_crash_*.txt
+
+# System crash files (Windows)
+*.wer
+
+# macOS crash files
+*.crash
+
+# Linux core dumps
+*.core
