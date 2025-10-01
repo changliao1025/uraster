@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Liao
+    given-names: Chang
+    orcid: https://orcid.org/0000-0002-7348-8858
+
+title: "uraster: A Python package to transform raster data to unstructured mesh using GDAL."
+version: 0.1.0
+doi:
+date-released: 2025-10-01

@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uraster"
+version = "0.1.0"
+description = "A Python package for unstructured raster processing and remapping"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Chang Liao", email = "changliao.climate@gmail.com"}
+]
+maintainers = [
+    {name = "Chang Liao", email = "changliao.climate@gmail.com"}
+]
+keywords = ["raster", "GIS", "geospatial", "GDAL", "unstructured"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.19.0",
+    "gdal>=3.0.0",
+    "osr",
+    "ogr",
+    "psutil",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "flake8",
+    "mypy",
+]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+]
+
+[project.urls]
+Homepage = "https://github.com/changliao1025/uraster"
+Documentation = "https://github.com/changliao1025/uraster"
+Repository = "https://github.com/changliao1025/uraster"
+"Bug Tracker" = "https://github.com/changliao1025/uraster/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["uraster*"]
+exclude = ["tests*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
