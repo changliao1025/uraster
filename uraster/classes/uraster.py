@@ -1,20 +1,18 @@
 # Define a class named 'uraster'
 import os
-import numpy as np
-from osgeo import gdal, ogr, osr
-from multiprocessing import Pool, cpu_count
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-
-from pyearth.gis.gdal.read.raster.gdal_read_geotiff_file import gdal_read_geotiff_file
-from pyearth.toolbox.management.vector.reproject import reproject_vector
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
-from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from .sraster import sraster
 import logging
 import traceback
 import signal
 import sys
+import time
+import numpy as np
+from osgeo import gdal, ogr, osr
+from multiprocessing import Pool, cpu_count
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pyearth.gis.gdal.read.raster.gdal_read_geotiff_file import gdal_read_geotiff_file
+from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
+from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
+from .sraster import sraster
 
 # Set up logging for crash detection
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,19 +30,15 @@ signal.signal(signal.SIGSEGV, signal_handler)  # Segmentation fault
 signal.signal(signal.SIGABRT, signal_handler)  # Abort
 signal.signal(signal.SIGFPE, signal_handler)   # Floating point exception
 
-
-
 class uraster:
 
     def __init__(self, aConfig = dict()):
         self.iFlag_global = None
         self.dResolution_raster = None
         self.dResolution_uraster = None
-
         self.sFilename_source_mesh = None
         self.sFilename_target_mesh = None
         self.aFilename_source_raster = list()
-
 
         if "sFilename_source_mesh" in aConfig:
             self.sFilename_source_mesh = aConfig['sFilename_source_mesh']
