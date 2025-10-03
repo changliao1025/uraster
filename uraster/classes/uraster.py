@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyearth.gis.gdal.read.raster.gdal_read_geotiff_file import gdal_read_geotiff_file
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
+from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
 from .sraster import sraster
 
 # Set up logging for crash detection
@@ -49,6 +50,55 @@ class uraster:
         if "aFilename_source_raster" in aConfig:
             self.aFilename_source_raster = aConfig['aFilename_source_raster']
 
+    def _get_geometry_type_name(self, geometry_type):
+        """
+        Convert OGR geometry type integer to readable string
+        """
+        geometry_types = {
+            ogr.wkbUnknown: "wkbUnknown",
+            ogr.wkbPoint: "wkbPoint",
+            ogr.wkbLineString: "wkbLineString",
+            ogr.wkbPolygon: "wkbPolygon",
+            ogr.wkbMultiPoint: "wkbMultiPoint",
+            ogr.wkbMultiLineString: "wkbMultiLineString",
+            ogr.wkbMultiPolygon: "wkbMultiPolygon",
+            ogr.wkbGeometryCollection: "wkbGeometryCollection"
+        }
+
+        # Direct match
+        if geometry_type in geometry_types:
+            return geometry_types[geometry_type]
+
+        # Check base type (removes 3D/Z flags)
+        base_type = geometry_type & 0xFF
+        for const_val, name in geometry_types.items():
+            if (const_val & 0xFF) == base_type:
+                return f"{name} (with flags)"
+
+        return f"Unknown geometry type: {geometry_type}"
+
+    def _get_vector_driver_from_filename(self, filename):
+        """
+        Determine the appropriate OGR driver based on file extension
+        :param filename: Output vector filename
+        :return: OGR driver name
+        """
+        extension = os.path.splitext(filename)[1].lower()
+
+        driver_mapping = {
+            '.shp': 'ESRI Shapefile',
+            '.geojson': 'GeoJSON',
+            '.json': 'GeoJSON',
+            '.gpkg': 'GPKG',
+            '.kml': 'KML',
+            '.gml': 'GML',
+            '.sqlite': 'SQLite',
+            '.csv': 'CSV',
+            '.parquet': 'Parquet'
+        }
+
+        # Default to Shapefile if extension not recognized
+        return driver_mapping.get(extension, 'ESRI Shapefile')
 
     def check_raster_files(self, aFilename_source_raster_in=None):
         """
@@ -109,9 +159,11 @@ class uraster:
                     sFilename_target_mesh_in = None,
                                 aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
+                  iFlag_save_clipped_raster_in=0,
+                  sFolder_raster_out_in = None,
                   sFormat_in='GTiff'):
         """
-        Clip a raster by a shapefile
+        Clip a raster by a vector mesh file
         :param aFilename_source_raster_in: a list of raster files
         :param    sFilename_target_mesh_in : input polygon filename
         :param sFilename_raster_out: output raster filename
@@ -140,10 +192,12 @@ class uraster:
         if os.path.exists(sFilename_target_mesh ):
             pass
         else:
-            print('The shapefile does not exist!')
+            print('The vector mesh file does not exist!')
             return
 
-        pDriver_shapefile = ogr.GetDriverByName('ESRI Shapefile')
+        # Determine output vector format from filename extension
+        sVectorDriverName = self._get_vector_driver_from_filename(sFilename_vector_out)
+        pDriver_vector = ogr.GetDriverByName(sVectorDriverName)
 
         #check the input raster data format and decide gdal driver
         if sFormat_in is not None:
@@ -152,8 +206,8 @@ class uraster:
             sDriverName = 'GTiff'
 
         if os.path.exists(sFilename_vector_out):
-            #remove the file using the gdal driver
-            pDriver_shapefile.DeleteDataSource(sFilename_vector_out)
+            #remove the file using the vector driver
+            pDriver_vector.DeleteDataSource(sFilename_vector_out)
 
         pDriver = gdal.GetDriverByName(sDriverName)
 
@@ -208,7 +262,7 @@ class uraster:
         sDriverName = 'MEM'
 
         #create a polygon feature to save the output
-        pDataset_out = pDriver_shapefile.CreateDataSource(sFilename_vector_out)
+        pDataset_out = pDriver_vector.CreateDataSource(sFilename_vector_out)
         pLayer_out = pDataset_out.CreateLayer('cell', pSpatialRef_target, ogr.wkbPolygon)
         pLayer_defn_out = pLayer_out.GetLayerDefn()
         pFeature_out = ogr.Feature(pLayer_defn_out)
@@ -239,7 +293,8 @@ class uraster:
             'yRes': abs(pPixelHeight),
             'dstSRS': pSpatialRef_target,
             'format': 'MEM',
-            'resampleAlg': sResampleAlg
+            'resampleAlg': sResampleAlg,
+            'srcSRS': 'EPSG:4326',  # Explicitly set source CRS
         }
 
         # Enable GDAL multi-threading
@@ -247,16 +302,48 @@ class uraster:
 
         # Batch processing variables
         i = 1
-        iFlag_save_clipped_raster = 1 #for debugging purpose
-        sFolder_raster_out = '/compyfs/liao313/04model/pyhexwatershed/global/dem'
 
         # Pre-fetch all features for potential parallel processing
         aFeatures = []
         pLayer_mesh.ResetReading()
         pFeature_mesh = pLayer_mesh.GetNextFeature()
         while pFeature_mesh is not None:
-            aFeatures.append(pFeature_mesh.Clone())
-            pFeature_mesh = pLayer_mesh.GetNextFeature()
+            #what if a feature cross the international date line?
+            #reuse the code from pyflowline to split the polygon if it cross the date line
+            pPolygon = pFeature_mesh.GetGeometryRef()
+            aCoord = get_geometry_coordinates(pPolygon)
+            dLon_min = np.min(aCoord[:,0])
+            dLon_max = np.max(aCoord[:,0])
+            if dLon_max - dLon_min > 100:  #cross the date line
+                if not pPolygon.IsValid():
+                    print('Invalid polygon geometry detected, something broke during the PyFlowline simulation.')
+                    pass
+                # Create multipolygon to handle IDL crossing
+                print('Feature ', i, ' cross the international date line, splitting it into multiple parts.')
+                pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
+                aCoord_gcs_split = split_polygon_cross_idl(aCoord) #careful
+                for aCoord_gcs in aCoord_gcs_split:
+                    #create a polygon (not just ring) and add it to the multipolygon
+                    ring = ogr.Geometry(ogr.wkbLinearRing)
+                    for iCoord in range(aCoord_gcs.shape[0]):
+                        ring.AddPoint(aCoord_gcs[iCoord, 0], aCoord_gcs[iCoord, 1])
+
+                    ring.CloseRings()
+                    # Create polygon from ring
+                    polygon_part = ogr.Geometry(ogr.wkbPolygon)
+                    polygon_part.AddGeometry(ring)
+                    pMultipolygon.AddGeometry(polygon_part)  # Add polygon, not ring
+
+                #create a feature from the multipolygon and add it to the list
+                pFeature_new = ogr.Feature(pLayer_mesh.GetLayerDefn())
+                pFeature_new.SetGeometry(pMultipolygon)
+                aFeatures.append(pFeature_new)
+                pFeature_mesh = pLayer_mesh.GetNextFeature()
+            else:
+                aFeatures.append(pFeature_mesh.Clone())
+                pFeature_mesh = pLayer_mesh.GetNextFeature()
+
+            i += 1
 
         print(f"Processing {len(aFeatures)} features...")
         start_time = time.time()
@@ -265,11 +352,13 @@ class uraster:
         failed_features = []
         successful_features = 0
 
+        #reset i
+        i = 1
+
         # Process features
         for idx, pFeature_mesh in enumerate(aFeatures):
             sClip = f"{i:08d}"  # f-string is faster than format
             pPolygon = pFeature_mesh.GetGeometryRef()
-
             # Fast envelope check first
             minX, maxX, minY, maxY = pPolygon.GetEnvelope()
             if (minX > dX_right or maxX < dX_left or
@@ -291,57 +380,45 @@ class uraster:
                 except ImportError:
                     pass  # psutil not available
 
-                # Use WKT for faster performance (reuse base options)
-                pPolygonWKT = pPolygon.ExportToWkt()
-                warp_options = gdal_warp_options_base.copy()
-                warp_options['cutlineWKT'] = pPolygonWKT
-                pWrapOption = gdal.WarpOptions(**warp_options)
+                # Handle polygon vs multipolygon differently
+                geometry_type = pPolygon.GetGeometryType()
+                sGeometry_type = pPolygon.GetGeometryName()
+                geometry_type_name = self._get_geometry_type_name(geometry_type)
+                logger.debug(f"Feature {i} geometry type: {geometry_type} ({geometry_type_name})")
 
-                # Capture GDAL errors during Warp operation
-                gdal.PushErrorHandler('CPLQuietErrorHandler')
-                # Set a timeout for the operation (using alarm signal on Unix)
-                def timeout_handler(signum, frame):
-                    raise TimeoutError(f"GDAL Warp operation timed out after 30 seconds for feature {i}")
+                if sGeometry_type == "POLYGON":
+                    # Simple polygon - process normally
+                    pDataset_clip_warped, aData_clip, newGeoTransform = self._process_single_polygon(
+                        pPolygon, aFilename_source_raster, gdal_warp_options_base, i)
 
-                if hasattr(signal, 'SIGALRM'):  # Unix systems only
-                    signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(30)  # 30 second timeout
+                    if pDataset_clip_warped is None:
+                        error_msg = f"Failed to process single polygon for feature {i}"
+                        logger.error(error_msg)
+                        failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
+                        i += 1
+                        continue
 
-                logger.debug(f"Starting GDAL Warp for feature {i}")
-                pDataset_clip_warped = gdal.Warp('', aFilename_source_raster, options=pWrapOption)
+                elif sGeometry_type == "MULTIPOLYGON":
+                    # Multipolygon (IDL crossing) - process each part separately and merge
+                    logger.info(f"Processing IDL-crossing multipolygon for feature {i}")
+                    merged_data, merged_transform = self._process_multipolygon_idl(
+                        pPolygon, aFilename_source_raster, gdal_warp_options_base, i, dMissing_value)
 
-                if hasattr(signal, 'SIGALRM'):
-                    signal.alarm(0)  # Cancel the alarm
+                    if merged_data is None:
+                        error_msg = f"Failed to process IDL-crossing multipolygon for feature {i}"
+                        logger.error(error_msg)
+                        failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
+                        i += 1
+                        continue
 
-                gdal.PopErrorHandler()
-                # Check if the operation succeeded
-                if pDataset_clip_warped is None:
-                    gdal_error = gdal.GetLastErrorMsg()
-                    error_msg = f"GDAL Warp failed for feature {i}: {gdal_error}"
-                    logger.error(error_msg)
-                    logger.error(f"Polygon envelope: {minX}, {maxX}, {minY}, {maxY}")
-                    failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                    i += 1
-                    continue
+                    aData_clip = merged_data
+                    newGeoTransform = merged_transform
+                    pDataset_clip_warped = True  # Flag to indicate successful processing
 
-                newGeoTransform = pDataset_clip_warped.GetGeoTransform()
-                aData_clip = pDataset_clip_warped.ReadAsArray()
-
-                # Check if data was successfully read
-                if aData_clip is None:
-                    error_msg = f"Failed to read array data for feature {i}"
+                else:
+                    error_msg = f"Unsupported geometry type for feature {i}: {geometry_type} ({geometry_type_name})"
                     logger.error(error_msg)
                     failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                    pDataset_clip_warped = None
-                    i += 1
-                    continue
-
-                # Check for reasonable data dimensions
-                if aData_clip.size == 0:
-                    error_msg = f"Empty data array for feature {i}"
-                    logger.warning(error_msg)
-                    failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                    pDataset_clip_warped = None
                     i += 1
                     continue
 
@@ -372,6 +449,7 @@ class uraster:
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 # Log polygon geometry for debugging (truncated)
                 try:
+                    pPolygonWKT = pPolygon.ExportToWkt()
                     logger.debug(f"Polygon WKT (first 200 chars): {pPolygonWKT[:200]}...")
                 except:
                     logger.debug("Could not log polygon WKT")
@@ -385,26 +463,27 @@ class uraster:
                 aData_clip = aData_clip.astype(np.int32, copy=False)  # Avoid unnecessary copy
                 np.place(aData_clip, aData_clip == dMissing_value, -9999)  # Faster than boolean indexing
 
-                if iFlag_save_clipped_raster == 1:
-                    sFilename_raster_out = os.path.join(sFolder_raster_out, f'{sRasterName_no_extension}_clip_{sClip}{sExtension}')
-                    # Delete existing file if it exists (GDAL Create() doesn't overwrite)
-                    if os.path.exists(sFilename_raster_out):
-                        try:
-                            pDriver.Delete(sFilename_raster_out)
-                        except:
-                            os.remove(sFilename_raster_out)  # Fallback if GDAL delete fails
-                    iNewWidth = aData_clip.shape[1]
-                    iNewHeigh = aData_clip.shape[0]
-                    pDataset_clip = pDriver.Create(sFilename_raster_out, iNewWidth, iNewHeigh, 1, eType , options= options)
-                    pDataset_clip.SetGeoTransform( newGeoTransform )
-                    pDataset_clip.SetProjection( pSpatialRef_target_wkt)
-                    #set the no data value
-                    pBand = pDataset_clip.GetRasterBand(1)
-                    pBand.SetNoDataValue(-9999)
-                    pBand.WriteArray(aData_clip)
-                    pBand.FlushCache()  # Corrected method name to FlushCache()
-                    pDataset_clip.FlushCache()
-                    pDataset_clip = None
+                if iFlag_save_clipped_raster_in == 1 :
+                    if geometry_type == ogr.wkbPolygon : #we cannot save the multipolygon directly
+                        sFilename_raster_out = os.path.join(sFolder_raster_out_in, f'{sRasterName_no_extension}_clip_{sClip}{sExtension}')
+                        # Delete existing file if it exists (GDAL Create() doesn't overwrite)
+                        if os.path.exists(sFilename_raster_out):
+                            try:
+                                pDriver.Delete(sFilename_raster_out)
+                            except:
+                                os.remove(sFilename_raster_out)  # Fallback if GDAL delete fails
+                        iNewWidth = aData_clip.shape[1]
+                        iNewHeigh = aData_clip.shape[0]
+                        pDataset_clip = pDriver.Create(sFilename_raster_out, iNewWidth, iNewHeigh, 1, eType , options= options)
+                        pDataset_clip.SetGeoTransform( newGeoTransform )
+                        pDataset_clip.SetProjection( pSpatialRef_target_wkt)
+                        #set the no data value
+                        pBand = pDataset_clip.GetRasterBand(1)
+                        pBand.SetNoDataValue(-9999)
+                        pBand.WriteArray(aData_clip)
+                        pBand.FlushCache()  # Corrected method name to FlushCache()
+                        pDataset_clip.FlushCache()
+                        pDataset_clip = None
 
                 aCoords_gcs = get_geometry_coordinates(pPolygon)
                 dArea = calculate_polygon_area(aCoords_gcs[:,0], aCoords_gcs[:,1])
@@ -414,9 +493,14 @@ class uraster:
                 pFeature_out.SetField('area', dArea)
 
                 if iFlag_stat_in == 1:
-                    # Optimize statistics calculation
-                    valid_mask = aData_clip != -9999
-                    valid_data = aData_clip[valid_mask]
+                    # Check if aData_clip is already 1D valid data (from IDL merge) or 2D raster
+                    if aData_clip.ndim == 1:
+                        # Already 1D array of valid data from IDL merge
+                        valid_data = aData_clip[aData_clip != -9999]  # Remove any remaining -9999 values
+                    else:
+                        # Standard 2D raster - extract valid data
+                        valid_mask = aData_clip != -9999
+                        valid_data = aData_clip[valid_mask]
 
                     if valid_data.size > 0:
                         # Calculate all statistics in one pass for efficiency
@@ -428,8 +512,13 @@ class uraster:
 
                 pLayer_out.CreateFeature(pFeature_out)
 
-                # Explicit cleanup
-                pDataset_clip_warped = None
+                # Explicit cleanup - handle both single polygon dataset and multipolygon flag
+                if isinstance(pDataset_clip_warped, bool):
+                    # Multipolygon case - cleanup was already handled in helper method
+                    pass
+                else:
+                    # Single polygon case - cleanup the dataset
+                    pDataset_clip_warped = None
 
                 # Progress reporting
                 if i % 100 == 0:
@@ -460,7 +549,9 @@ class uraster:
 
         # Save failure report to file
         if failed_features:
-            failure_report_file = sFilename_vector_out.replace('.shp', '_failures.log')
+            # Generate failure report filename by replacing extension with '_failures.log'
+            base_name = os.path.splitext(sFilename_vector_out)[0]
+            failure_report_file = f"{base_name}_failures.log"
             try:
                 with open(failure_report_file, 'w') as f:
                     f.write(f"Processing failure report - {time.ctime()}\n")
@@ -475,3 +566,153 @@ class uraster:
                 logger.error(f"Could not save failure report: {e}")
 
         return
+
+    def _process_single_polygon(self, polygon, aFilename_source_raster, gdal_warp_options_base, feature_id):
+        """
+        Process a single polygon with GDAL Warp
+        Returns: (dataset, data_array, geotransform) or (None, None, None) on failure
+        """
+        try:
+            # Use WKT for faster performance
+            pPolygonWKT = polygon.ExportToWkt()
+            warp_options = gdal_warp_options_base.copy()
+            warp_options['cutlineWKT'] = pPolygonWKT
+            pWrapOption = gdal.WarpOptions(**warp_options)
+
+            # Capture GDAL errors during Warp operation
+            gdal.PushErrorHandler('CPLQuietErrorHandler')
+
+            # Set a timeout for the operation (using alarm signal on Unix)
+            def timeout_handler(signum, frame):
+                raise TimeoutError(f"GDAL Warp operation timed out after 30 seconds for feature {feature_id}")
+
+            if hasattr(signal, 'SIGALRM'):  # Unix systems only
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(30)  # 30 second timeout
+
+            logger.debug(f"Starting GDAL Warp for single polygon feature {feature_id}")
+            pDataset_clip_warped = gdal.Warp('', aFilename_source_raster, options=pWrapOption)
+
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)  # Cancel the alarm
+
+            gdal.PopErrorHandler()
+
+            # Check if the operation succeeded
+            if pDataset_clip_warped is None:
+                gdal_error = gdal.GetLastErrorMsg()
+                logger.error(f"GDAL Warp failed for single polygon feature {feature_id}: {gdal_error}")
+                return None, None, None
+
+            newGeoTransform = pDataset_clip_warped.GetGeoTransform()
+            aData_clip = pDataset_clip_warped.ReadAsArray()
+
+            # Check if data was successfully read
+            if aData_clip is None:
+                logger.error(f"Failed to read array data for single polygon feature {feature_id}")
+                pDataset_clip_warped = None
+                return None, None, None
+
+            # Check for reasonable data dimensions
+            if aData_clip.size == 0:
+                logger.warning(f"Empty data array for single polygon feature {feature_id}")
+                pDataset_clip_warped = None
+                return None, None, None
+
+            return pDataset_clip_warped, aData_clip, newGeoTransform
+
+        except TimeoutError as e:
+            logger.error(str(e))
+            return None, None, None
+        except Exception as e:
+            logger.error(f"Unexpected exception during single polygon processing for feature {feature_id}: {str(e)}")
+            return None, None, None
+
+    def _process_multipolygon_idl(self, multipolygon, aFilename_source_raster, gdal_warp_options_base, feature_id, dMissing_value):
+        """
+        Process a multipolygon (IDL crossing) by handling each part separately and merging results
+        Returns: (merged_data_array, merged_geotransform) or (None, None) on failure
+        """
+        try:
+            nGeometries = multipolygon.GetGeometryCount()
+            logger.info(f"Processing {nGeometries} polygon parts for IDL-crossing feature {feature_id}")
+
+            merged_datasets = []
+            merged_data_arrays = []
+            merged_transforms = []
+
+            # Process each polygon part separately
+            for iPart in range(nGeometries):
+                polygon_part = multipolygon.GetGeometryRef(iPart)
+
+                # Process this polygon part
+                pDataset_part, aData_part, transform_part = self._process_single_polygon(
+                    polygon_part, aFilename_source_raster, gdal_warp_options_base,
+                    f"{feature_id}_part{iPart}")
+
+                if pDataset_part is None:
+                    logger.warning(f"Failed to process polygon part {iPart} of feature {feature_id}")
+                    continue
+
+                merged_datasets.append(pDataset_part)
+                merged_data_arrays.append(aData_part)
+                merged_transforms.append(transform_part)
+
+            if not merged_data_arrays:
+                logger.error(f"No polygon parts could be processed for IDL feature {feature_id}")
+                return None, None
+
+            # Merge the data arrays and transforms
+            merged_data, merged_transform = self._merge_raster_parts(merged_data_arrays, merged_transforms, feature_id, dMissing_value)
+
+            # Clean up datasets
+            for dataset in merged_datasets:
+                dataset = None
+
+            return merged_data, merged_transform
+
+        except Exception as e:
+            logger.error(f"Error processing multipolygon IDL feature {feature_id}: {str(e)}")
+            return None, None
+
+    def _merge_raster_parts(self, data_arrays, transforms, feature_id, dMissing_value):
+        """
+        Merge multiple raster arrays from IDL-split polygons
+        Returns only valid data as a 1D array for statistics calculation
+        Returns: (merged_1D_array, dummy_transform)
+        """
+        try:
+            if len(data_arrays) == 1:
+                # Single array: extract valid data as 1D
+                data_array = data_arrays[0]
+                valid_mask = data_array != dMissing_value
+                valid_data = data_array[valid_mask]
+                return valid_data.flatten() if valid_data.size > 0 else np.array([dMissing_value]), transforms[0]
+
+            # Multiple arrays: concatenate all valid data values
+            all_valid_data = []
+
+            for data_array in data_arrays:
+                # Extract all valid (non-nodata) values
+                valid_mask = data_array != dMissing_value
+                valid_data = data_array[valid_mask]
+
+                if valid_data.size > 0:
+                    all_valid_data.append(valid_data.flatten())
+
+            if not all_valid_data:
+                logger.warning(f"No valid data found in any part for IDL feature {feature_id}")
+                return np.array([dMissing_value]), transforms[0]
+
+            # Concatenate all valid data into a single 1D array
+            merged_data = np.concatenate(all_valid_data)
+
+            logger.info(f"Successfully merged {len(data_arrays)} raster parts for feature {feature_id}: "
+                       f"{merged_data.size} valid pixels")
+
+            # Return 1D array of valid data only (no transform needed for statistics)
+            return merged_data, transforms[0]
+
+        except Exception as e:
+            logger.error(f"Error merging raster parts for feature {feature_id}: {str(e)}")
+            return None, None
