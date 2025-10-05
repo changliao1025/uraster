@@ -314,7 +314,7 @@ class uraster:
             aCoord = get_geometry_coordinates(pPolygon)
             dLon_min = np.min(aCoord[:,0])
             dLon_max = np.max(aCoord[:,0])
-            if dLon_max - dLon_min > 100:  #cross the date line
+            if dLon_max - dLon_min > 100:  #cross the international date line
                 if not pPolygon.IsValid():
                     print('Invalid polygon geometry detected, something broke during the PyFlowline simulation.')
                     pass
