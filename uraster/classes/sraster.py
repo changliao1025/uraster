@@ -6,7 +6,6 @@ from osgeo import gdal
 # Define a class named 'sraster'
 from pyearth.toolbox.management.raster.reproject import reproject_raster_gdalwarp
 
-
 class sraster:
     def __init__(self, sFilename=None):
         # File path

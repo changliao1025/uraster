@@ -6,7 +6,8 @@ from uraster.classes.uraster import uraster
 #create a uraster object using the dict
 
 aConfig=dict()
-aConfig['sFilename_target_mesh']='/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926003/mpas.geojson' #use the L10-100 test mesh
+sFilename_target_mesh = '/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926003/mpas.geojson' #use the L10-100 test mesh
+aConfig['sFilename_target_mesh']= sFilename_target_mesh #use the L10-100 test mesh
 
 aFilename_source_raster = list()
 #find all the tif under the gebco folder
