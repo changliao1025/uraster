@@ -2,76 +2,28 @@ import os, sys
 import numpy as np
 from osgeo import ogr
 import geovista as gv
-import geovista.theme
+#import geovista.theme
+import geovista.report as gvreport
 from pyearth.system.define_global_variables import *
 from pyearth.gis.gdal.read.vector.get_supported_formats import get_format_from_extension
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
+from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
 
+def visualize_mesh(sFilename_mesh, sFilename_out = None, sVariable_in = None, sUnit_in = None,
+                    dLongitude_focus_in=0.0, dLatitude_focus_in=0.0, iFlag_show_gpu_info= None):
 
-def extract_unique_vertices_and_connectivity(cell_x_coords_list, cell_y_coords_list):
-    """
-    Extract unique vertices and connectivity from mesh cell coordinates.
+    if iFlag_show_gpu_info is not None:
+        #check GPU availability
+        print(gvreport.Report())
 
-    Parameters:
-    -----------
-    cell_x_coords_list : list of arrays
-        List where each element is an array of x-coordinates for one mesh cell
-    cell_y_coords_list : list of arrays
-        List where each element is an array of y-coordinates for one mesh cell
-
-    Returns:
-    --------
-    xv : numpy.ndarray
-        Array of unique x-coordinates (vertices)
-    yv : numpy.ndarray
-        Array of unique y-coordinates (vertices)
-    connectivity : numpy.ndarray
-        2D array where connectivity[i] contains vertex indices for cell i,
-        padded with -1 for variable-sized polygons
-    vertex_to_index : dict
-        Dictionary mapping (x,y) coordinate pairs to vertex indices
-    """
-    # Collect all vertices from all cells
-    all_vertices_x = []
-    all_vertices_y = []
-
-    for x_coords, y_coords in zip(cell_x_coords_list, cell_y_coords_list):
-        all_vertices_x.extend(x_coords)
-        all_vertices_y.extend(y_coords)
-
-    # Create coordinate pairs and find unique vertices
-    vertex_pairs = list(zip(all_vertices_x, all_vertices_y))
-    unique_vertex_pairs = list(set(vertex_pairs))
-
-    # Extract unique x and y coordinates
-    xv = np.array([pair[0] for pair in unique_vertex_pairs])
-    yv = np.array([pair[1] for pair in unique_vertex_pairs])
-
-    # Create vertex lookup dictionary for fast index mapping
-    vertex_to_index = {vertex: idx for idx, vertex in enumerate(unique_vertex_pairs)}
-
-    # Build connectivity array - maps each cell to its vertex indices
-    connectivity_list = []
-    max_vertices = 0
-
-    for x_coords, y_coords in zip(cell_x_coords_list, cell_y_coords_list):
-        cell_vertex_indices = []
-        for x, y in zip(x_coords, y_coords):
-            vertex_pair = (x, y)
-            vertex_index = vertex_to_index[vertex_pair]
-            cell_vertex_indices.append(vertex_index)
-        connectivity_list.append(cell_vertex_indices)
-        max_vertices = max(max_vertices, len(cell_vertex_indices))
-
-    # Create 2D connectivity array padded with -1 for variable-sized polygons
-    connectivity = np.full((len(connectivity_list), max_vertices), -1, dtype=np.int32)
-    for i, cell_indices in enumerate(connectivity_list):
-        connectivity[i, :len(cell_indices)] = cell_indices
-
-    return xv, yv, connectivity, vertex_to_index
-def visualize_mesh(sFilename_mesh, sFilename_out = None, sVariable_in = None, sUnit_in = None):
-
-    #call gdal api to get the lon/lat from the vector file
+    if dLongitude_focus_in is not None:
+        dLongitude_focus = dLongitude_focus_in
+    else:
+        dLongitude_focus = 0.0
+    if dLatitude_focus_in is not None:
+        dLatitude_focus = dLatitude_focus_in
+    else:
+        dLatitude_focus = 0.0
 
     #determine file extension
     sExt = os.path.splitext(sFilename_mesh)[1]
@@ -196,19 +148,25 @@ def visualize_mesh(sFilename_mesh, sFilename_out = None, sVariable_in = None, sU
     mesh = gv.Transform.from_unstructured(xv, yv, connectivity=connectivity_masked, crs = crs)
 
     # Add the data values to the mesh
+    print(f"Type of mesh.cell_data: {type(mesh.cell_data)}")
+    print(f"MRO of mesh.cell_data: {type(mesh.cell_data).__mro__}")
+    print(f"Data dtype before assignment: {data.dtype}")
     mesh.cell_data[name] = data
+    print(f"Data dtype after assignment: {mesh.cell_data[name].dtype if name in mesh.cell_data.keys() else 'Not found'}")
     # Plot the mesh.
     plotter = gv.GeoPlotter()
     sargs = {"title": f"{name} / {sUnit}",
            "shadow": True,    "title_font_size": 10,    "label_font_size": 10,    "fmt": "%.1f",
     }
     plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
+    plotter.camera.focal_point = gv.geodesic.to_cartesian(dLongitude_focus, dLatitude_focus, 0)[0]
+    # --- End of new code ---
     plotter.view_xy()
-
-
     plotter.camera.zoom(1.4)
     plotter.add_coastlines()
     plotter.add_axes()
+    #plotter.add_meridians()
+    plotter.add_graticule(show_labels=True)
     if sFilename_out is not None:
         #save the figure
         plotter.screenshot(sFilename_out)
