@@ -159,13 +159,13 @@ def visualize_mesh(sFilename_mesh, sFilename_out = None, sVariable_in = None, sU
            "shadow": True,    "title_font_size": 10,    "label_font_size": 10,    "fmt": "%.1f",
     }
     plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
-    plotter.camera.focal_point = gv.geodesic.to_cartesian(dLongitude_focus, dLatitude_focus, 0)[0]
-    # --- End of new code ---
-    plotter.view_xy()
+    focal_point = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus])[0]
+    camera_position = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus], radius=gv.common.RADIUS *6)[0]
+    plotter.camera.focal_point = focal_point
+    plotter.camera.position = camera_position
     plotter.camera.zoom(1.4)
     plotter.add_coastlines()
     plotter.add_axes()
-    #plotter.add_meridians()
     plotter.add_graticule(show_labels=True)
     if sFilename_out is not None:
         #save the figure
