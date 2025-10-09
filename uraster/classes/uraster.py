@@ -9,16 +9,21 @@ import numpy as np
 from osgeo import gdal, ogr, osr
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pyearth.system.define_global_variables import *
 from pyearth.gis.gdal.read.raster.gdal_read_geotiff_file import gdal_read_geotiff_file
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
+from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
+from pyearth.gis.gdal.read.vector.get_supported_formats import get_format_from_extension
+from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
+
 from .sraster import sraster
 
 # Set up logging for crash detection
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
+crs = "EPSG:4326"
 def signal_handler(signum, frame):
     """Handle system signals (like SIGSEGV) for crash detection"""
     logger.error(f"Received signal {signum}. Process may have crashed.")
@@ -33,6 +38,23 @@ signal.signal(signal.SIGFPE, signal_handler)   # Floating point exception
 
 class uraster:
 
+    iFlag_remap_method = 1
+
+    nVertex_max = 3
+
+    sFilename_source_mesh = None
+    sFilename_target_mesh = None
+
+
+    #mesh info
+    aVertex_longititude = None
+    aVertex_latitude = None
+    aCenter_longititude = None
+    aCenter_latitude = None
+    aConnectivity = None
+
+    sFilename_output_vector = None
+
     def __init__(self, aConfig = dict()):
         self.iFlag_global = None
         self.dResolution_raster = None
@@ -40,6 +62,9 @@ class uraster:
         self.sFilename_source_mesh = None
         self.sFilename_target_mesh = None
         self.aFilename_source_raster = list()
+
+        if 'iFlag_remap_method' in aConfig:
+            self.iFlag_remap_method = aConfig['iFlag_remap_method']
 
         if "sFilename_source_mesh" in aConfig:
             self.sFilename_source_mesh = aConfig['sFilename_source_mesh']
@@ -50,55 +75,136 @@ class uraster:
         if "aFilename_source_raster" in aConfig:
             self.aFilename_source_raster = aConfig['aFilename_source_raster']
 
-    def _get_geometry_type_name(self, geometry_type):
-        """
-        Convert OGR geometry type integer to readable string
-        """
-        geometry_types = {
-            ogr.wkbUnknown: "wkbUnknown",
-            ogr.wkbPoint: "wkbPoint",
-            ogr.wkbLineString: "wkbLineString",
-            ogr.wkbPolygon: "wkbPolygon",
-            ogr.wkbMultiPoint: "wkbMultiPoint",
-            ogr.wkbMultiLineString: "wkbMultiLineString",
-            ogr.wkbMultiPolygon: "wkbMultiPolygon",
-            ogr.wkbGeometryCollection: "wkbGeometryCollection"
-        }
 
-        # Direct match
-        if geometry_type in geometry_types:
-            return geometry_types[geometry_type]
 
-        # Check base type (removes 3D/Z flags)
-        base_type = geometry_type & 0xFF
-        for const_val, name in geometry_types.items():
-            if (const_val & 0xFF) == base_type:
-                return f"{name} (with flags)"
+    def setup(self):
+        self.setup_raster()
+        self.setup_mesh()
 
-        return f"Unknown geometry type: {geometry_type}"
+        return
 
-    def _get_vector_driver_from_filename(self, filename):
-        """
-        Determine the appropriate OGR driver based on file extension
-        :param filename: Output vector filename
-        :return: OGR driver name
-        """
-        extension = os.path.splitext(filename)[1].lower()
+    def setup_raster(self):
+        self.check_raster_files()
+        return
 
-        driver_mapping = {
-            '.shp': 'ESRI Shapefile',
-            '.geojson': 'GeoJSON',
-            '.json': 'GeoJSON',
-            '.gpkg': 'GPKG',
-            '.kml': 'KML',
-            '.gml': 'GML',
-            '.sqlite': 'SQLite',
-            '.csv': 'CSV',
-            '.parquet': 'Parquet'
-        }
+    def setup_mesh(self):
+        self.rebuild_mesh_topology()
 
-        # Default to Shapefile if extension not recognized
-        return driver_mapping.get(extension, 'ESRI Shapefile')
+        return
+
+    def rebuild_mesh_topology(self):
+        #retrive the mesh node et al
+        #determine file extension
+        sFormat = get_format_from_extension(self.sFilename_target_mesh)
+        # Get the appropriate driver
+        pDriver_out = ogr.GetDriverByName(sFormat)
+        if pDriver_out is None:
+            print(f'{sFormat} driver not available.')
+            return
+
+        # Open the input data source
+        pDataset = ogr.Open(self.sFilename_target_mesh, 0)  # 0 means read-only. 1 means writeable.
+        if pDataset is None:
+            print(f'Failed to open file: {self.sFilename_target_mesh}')
+            return
+        print(f'Opened file: {self.sFilename_target_mesh}')
+        # Get the first layer
+        pLayer = pDataset.GetLayer()
+        if pLayer is None:
+            print('Failed to get layer from the dataset.')
+            return
+
+        # Get the layer definition
+        pLayerDefn = pLayer.GetLayerDefn()
+        if pLayerDefn is None:
+            print('Failed to get layer definition.')
+            return
+
+        iFieldCount = pLayerDefn.GetFieldCount()
+
+        sVariable = pLayerDefn.GetFieldDefn(0).GetName()
+
+        #loop the features to get lon/lat
+        lons_list = []
+        lats_list = []
+        data_list = []
+        #reset the reading to the start
+        pLayer.ResetReading()
+        pFeature = pLayer.GetNextFeature()
+        while pFeature is not None:
+            pGeometry = pFeature.GetGeometryRef()
+            if pGeometry is not None:
+                # Assuming the geometry is a polygon, get the centroid
+                sGeometry_type = pGeometry.GetGeometryName()
+                if sGeometry_type == 'POLYGON':
+                    #get all the coordinates of the polygon
+                    aCoord = get_geometry_coordinates(pGeometry)
+                    lons_list.append(aCoord[:,0])
+                    lats_list.append(aCoord[:,1])
+                    data_list.append(pFeature.GetField(sVariable))
+
+            pFeature = pLayer.GetNextFeature()
+
+        # Pad to maximum size approach
+        max_vertices = max(len(coord) for coord in lons_list)
+        self.nVertex_max = 3 = max_vertices
+        lons_padded = []
+        lats_padded = []
+
+        for lon_coords, lat_coords in zip(lons_list, lats_list):
+            # Pad with NaN for missing vertices
+            lon_padded = np.pad(lon_coords, (0, max_vertices - len(lon_coords)),
+                               mode='constant', constant_values=np.nan)
+            lat_padded = np.pad(lat_coords, (0, max_vertices - len(lat_coords)),
+                               mode='constant', constant_values=np.nan)
+            lons_padded.append(lon_padded)
+            lats_padded.append(lat_padded)
+
+        # Convert to numpy arrays
+        lons = np.array(lons_padded)
+        lats = np.array(lats_padded)
+
+        # Get unique 1D coordinates for each mesh cell (centroids)
+        cell_lons_1d = []
+        cell_lats_1d = []
+
+        for i in range(len(lons_list)):
+            # Calculate centroid of each cell (ignoring NaN values)
+            valid_lons = lons[i][~np.isnan(lons[i])]
+            valid_lats = lats[i][~np.isnan(lats[i])]
+
+            centroid_lon = np.mean(valid_lons)
+            centroid_lat = np.mean(valid_lats)
+
+            cell_lons_1d.append(centroid_lon)
+            cell_lats_1d.append(centroid_lat)
+
+        cell_lons_1d = np.array(cell_lons_1d)
+        cell_lats_1d = np.array(cell_lats_1d)
+
+        # Extract unique vertices and connectivity using the independent function
+        xv, yv, connectivity, vertex_to_index = extract_unique_vertices_and_connectivity(
+            lons_list, lats_list
+        )
+
+        self.aVertex_longititude = xv
+        self.aVertex_latitude = yv
+        self.aCenter_longititude = cell_lons_1d
+        self.aCenter_latitude = cell_lats_1d
+        self.aConnectivity = connectivity
+
+        return xv, yv, connectivity
+
+    def report_inputs(self, iFlag_show_gpu_info=None):
+        self.print_raster_info()
+        self.print_mesh_info()
+        if iFlag_show_gpu_info is not None:
+            import geovista.report as gvreport
+            print(gvreport.Report())
+        return
+
+    def report_outputs(self):
+        return
 
     def check_raster_files(self, aFilename_source_raster_in=None):
         """
@@ -137,7 +243,6 @@ class uraster:
                 pRaster_wgs84 = pRaster.convert_to_wgs84()
                 aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
 
-
         return aFilename_source_raster_out
 
     def print_raster_info(self):
@@ -155,7 +260,16 @@ class uraster:
 
         return
 
-    def remap_raster_to_uraster(self, sFilename_vector_out,
+    def print_mesh_info(self):
+
+        print(f"Number of mesh cells: {len(self.aCenter_longititude)}")
+        print(f"Cell longitude range: {self.aCenter_longititude.min():.3f} to {self.aCenter_longititude.max():.3f}")
+        print(f"Cell latitude range: {self.aCenter_latitude.min():.3f} to {self.aCenter_latitude.max():.3f}")
+        print(f"Number of maximum vertices: {self.nVertex_max }")
+
+        return
+
+    def run_remap(self, sFilename_vector_out,
                     sFilename_target_mesh_in = None,
                                 aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
@@ -566,6 +680,190 @@ class uraster:
                 logger.error(f"Could not save failure report: {e}")
 
         return
+
+
+    def visualize_target_mesh(self,
+                              sFilename_out = None,
+                    dLongitude_focus_in=0.0,
+                    dLatitude_focus_in=0.0):
+
+        import geovista as gv
+        if dLongitude_focus_in is not None:
+            dLongitude_focus = dLongitude_focus_in
+        else:
+            dLongitude_focus = 0.0
+        if dLatitude_focus_in is not None:
+            dLatitude_focus = dLatitude_focus_in
+        else:
+            dLatitude_focus = 0.0
+
+        name = 'Mesh cell ID'
+        sUnit = ""
+
+        connectivity_masked = np.ma.masked_where(self.aConnectivity == -1, self.aConnectivity)
+
+        mesh = gv.Transform.from_unstructured(self.aVertex_longititude, self.aVertex_latitude, connectivity=connectivity_masked, crs = crs)
+
+        # Plot the mesh.
+        plotter = gv.GeoPlotter()
+        sargs = {"title": f"{name} / {sUnit}",
+               "shadow": True,
+                "title_font_size": 10,
+                    "label_font_size": 10,
+                        "fmt": "%.1f",
+        }
+        plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
+        focal_point = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus])[0]
+        camera_position = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus], radius=gv.common.RADIUS *6)[0]
+        plotter.camera.focal_point = focal_point
+        plotter.camera.position = camera_position
+        plotter.camera.zoom(1.4)
+        plotter.add_coastlines()
+        plotter.add_axes()
+        plotter.add_graticule(show_labels=True)
+        if sFilename_out is not None:
+            #save the figure
+            plotter.screenshot(sFilename_out)
+            print(f'Saved screenshot to: {sFilename_out}')
+        else:
+            plotter.show()
+            return
+
+    def visualize_raster(self):
+        return
+
+    def visualize_outputs(self, sVariable,
+                          sUnit_in=None,
+                          sFilename_out = None,
+                    dLongitude_focus_in=0.0,
+                    dLatitude_focus_in=0.0):
+
+        import geovista as gv
+        if dLongitude_focus_in is not None:
+            dLongitude_focus = dLongitude_focus_in
+        else:
+            dLongitude_focus = 0.0
+        if dLatitude_focus_in is not None:
+            dLatitude_focus = dLatitude_focus_in
+        else:
+            dLatitude_focus = 0.0
+
+        name = sVariable.capitalize()
+        sUnit = sUnit_in if sUnit_in is not None else ""
+        connectivity_masked = np.ma.masked_where(self.aConnectivity == -1, self.aConnectivity)
+
+        data_list = []
+            # Open the input data source
+        pDataset = ogr.Open(self.sFilename_target_mesh, 0)  # 0 means read-only. 1 means writeable.
+        if pDataset is None:
+            print(f'Failed to open file: {self.sFilename_target_mesh}')
+            return
+        print(f'Opened file: {self.sFilename_target_mesh}')
+        # Get the first layer
+        pLayer = pDataset.GetLayer()
+        if pLayer is None:
+            print('Failed to get layer from the dataset.')
+            return
+
+        # Get the layer definition
+        pLayerDefn = pLayer.GetLayerDefn()
+        if pLayerDefn is None:
+            print('Failed to get layer definition.')
+            return
+
+        iFieldCount = pLayerDefn.GetFieldCount()
+        print(f'Number of fields in the layer: {iFieldCount}')
+        #reset the reading to the start
+        pLayer.ResetReading()
+        pFeature = pLayer.GetNextFeature()
+        while pFeature is not None:
+            pGeometry = pFeature.GetGeometryRef()
+            if pGeometry is not None:
+                # Assuming the geometry is a polygon, get the centroid
+                sGeometry_type = pGeometry.GetGeometryName()
+                if sGeometry_type == 'POLYGON':
+                    #get all the coordinates of the polygon
+                    data_list.append(pFeature.GetField(sVariable))
+
+        data = np.array(data_list)
+
+
+        mesh = gv.Transform.from_unstructured(self.aVertex_longititude, self.aVertex_latitude, connectivity=connectivity_masked, crs = crs)
+
+        mesh.cell_data[name] = data
+
+        # Plot the mesh.
+        plotter = gv.GeoPlotter()
+        sargs = {"title": f"{name} / {sUnit}",
+               "shadow": True,    "title_font_size": 10,    "label_font_size": 10,    "fmt": "%.1f"        }
+        plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
+        focal_point = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus])[0]
+        camera_position = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus], radius=gv.common.RADIUS *6)[0]
+        plotter.camera.focal_point = focal_point
+        plotter.camera.position = camera_position
+        plotter.camera.zoom(1.4)
+        plotter.add_coastlines()
+        plotter.add_axes()
+        plotter.add_graticule(show_labels=True)
+        if sFilename_out is not None:
+            #save the figure
+            plotter.screenshot(sFilename_out)
+            print(f'Saved screenshot to: {sFilename_out}')
+        else:
+            plotter.show()
+            return
+
+        return
+
+    def _get_geometry_type_name(self, geometry_type):
+        """
+        Convert OGR geometry type integer to readable string
+        """
+        geometry_types = {
+            ogr.wkbUnknown: "wkbUnknown",
+            ogr.wkbPoint: "wkbPoint",
+            ogr.wkbLineString: "wkbLineString",
+            ogr.wkbPolygon: "wkbPolygon",
+            ogr.wkbMultiPoint: "wkbMultiPoint",
+            ogr.wkbMultiLineString: "wkbMultiLineString",
+            ogr.wkbMultiPolygon: "wkbMultiPolygon",
+            ogr.wkbGeometryCollection: "wkbGeometryCollection"
+        }
+
+        # Direct match
+        if geometry_type in geometry_types:
+            return geometry_types[geometry_type]
+
+        # Check base type (removes 3D/Z flags)
+        base_type = geometry_type & 0xFF
+        for const_val, name in geometry_types.items():
+            if (const_val & 0xFF) == base_type:
+                return f"{name} (with flags)"
+
+        return f"Unknown geometry type: {geometry_type}"
+
+    def _get_vector_driver_from_filename(self, filename):
+        """
+        Determine the appropriate OGR driver based on file extension
+        :param filename: Output vector filename
+        :return: OGR driver name
+        """
+        extension = os.path.splitext(filename)[1].lower()
+
+        driver_mapping = {
+            '.shp': 'ESRI Shapefile',
+            '.geojson': 'GeoJSON',
+            '.json': 'GeoJSON',
+            '.gpkg': 'GPKG',
+            '.kml': 'KML',
+            '.gml': 'GML',
+            '.sqlite': 'SQLite',
+            '.csv': 'CSV',
+            '.parquet': 'Parquet'
+        }
+
+        # Default to Shapefile if extension not recognized
+        return driver_mapping.get(extension, 'ESRI Shapefile')
 
     def _process_single_polygon(self, polygon, aFilename_source_raster, gdal_warp_options_base, feature_id):
         """
