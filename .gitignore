@@ -285,3 +285,7 @@ python_crash_*.txt
 
 # Linux core dumps
 *.core
+
+# Retired code/files
+**/retired/
+**/retired/**
