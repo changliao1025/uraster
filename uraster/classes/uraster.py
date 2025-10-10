@@ -48,15 +48,12 @@ class uraster:
     sFilename_source_mesh = None
     sFilename_target_mesh = None
 
-
     #mesh info
     aVertex_longititude = None # cell vertex coordinates
     aVertex_latitude = None
     aCenter_longititude = None # cell centers, but different methods may be used
     aCenter_latitude = None
     aConnectivity = None
-
-
 
     def __init__(self, aConfig = dict()):
 
@@ -708,6 +705,8 @@ class uraster:
             sRemap_method = 'nearest neighbor'
         elif self.iFlag_remap_method == 2: #extracted using nearest neighbor
             sRemap_method = 'nearest neighbor'
+        elif self.iFlag_remap_method == 3: #this one need a different method, see polygon calculator package
+            sRemap_method = 'weighted average'
 
         # Pre-compute GDAL options to avoid repeated object creation
         gdal_warp_options_base = {
