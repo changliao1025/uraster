@@ -54,7 +54,7 @@ class sraster:
         """
 
         #check if file exists
-        sFilename = self.sFilename_raw
+        sFilename = self.sFilename
         if not os.path.isfile(sFilename):
             raise FileNotFoundError(f"File does not exist: {sFilename}")
 

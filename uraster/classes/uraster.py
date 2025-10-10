@@ -71,6 +71,7 @@ class uraster:
         self.aCenter_longititude = None
         self.aCenter_latitude = None
         self.aConnectivity = None
+        self.aCellID = None
 
         if 'iFlag_remap_method' in aConfig:
             self.iFlag_remap_method = aConfig['iFlag_remap_method']
@@ -241,6 +242,8 @@ class uraster:
                 pDataset = None
                 return None
 
+            aCellID= list(range(nFeatures))
+
             logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
 
             # Get the first field name (assuming it contains the data variable)
@@ -253,7 +256,7 @@ class uraster:
 
             # Process features with enhanced error handling
             pLayer.ResetReading()
-            feature_count = 0
+            iFeature_index = 0
             invalid_geometry_count = 0
 
             for pFeature in pLayer:
@@ -262,8 +265,8 @@ class uraster:
 
                 pGeometry = pFeature.GetGeometryRef()
                 if pGeometry is None:
-                    logger.warning(f'Feature {feature_count} has no geometry, skipping')
-                    feature_count += 1
+                    logger.warning(f'Feature {iFeature_index} has no geometry, skipping')
+                    iFeature_index += 1
                     invalid_geometry_count += 1
                     continue
 
@@ -273,9 +276,10 @@ class uraster:
                     try:
                         # Validate geometry before processing
                         if not pGeometry.IsValid():
-                            logger.warning(f'Feature {feature_count} has invalid geometry, skipping')
-                            feature_count += 1
+                            logger.warning(f'Feature {iFeature_index} has invalid geometry, skipping')
+                            iFeature_index += 1
                             invalid_geometry_count += 1
+                            print(pGeometry.ExportToWkt())
                             continue
                         # Get coordinates of the polygon
                         aCoord = get_geometry_coordinates(pGeometry)
@@ -287,12 +291,12 @@ class uraster:
                             # Check for reasonable coordinate ranges
                             if (np.any(lons < -180) or np.any(lons > 180) or
                                 np.any(lats < -90) or np.any(lats > 90)):
-                                logger.warning(f'Feature {feature_count} has coordinates outside valid range')
+                                logger.warning(f'Feature {iFeature_index} has coordinates outside valid range')
 
                             # Check for minimum polygon area (avoid degenerate polygons)
                             if len(aCoord) < 3:
-                                logger.warning(f'Feature {feature_count} has fewer than 3 vertices, skipping')
-                                feature_count += 1
+                                logger.warning(f'Feature {iFeature_index} has fewer than 3 vertices, skipping')
+                                iFeature_index += 1
                                 invalid_geometry_count += 1
                                 continue
 
@@ -308,35 +312,37 @@ class uraster:
                                         data_list.append(int(field_value))
                                     else:
                                         data_list.append(0)
+
+                                    aCellID[iFeature_index] = int(field_value) if field_value is not None else iFeature_index
                                 except (ValueError, TypeError) as e:
-                                    logger.warning(f'Could not convert field value for feature {feature_count}: {e}')
-                                    data_list.append(feature_count)
+                                    logger.warning(f'Could not convert field value for feature {iFeature_index}: {e}')
+                                    data_list.append(iFeature_index)
                             else:
-                                data_list.append(feature_count)  # Use feature index as default
+                                data_list.append(iFeature_index)  # Use feature index as default
                         else:
-                            logger.warning(f'Failed to extract coordinates from feature {feature_count}')
+                            logger.warning(f'Failed to extract coordinates from feature {iFeature_index}')
                             invalid_geometry_count += 1
 
                     except Exception as e:
-                        logger.warning(f'Error processing feature {feature_count}: {str(e)}')
+                        logger.warning(f'Error processing feature {iFeature_index}: {str(e)}')
                         invalid_geometry_count += 1
 
                 elif sGeometry_type in ['MULTIPOLYGON', 'POINT', 'LINESTRING']:
-                    logger.warning(f'Geometry type {sGeometry_type} not supported in feature {feature_count}, skipping')
+                    logger.warning(f'Geometry type {sGeometry_type} not supported in feature {iFeature_index}, skipping')
                     invalid_geometry_count += 1
                 else:
-                    logger.warning(f'Unknown geometry type {sGeometry_type} in feature {feature_count}, skipping')
+                    logger.warning(f'Unknown geometry type {sGeometry_type} in feature {iFeature_index}, skipping')
                     invalid_geometry_count += 1
 
-                feature_count += 1
+                iFeature_index += 1
 
             # Report processing statistics
             valid_features = len(lons_list)
             logger.info(f'Feature processing summary:')
-            logger.info(f'  - Total features: {feature_count}')
+            logger.info(f'  - Total features: {iFeature_index}')
             logger.info(f'  - Valid polygons: {valid_features}')
             logger.info(f'  - Invalid/skipped: {invalid_geometry_count}')
-            logger.info(f'  - Success rate: {(valid_features/feature_count*100):.1f}%' if feature_count > 0 else '  - Success rate: 0%')
+            logger.info(f'  - Success rate: {(valid_features/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
 
             # Clean up dataset
             pDataset = None
@@ -481,6 +487,13 @@ class uraster:
             self.aCenter_longititude = cell_lons_1d
             self.aCenter_latitude = cell_lats_1d
             self.aConnectivity = connectivity
+
+            # Ensure aCellID matches the number of valid mesh cells
+            if len(aCellID) != len(cell_lons_1d):
+                logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)}), truncating to match")
+                aCellID = aCellID[:len(cell_lons_1d)]
+
+            self.aCellID = np.array(aCellID)
 
             # Enhanced validation of final results
             validation_passed = True
@@ -1004,12 +1017,14 @@ class uraster:
         else:
             dLatitude_focus = 0.0
 
-        name = 'Mesh cell ID'
+        name = 'ID'
         sUnit = ""
 
         connectivity_masked = np.ma.masked_where(self.aConnectivity == -1, self.aConnectivity)
 
         mesh = gv.Transform.from_unstructured(self.aVertex_longititude, self.aVertex_latitude, connectivity=connectivity_masked, crs = crs)
+
+        mesh.cell_data[name] = self.aCellID
 
         # Plot the mesh.
         plotter = gv.GeoPlotter()
