@@ -5,25 +5,28 @@ from osgeo import osr
 from osgeo import gdal
 # Define a class named 'sraster'
 from pyearth.toolbox.management.raster.reproject import reproject_raster_gdalwarp
+from uraster.mesh.raster.create_square_mesh import create_square_mesh
+from uraster.mesh.raster.create_latlon_mesh import create_latlon_mesh
 
+pSpatialRef_wgs84 = osr.SpatialReference()
+pSpatialRef_wgs84.ImportFromEPSG(4326)
+wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
 class sraster:
-    def __init__(self, sFilename=None):
+    sFilename = None
+    sFilename_mesh = None
+    def __init__(self, sFilename_in=None):
         # File path
-        self.sFilename = sFilename
 
+        self.sFilename = sFilename_in
         # Raster dimensions
         self.iWidth = None
         self.iHeight = None
-
         # Number of bands
         self.iBandCount = None
-
         # Data type (e.g., uint8, float32)
         self.sDtype = None
-
         # Coordinate Reference System (CRS)
         self.sCrs = None
-
         # GDAL Spatial Reference object
         self.pSpatialRef = osr.SpatialReference()
         self.pSpatialRef_wkt = None
@@ -34,7 +37,13 @@ class sraster:
         self.aExtent_wgs84 = None
 
         self.sFilename_mesh = None
-
+        #check the file exists
+        if sFilename_in is not None:
+            if os.path.isfile(sFilename_in):
+                #setup the mesh filename
+                self.sFilename_mesh = sFilename_in.replace('.tif', '_mesh.geojson')
+            else:
+                raise FileNotFoundError(f"File does not exist: {sFilename_in}")
         # NoData value
         self.dNoData = None
         return
@@ -45,7 +54,7 @@ class sraster:
         """
 
         #check if file exists
-        sFilename = self.sFilename
+        sFilename = self.sFilename_raw
         if not os.path.isfile(sFilename):
             raise FileNotFoundError(f"File does not exist: {sFilename}")
 
@@ -53,28 +62,23 @@ class sraster:
         if pDataset is None:
             raise FileNotFoundError(f"Unable to open file: {sFilename}")
 
-        self.sFilename = sFilename
+        self.sCrs = pDataset.GetProjection()
+        self.pSpatialRef.ImportFromWkt(self.sCrs)
+        self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
+
         self.iWidth = pDataset.RasterXSize
         self.iHeight = pDataset.RasterYSize
         self.iBandCount = pDataset.RasterCount
         self.eType = pDataset.GetRasterBand(1).DataType if self.iBandCount > 0 else None
         self.sDtype = gdal.GetDataTypeName(self.eType) if self.iBandCount > 0 else None
         self.pTransform = pDataset.GetGeoTransform()
+        self.dResolution_x = self.pTransform[1]
+        self.dResolution_y = -self.pTransform[5]
         self.dNoData = pDataset.GetRasterBand(1).GetNoDataValue() if self.iBandCount > 0 else None
-        self.sCrs = pDataset.GetProjection()
-        self.pSpatialRef.ImportFromWkt(self.sCrs)
-        self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
-        pDataset = None
-
-
 
         #obtain the spatial extent
         self.aExtent = (self.pTransform[0], self.pTransform[3], self.pTransform[1], self.pTransform[4])
 
-        #create the wkt for WGS84
-        pSpatialRef_wgs84 = osr.SpatialReference()
-        pSpatialRef_wgs84.ImportFromEPSG(4326)
-        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
 
         #if the spatial reference is not in WGS84, transform the extent to WGS84
         if not self.pSpatialRef_wkt == wkt_wgs84:
@@ -83,6 +87,7 @@ class sraster:
             (maxX, minY, _) = transform.TransformPoint(self.aExtent[0] + self.aExtent[2], self.aExtent[1] + self.aExtent[3])
             self.aExtent_wgs84 = (minX, minY, maxX, maxY)
         else:
+
             self.aExtent_wgs84 = self.aExtent
 
         self.dLongitude_left = self.aExtent_wgs84[0]
@@ -124,6 +129,37 @@ class sraster:
 
         #Placeholder for actual mesh creation logic
         #we need to use pyflowline approach to create the mesh?
+        if not self.pSpatialRef_wkt == wkt_wgs84:
+            dX_left_in= self.aExtent[0]
+            dY_bot_in= self.aExtent[1]
+            dResolution_meter_in= self.dResolution_x,
+            ncolumn_in= self.iWidth
+            nrow_in= self.iHeight
+            sFilename_output_in= self.sFilename_mesh
+            pProjection_reference_in = self.pSpatialRef_wkt
+            create_square_mesh(dX_left_in, dY_bot_in,
+                        dResolution_meter_in,
+                        ncolumn_in, nrow_in,
+                        sFilename_output_in,
+                        pProjection_reference_in)
+            pass
+
+        else:
+            dLongitude_left_in= self.dLongitude_left
+            dLatitude_bot_in= self.dLatitude_bottom
+            dResolution_degree_in= self.dResolution_x
+            ncolumn_in= self.iWidth
+            nrow_in= self.iHeight
+            sFilename_output_in= self.sFilename_mesh
+            create_latlon_mesh(dLongitude_left_in,
+                       dLatitude_bot_in,
+                       dResolution_degree_in,
+                       ncolumn_in, nrow_in,
+                       sFilename_output_in)
+
+            pass
+
+
 
     def convert_to_wgs84(self):
         """
@@ -144,8 +180,6 @@ class sraster:
                               xRes=None, yRes=None,
                                sResampleAlg = 'near',
                                  iFlag_force_resolution_in = 0)
-
-        self.sFilename_wgs84 = sFilename_raster_wgs84
 
         return sraster(sFilename=sFilename_raster_wgs84)
 
