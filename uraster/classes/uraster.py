@@ -66,6 +66,14 @@ class uraster:
         self.sFilename_source_mesh = None
         self.sFilename_target_mesh = None
         self.aFilename_source_raster = list()
+        self.nCell = -1
+        self.nCell_source = -1
+        self.nCell_target = -1
+        self.aVertex_longititude = None
+        self.aVertex_latitude = None
+        self.aCenter_longititude = None
+        self.aCenter_latitude = None
+        self.aConnectivity = None
 
         if 'iFlag_remap_method' in aConfig:
             self.iFlag_remap_method = aConfig['iFlag_remap_method']

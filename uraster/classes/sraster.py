@@ -122,8 +122,8 @@ class sraster:
         if self.sFilename_mesh and os.path.isfile(self.sFilename_mesh):
             os.remove(self.sFilename_mesh)
 
-        # Placeholder for actual mesh creation logic
-        #we need to use pyflowline approach to create the mesh because?
+        #Placeholder for actual mesh creation logic
+        #we need to use pyflowline approach to create the mesh?
 
     def convert_to_wgs84(self):
         """
