@@ -9,14 +9,14 @@ import numpy as np
 from osgeo import gdal, ogr, osr
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pyearth.system.define_global_variables import *
+
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_extension
 from pyearth.gis.gdal.read.raster.gdal_read_geotiff_file import gdal_read_geotiff_file
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
-from pyearth.gis.gdal.read.vector.get_supported_formats import get_format_from_extension
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
+from pyearth.gis.gdal.gdal_vector_format_support import get_format_from_extension
 
 from .sraster import sraster
 
@@ -36,36 +36,56 @@ signal.signal(signal.SIGSEGV, signal_handler)  # Segmentation fault
 signal.signal(signal.SIGABRT, signal_handler)  # Abort
 signal.signal(signal.SIGFPE, signal_handler)   # Floating point exception
 
+# Constants for processing thresholds
+IDL_LONGITUDE_THRESHOLD = 100  # Degrees - threshold for detecting IDL crossing
+MEMORY_WARNING_THRESHOLD = 80  # Percent - warn when memory usage exceeds this
+WARP_TIMEOUT_SECONDS = 30      # Seconds - timeout for GDAL Warp operations
+PROGRESS_REPORT_INTERVAL = 100 # Report progress every N features
+
 class uraster:
+    """
+    Unstructured raster processing class for zonal statistics on mesh geometries.
 
-    iFlag_remap_method = 1 #1 nearest neighbor, 2 extracted 3, area weighted
+    Handles complex scenarios including:
+    - International Date Line (IDL) crossing polygons
+    - Parallel processing for large datasets
+    - Multiple raster formats and coordinate systems
+    - Comprehensive error handling and crash detection
+    """
 
-    nVertex_max = 3
-    nCell =-1
-    nCell_source = -1
-    nCell_target = -1
+    def __init__(self, aConfig=None):
+        """
+        Initialize uraster instance.
 
-    sFilename_source_mesh = None
-    sFilename_target_mesh = None
+        Args:
+            aConfig (dict, optional): Configuration dictionary with keys:
+                - iFlag_remap_method (int): Remap method (1=nearest, 2=nearest, 3=weighted average)
+                - sFilename_source_mesh (str): Source mesh file path
+                - sFilename_target_mesh (str): Target mesh file path
+                - aFilename_source_raster (list): List of source raster file paths
+        """
+        # Default configuration
+        if aConfig is None:
+            aConfig = {}
 
-    #mesh info
-    aVertex_longititude = None # cell vertex coordinates
-    aVertex_latitude = None
-    aCenter_longititude = None # cell centers, but different methods may be used
-    aCenter_latitude = None
-    aConnectivity = None
-
-    def __init__(self, aConfig = dict()):
-
+        # Processing flags and resolutions
         self.iFlag_global = None
+        self.iFlag_remap_method = aConfig.get('iFlag_remap_method', 1)  # Default to nearest neighbor
         self.dResolution_raster = None
         self.dResolution_uraster = None
-        self.sFilename_source_mesh = None
-        self.sFilename_target_mesh = None
-        self.aFilename_source_raster = list()
+
+        # File paths
+        self.sFilename_source_mesh = aConfig.get('sFilename_source_mesh', None)
+        self.sFilename_target_mesh = aConfig.get('sFilename_target_mesh', None)
+        self.aFilename_source_raster = aConfig.get('aFilename_source_raster', [])
+
+        # Cell counts
         self.nCell = -1
         self.nCell_source = -1
         self.nCell_target = -1
+        self.nVertex_max = 0  # Will be calculated dynamically
+
+        # Mesh topology data
         self.aVertex_longititude = None
         self.aVertex_latitude = None
         self.aCenter_longititude = None
@@ -73,65 +93,200 @@ class uraster:
         self.aConnectivity = None
         self.aCellID = None
 
-        if 'iFlag_remap_method' in aConfig:
-            self.iFlag_remap_method = aConfig['iFlag_remap_method']
+        # Mesh area statistics
+        self.dArea_min = None
+        self.dArea_max = None
+        self.dArea_mean = None
 
-        if "sFilename_source_mesh" in aConfig:
-            self.sFilename_source_mesh = aConfig['sFilename_source_mesh']
+        # Resolution comparison threshold (ratio of mesh to raster resolution)
+        # If mesh cells are within this factor of raster resolution, use weighted averaging
+        self.dResolution_ratio_threshold = 3.0  # mesh resolution < 3x raster resolution triggers weighted avg
 
-        if "sFilename_target_mesh" in aConfig:
-            self.sFilename_target_mesh = aConfig['sFilename_target_mesh']
-
-        if "aFilename_source_raster" in aConfig:
-            self.aFilename_source_raster = aConfig['aFilename_source_raster']
+        # Validate configuration
+        if self.iFlag_remap_method not in [1, 2, 3]:
+            logger.warning(f"Invalid remap method {self.iFlag_remap_method}, defaulting to 1 (nearest neighbor)")
+            self.iFlag_remap_method = 1
 
     def setup(self):
-        self.check_raster_files()
-        self.check_mesh_file()
+        """
+        Initialize and validate the uraster configuration.
+        Checks raster files and mesh file for existence and validity.
 
-        return
+        Returns:
+            bool: True if setup successful, False otherwise
+        """
+        raster_check = self.check_raster_files()
+        mesh_check = self.check_mesh_file()
+
+        return raster_check is not None and mesh_check is not None
 
     def check_raster_files(self, aFilename_source_raster_in=None):
         """
-        Check if the input raster files exist
-        :param aFilename_source_raster_in: a list of raster files
-        :return: True if all files exist, False otherwise
-        """
+        Validate and prepare input raster files, converting to WGS84 if needed.
 
+        Performs comprehensive validation of raster files including:
+        - File existence and readability
+        - Valid GDAL raster format
+        - Coordinate system compatibility
+        - Data integrity checks
+
+        Args:
+            aFilename_source_raster_in (list, optional): List of raster file paths.
+                If None, uses self.aFilename_source_raster
+
+        Returns:
+            list: List of WGS84 raster file paths, or None if validation fails
+
+        Note:
+            - Non-WGS84 rasters are automatically converted and cached
+            - All rasters must be valid and readable for processing to continue
+        """
+        # Determine input raster list
         if aFilename_source_raster_in is None:
             aFilename_source_raster = self.aFilename_source_raster
         else:
             aFilename_source_raster = aFilename_source_raster_in
 
-        for sFilename_raster_in in aFilename_source_raster:
-            if os.path.exists(sFilename_raster_in):
-                pass
-            else:
-                print('The raster file does not exist:', sFilename_raster_in)
-                return False
+        # Validate input list
+        if not aFilename_source_raster:
+            logger.error('No raster files provided for validation')
+            return None
 
-        aFilename_source_raster_out = list()
-        #create a WGS84 spatial reference in the WKT format for comparison
-        pSpatialRef_wgs84 = osr.SpatialReference()
-        pSpatialRef_wgs84.ImportFromEPSG(4326)
-        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
-        #uset the sraster class the check the raster
-        for sFilename_raster_in in aFilename_source_raster:
-            pRaster = sraster(sFilename_raster_in)
-            pRaster.read_metadata()
-            if pRaster.pSpatialRef_wkt == wkt_wgs84:
-                print('The raster file is in WGS84 geographic coordinate system:', sFilename_raster_in)
-                aFilename_source_raster_out.append(sFilename_raster_in)
+        if not isinstance(aFilename_source_raster, (list, tuple)):
+            logger.error(f'Raster files must be provided as a list, got {type(aFilename_source_raster).__name__}')
+            return None
 
-            else:
-                #need conversion
-                pRaster_wgs84 = pRaster.convert_to_wgs84()
-                aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
+        logger.info(f'Validating {len(aFilename_source_raster)} raster file(s)...')
+
+        # Phase 1: Check file existence and readability
+        for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
+            if not isinstance(sFilename_raster_in, str):
+                logger.error(f'Raster file path must be a string, got {type(sFilename_raster_in).__name__} at index {idx}')
+                return None
+
+            if not sFilename_raster_in.strip():
+                logger.error(f'Empty raster file path at index {idx}')
+                return None
+
+            if not os.path.exists(sFilename_raster_in):
+                logger.error(f'Raster file does not exist: {sFilename_raster_in}')
+                return None
+
+            if not os.path.isfile(sFilename_raster_in):
+                logger.error(f'Path is not a file: {sFilename_raster_in}')
+                return None
+
+            # Check file permissions
+            if not os.access(sFilename_raster_in, os.R_OK):
+                logger.error(f'Raster file is not readable: {sFilename_raster_in}')
+                return None
+
+            # Quick GDAL format validation
+            try:
+                pDataset_test = gdal.Open(sFilename_raster_in, gdal.GA_ReadOnly)
+                if pDataset_test is None:
+                    logger.error(f'GDAL cannot open raster file: {sFilename_raster_in}')
+                    return None
+                pDataset_test = None  # Close dataset
+            except Exception as e:
+                logger.error(f'Error opening raster with GDAL: {sFilename_raster_in}: {e}')
+                return None
+
+        logger.info('All raster files exist and are readable')
+
+        # Phase 2: Process and convert rasters to WGS84
+        aFilename_source_raster_out = []
+
+        # Create WGS84 spatial reference for comparison
+        try:
+            pSpatialRef_wgs84 = osr.SpatialReference()
+            pSpatialRef_wgs84.ImportFromEPSG(4326)
+            wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
+        except Exception as e:
+            logger.error(f'Failed to create WGS84 spatial reference: {e}')
+            return None
+
+        # Process each raster file
+        for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
+            logger.info(f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
+
+            try:
+                # Create sraster instance and read metadata
+                pRaster = sraster(sFilename_raster_in)
+                pRaster.read_metadata()
+
+                # Validate critical metadata
+                if pRaster.pSpatialRef_wkt is None:
+                    logger.error(f'Raster has no spatial reference: {sFilename_raster_in}')
+                    return None
+
+                if pRaster.nrow is None or pRaster.ncolumn is None:
+                    logger.error(f'Invalid raster dimensions: {sFilename_raster_in}')
+                    return None
+
+                if pRaster.nrow <= 0 or pRaster.ncolumn <= 0:
+                    logger.error(f'Raster has invalid dimensions ({pRaster.nrow}x{pRaster.ncolumn}): {sFilename_raster_in}')
+                    return None
+
+                # Check if coordinate system matches WGS84
+                if pRaster.pSpatialRef_wkt == wkt_wgs84:
+                    logger.info(f'  ✓ Already in WGS84 (EPSG:4326)')
+                    aFilename_source_raster_out.append(sFilename_raster_in)
+                else:
+                    # Convert to WGS84
+                    logger.info(f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}')
+                    try:
+                        pRaster_wgs84 = pRaster.convert_to_wgs84()
+
+                        if pRaster_wgs84 is None or not hasattr(pRaster_wgs84, 'sFilename'):
+                            logger.error(f'Conversion to WGS84 failed: {sFilename_raster_in}')
+                            return None
+
+                        if not os.path.exists(pRaster_wgs84.sFilename):
+                            logger.error(f'Converted WGS84 file not found: {pRaster_wgs84.sFilename}')
+                            return None
+
+                        logger.info(f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
+                        aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
+
+                    except Exception as e:
+                        logger.error(f'Error during WGS84 conversion: {sFilename_raster_in}: {e}')
+                        logger.error(f'Traceback: {traceback.format_exc()}')
+                        return None
+
+                # Log raster summary
+                logger.debug(f'  - Dimensions: {pRaster.nrow} x {pRaster.ncolumn} pixels')
+                logger.debug(f'  - Data type: {pRaster.eType}')
+                if hasattr(pRaster, 'dNoData'):
+                    logger.debug(f'  - NoData value: {pRaster.dNoData}')
+
+            except AttributeError as e:
+                logger.error(f'Missing expected attribute in sraster: {sFilename_raster_in}: {e}')
+                logger.error(f'Ensure sraster class has all required methods and attributes')
+                return None
+
+            except Exception as e:
+                logger.error(f'Unexpected error processing raster {sFilename_raster_in}: {e}')
+                logger.error(f'Error type: {type(e).__name__}')
+                logger.error(f'Traceback: {traceback.format_exc()}')
+                return None
+
+        # Final validation
+        if len(aFilename_source_raster_out) != len(aFilename_source_raster):
+            logger.error(f'Output count mismatch: expected {len(aFilename_source_raster)}, got {len(aFilename_source_raster_out)}')
+            return None
+
+        logger.info(f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
 
         return aFilename_source_raster_out
-        return
 
     def check_mesh_file(self):
+        """
+        Check if the source mesh file exists and build its topology.
+
+        Returns:
+            tuple or None: (vertices_lon, vertices_lat, connectivity) if successful, None otherwise
+        """
         if not self.sFilename_source_mesh:
             logger.error("No source mesh filename provided")
             return None
@@ -140,13 +295,19 @@ class uraster:
             logger.error(f"Source mesh file does not exist: {self.sFilename_source_mesh}")
             return None
 
-        self.rebuild_mesh_topology()
-
-        return
+        return self.rebuild_mesh_topology()
 
     def _get_geometry_type_name(self, geometry_type):
         """
-        Convert OGR geometry type integer to readable string
+        Convert OGR geometry type integer to readable string name.
+
+        Handles both standard and 3D/Z-flagged geometry types.
+
+        Args:
+            geometry_type (int): OGR geometry type constant
+
+        Returns:
+            str: Human-readable geometry type name (e.g., "wkbPolygon")
         """
         geometry_types = {
             ogr.wkbUnknown: "wkbUnknown",
@@ -171,28 +332,63 @@ class uraster:
 
         return f"Unknown geometry type: {geometry_type}"
 
-    def _get_vector_driver_from_filename(self, filename):
+    def _determine_optimal_resampling(self, dPixelWidth, dPixelHeight):
         """
-        Determine the appropriate OGR driver based on file extension
-        :param filename: Output vector filename
-        :return: OGR driver name
+        Determine optimal resampling method based on mesh and raster resolution comparison.
+
+        Compares the characteristic mesh cell size with raster resolution to decide
+        whether to use nearest neighbor (when raster is much finer) or weighted
+        averaging (when mesh and raster resolutions are comparable).
+
+        Args:
+            dPixelWidth (float): Raster pixel width in degrees
+            dPixelHeight (float): Raster pixel height in degrees (absolute value)
+
+        Returns:
+            tuple: (resample_method_string, resample_method_code)
+                - resample_method_string: 'nearest', 'bilinear', 'cubic', 'average', etc.
+                - resample_method_code: integer code (1, 2, or 3)
         """
-        extension = os.path.splitext(filename)[1].lower()
+        if self.dArea_mean is None or self.dArea_mean <= 0:
+            logger.warning("Mesh area statistics not available, defaulting to nearest neighbor")
+            return 'near', 1
 
-        driver_mapping = {
-            '.shp': 'ESRI Shapefile',
-            '.geojson': 'GeoJSON',
-            '.json': 'GeoJSON',
-            '.gpkg': 'GPKG',
-            '.kml': 'KML',
-            '.gml': 'GML',
-            '.sqlite': 'SQLite',
-            '.csv': 'CSV',
-            '.parquet': 'Parquet'
-        }
+        # Estimate characteristic mesh cell dimension (approximate square root of mean area)
+        dMesh_characteristic_size = np.sqrt(self.dArea_mean)
 
-        # Default to Shapefile if extension not recognized
-        return driver_mapping.get(extension, 'ESRI Shapefile')
+        # Use the coarser of the two raster dimensions
+        dRaster_resolution = max(abs(dPixelWidth), abs(dPixelHeight))
+
+        # Calculate resolution ratio (mesh size / raster size)
+        dResolution_ratio = dMesh_characteristic_size / dRaster_resolution
+
+        logger.info("="*60)
+        logger.info("Resolution Comparison Analysis:")
+        logger.info(f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution*111:.2f} km at equator)")
+        logger.info(f"  Mean mesh cell size: {dMesh_characteristic_size:.6f} degrees ({dMesh_characteristic_size*111:.2f} km at equator)")
+        logger.info(f"  Resolution ratio (mesh/raster): {dResolution_ratio:.2f}")
+        logger.info(f"  Threshold for weighted averaging: {self.dResolution_ratio_threshold:.2f}")
+
+        # Decision logic
+        if dResolution_ratio < self.dResolution_ratio_threshold:
+            # Mesh cells are comparable to or smaller than raster resolution
+            # Use weighted averaging to properly capture sub-pixel variations
+            recommended_method = 'average'
+            recommended_code = 3
+            logger.warning(f"Mesh resolution is close to raster resolution (ratio: {dResolution_ratio:.2f})")
+            logger.warning(f"Switching to WEIGHTED AVERAGING (average) for accuracy")
+            logger.warning("Consider using higher resolution raster data for better results")
+        else:
+            # Raster is much finer than mesh - nearest neighbor is appropriate
+            recommended_method = 'near'
+            recommended_code = 1
+            logger.info(f"Raster is significantly finer than mesh (ratio: {dResolution_ratio:.2f})")
+            logger.info(f"Using NEAREST NEIGHBOR resampling (sufficient for this resolution ratio)")
+
+        logger.info("="*60)
+
+        return recommended_method, recommended_code
+
 
     def rebuild_mesh_topology(self):
         """
@@ -253,6 +449,7 @@ class uraster:
             lons_list = []
             lats_list = []
             data_list = []
+            area_list = []
 
             # Process features with enhanced error handling
             pLayer.ResetReading()
@@ -302,6 +499,14 @@ class uraster:
 
                             lons_list.append(lons)
                             lats_list.append(lats)
+
+                            # Calculate polygon area
+                            try:
+                                dArea = calculate_polygon_area(lons, lats)
+                                area_list.append(dArea)
+                            except Exception as area_error:
+                                logger.warning(f'Could not calculate area for feature {feature_count}: {area_error}')
+                                area_list.append(0.0)
 
                             # Get field data if available
                             if sVariable:
@@ -488,12 +693,32 @@ class uraster:
             self.aCenter_latitude = cell_lats_1d
             self.aConnectivity = connectivity
 
+<<<<<<< HEAD
             # Ensure aCellID matches the number of valid mesh cells
             if len(aCellID) != len(cell_lons_1d):
                 logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)}), truncating to match")
                 aCellID = aCellID[:len(cell_lons_1d)]
 
             self.aCellID = np.array(aCellID)
+=======
+            # Calculate and store area statistics
+            if area_list:
+                area_array = np.array(area_list)
+                valid_areas = area_array[area_array > 0]  # Exclude zero areas from statistics
+                if len(valid_areas) > 0:
+                    self.dArea_min = float(np.min(valid_areas))
+                    self.dArea_max = float(np.max(valid_areas))
+                    self.dArea_mean = float(np.mean(valid_areas))
+                    logger.info(f'Mesh area statistics:')
+                    logger.info(f'  - Min area: {self.dArea_min:.6f}')
+                    logger.info(f'  - Max area: {self.dArea_max:.6f}')
+                    logger.info(f'  - Mean area: {self.dArea_mean:.6f}')
+                else:
+                    logger.warning('No valid polygon areas calculated')
+                    self.dArea_min = 0.0
+                    self.dArea_max = 0.0
+                    self.dArea_mean = 0.0
+>>>>>>> some update for class functions
 
             # Enhanced validation of final results
             validation_passed = True
@@ -549,40 +774,86 @@ class uraster:
             logger.error(f'Traceback: {traceback.format_exc()}')
             return None
 
-    def report_inputs(self, iFlag_show_gpu_info=None):
+    def report_inputs(self, iFlag_show_gpu_info=False):
+        """
+        Print comprehensive input information including raster and mesh details.
+
+        Args:
+            iFlag_show_gpu_info (bool): If True, also print GPU/GeoVista information
+        """
         self.print_raster_info()
         self.print_mesh_info()
-        if iFlag_show_gpu_info is not None:
-            import geovista.report as gvreport
-            print(gvreport.Report())
-        return
 
-    def report_outputs(self):
-        return
+        if iFlag_show_gpu_info:
+            try:
+                import geovista.report as gvreport
+                print("\n" + "="*60)
+                print("GPU/GeoVista Information:")
+                print("="*60)
+                print(gvreport.Report())
+            except ImportError:
+                logger.warning("GeoVista not available for GPU info reporting")
+
+    def report_outputs(self, sFilename_output=None):
+        """
+        Report output statistics.
+
+        Args:
+            sFilename_output (str, optional): Output file to report on
+        """
+        if sFilename_output and os.path.exists(sFilename_output):
+            logger.info(f"Output file created: {sFilename_output}")
+            logger.info(f"Output file size: {os.path.getsize(sFilename_output) / (1024*1024):.2f} MB")
+        else:
+            logger.warning("No output file information available")
 
     def print_raster_info(self):
         """
-        Print the raster information
-        :return: None
+        Print detailed information about all input raster files.
         """
+        print("\n" + "="*60)
+        print(f"Input Raster Information ({len(self.aFilename_source_raster)} file(s)):")
+        print("="*60)
 
-        print('The input raster files are:')
-        for sFilename in self.aFilename_source_raster:
-            print(sFilename)
-            pRaster = sraster(sFilename)
-            pRaster.read_metadata()
-            pRaster.print_info()
-
-        return
+        for idx, sFilename in enumerate(self.aFilename_source_raster, 1):
+            print(f"\n[{idx}] {sFilename}")
+            try:
+                pRaster = sraster(sFilename)
+                pRaster.read_metadata()
+                pRaster.print_info()
+            except Exception as e:
+                logger.error(f"Error reading raster info: {e}")
 
     def print_mesh_info(self):
+        """
+        Print detailed mesh topology information.
+        """
+        if self.aCenter_longititude is None or len(self.aCenter_longititude) == 0:
+            logger.warning("Mesh topology not yet built")
+            return
 
+        print("\n" + "="*60)
+        print("Mesh Topology Information:")
+        print("="*60)
         print(f"Number of mesh cells: {len(self.aCenter_longititude)}")
         print(f"Cell longitude range: {self.aCenter_longititude.min():.3f} to {self.aCenter_longititude.max():.3f}")
         print(f"Cell latitude range: {self.aCenter_latitude.min():.3f} to {self.aCenter_latitude.max():.3f}")
-        print(f"Number of maximum vertices: {self.nVertex_max }")
+        print(f"Maximum vertices per cell: {self.nVertex_max}")
 
-        return
+        if self.aVertex_longititude is not None:
+            print(f"Total unique vertices: {len(self.aVertex_longititude)}")
+        if self.aConnectivity is not None:
+            print(f"Connectivity matrix shape: {self.aConnectivity.shape}")
+
+        # Display area statistics if available
+        if self.dArea_min is not None and self.dArea_max is not None:
+            print(f"\nCell Area Statistics:")
+            print(f"  Min area: {self.dArea_min:.6f}")
+            print(f"  Max area: {self.dArea_max:.6f}")
+            print(f"  Mean area: {self.dArea_mean:.6f}")
+            print(f"  Area range ratio: {self.dArea_max/self.dArea_min:.2f}x" if self.dArea_min > 0 else "  Area range ratio: N/A")
+
+        print("="*60)
 
     def run_remap(self, sFilename_vector_out,
                     sFilename_target_mesh_in = None,
@@ -592,12 +863,32 @@ class uraster:
                   sFolder_raster_out_in = None,
                   sFormat_in='GTiff'):
         """
-        Clip a raster by a vector mesh file
-        :param aFilename_source_raster_in: a list of raster files
-        :param    sFilename_target_mesh_in : input polygon filename
-        :param sFilename_raster_out: output raster filename
-        :param sFormat: output format
-        :return: None
+        Perform zonal statistics by clipping raster data to mesh polygons.
+
+        Main processing method that extracts raster values for each mesh cell polygon
+        and computes statistics (mean, min, max, std, sum, count).
+
+        Args:
+            sFilename_vector_out (str): Output vector file path with computed statistics
+            sFilename_target_mesh_in (str, optional): Input mesh polygon file.
+                Defaults to configured target mesh.
+            aFilename_source_raster_in (list, optional): List of source raster files.
+                Defaults to configured source rasters.
+            iFlag_stat_in (int, optional): Flag to compute statistics (1=yes, 0=no).
+                Default is 1.
+            iFlag_save_clipped_raster_in (int, optional): Flag to save clipped rasters (1=yes, 0=no).
+                Default is 0.
+            sFolder_raster_out_in (str, optional): Output folder for clipped rasters.
+                Required if iFlag_save_clipped_raster_in=1.
+            sFormat_in (str, optional): GDAL raster format. Default is 'GTiff'.
+
+        Returns:
+            None
+
+        Note:
+            - Handles IDL-crossing polygons automatically
+            - Generates failure report for problematic features
+            - Supports multiple input rasters (uses first in list)
         """
 
         if aFilename_source_raster_in is None:
@@ -625,7 +916,7 @@ class uraster:
             return
 
         # Determine output vector format from filename extension
-        sVectorDriverName = self._get_vector_driver_from_filename(sFilename_vector_out)
+        sVectorDriverName = get_vector_driver_from_extension(sFilename_vector_out)
         pDriver_vector = ogr.GetDriverByName(sVectorDriverName)
 
         #check the input raster data format and decide gdal driver
@@ -669,6 +960,28 @@ class uraster:
 
             if pPixelHeight is None or sRaster.pTransform[5] > pPixelHeight: #is pPixelHeight is negative, then it should be less than
                 pPixelHeight = sRaster.pTransform[5]
+
+        # Determine optimal resampling method based on resolution comparison
+        # This will override iFlag_remap_method if mesh resolution is too coarse
+        sRemap_method_auto, iRemap_method_auto = self._determine_optimal_resampling(dPixelWidth, abs(pPixelHeight))
+
+        # Use automatically determined method if it's more conservative than user setting
+        # Priority: weighted averaging > nearest neighbor
+        if iRemap_method_auto == 3 and self.iFlag_remap_method != 3:
+            logger.warning(f"Overriding user remap method ({self.iFlag_remap_method}) with automatic selection (3 - weighted average)")
+            logger.warning("This is necessary due to mesh/raster resolution compatibility")
+            sRemap_method = sRemap_method_auto
+            iFlag_remap_method_used = iRemap_method_auto
+        else:
+            # Use user's preferred method
+            if self.iFlag_remap_method == 1:
+                sRemap_method = 'near'
+            elif self.iFlag_remap_method == 2:
+                sRemap_method = 'near'
+            elif self.iFlag_remap_method == 3:
+                sRemap_method = 'average'
+            iFlag_remap_method_used = self.iFlag_remap_method
+            logger.info(f"Using user-specified remap method: {sRemap_method}")
 
 
         #get the spatial reference of the mesh vector file
@@ -714,14 +1027,8 @@ class uraster:
             #treat the raster as categorical?
             pass
 
-        if self.iFlag_remap_method == 1:
-            sRemap_method = 'nearest neighbor'
-        elif self.iFlag_remap_method == 2: #extracted using nearest neighbor
-            sRemap_method = 'nearest neighbor'
-        elif self.iFlag_remap_method == 3: #this one need a different method, see polygon calculator package
-            sRemap_method = 'weighted average'
-
         # Pre-compute GDAL options to avoid repeated object creation
+        # sRemap_method was already determined above based on resolution comparison
         gdal_warp_options_base = {
             'cropToCutline': True,
             'xRes': dPixelWidth,
@@ -743,20 +1050,21 @@ class uraster:
         pLayer_mesh.ResetReading()
         pFeature_mesh = pLayer_mesh.GetNextFeature()
         while pFeature_mesh is not None:
-            #what if a feature cross the international date line?
-            #reuse the code from pyflowline to split the polygon if it cross the date line
+            # Check if feature crosses the international date line
             pPolygon = pFeature_mesh.GetGeometryRef()
             aCoord = get_geometry_coordinates(pPolygon)
             dLon_min = np.min(aCoord[:,0])
             dLon_max = np.max(aCoord[:,0])
-            if dLon_max - dLon_min > 100:  #cross the international date line
+
+            if dLon_max - dLon_min > IDL_LONGITUDE_THRESHOLD:  # Use constant
                 if not pPolygon.IsValid():
-                    print('Invalid polygon geometry detected, something broke during the PyFlowline simulation.')
-                    pass
+                    logger.warning(f'Feature {i} has invalid geometry crossing IDL')
+
                 # Create multipolygon to handle IDL crossing
-                print('Feature ', i, ' cross the international date line, splitting it into multiple parts.')
+                logger.info(f'Feature {i} crosses the international date line, splitting into multiple parts.')
                 pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
-                aCoord_gcs_split = split_polygon_cross_idl(aCoord) #careful
+                aCoord_gcs_split = split_polygon_cross_idl(aCoord)
+
                 for aCoord_gcs in aCoord_gcs_split:
                     #create a polygon (not just ring) and add it to the multipolygon
                     ring = ogr.Geometry(ogr.wkbLinearRing)
@@ -810,7 +1118,7 @@ class uraster:
                     import psutil
                     process = psutil.Process()
                     memory_percent = process.memory_percent()
-                    if memory_percent > 80:  # If using more than 80% of available memory
+                    if memory_percent > MEMORY_WARNING_THRESHOLD:  # Use constant
                         logger.warning(f"High memory usage: {memory_percent:.1f}% at feature {i}")
                 except ImportError:
                     pass  # psutil not available
@@ -956,7 +1264,7 @@ class uraster:
                     pDataset_clip_warped = None
 
                 # Progress reporting
-                if i % 100 == 0:
+                if i % PROGRESS_REPORT_INTERVAL == 0:
                     elapsed = time.time() - start_time
                     rate = i / elapsed
                     eta = (len(aFeatures) - i) / rate if rate > 0 else 0
@@ -1003,27 +1311,59 @@ class uraster:
         return
 
     def visualize_source_mesh(self,
-                              sFilename_out = None,
-                    dLongitude_focus_in=0.0,
-                    dLatitude_focus_in=0.0):
+                              sFilename_out=None,
+                              dLongitude_focus_in=0.0,
+                              dLatitude_focus_in=0.0,
+                              dZoom_factor=1.4,
+                              iFlag_show_coastlines=True,
+                              iFlag_show_graticule=True):
+        """
+        Visualize the source mesh topology using GeoVista 3D globe rendering.
 
-        import geovista as gv
-        if dLongitude_focus_in is not None:
-            dLongitude_focus = dLongitude_focus_in
-        else:
-            dLongitude_focus = 0.0
-        if dLatitude_focus_in is not None:
-            dLatitude_focus = dLatitude_focus_in
-        else:
-            dLatitude_focus = 0.0
+        Creates an interactive or saved 3D visualization of the unstructured mesh
+        with proper geographic context including coastlines and coordinate grid.
 
+        Args:
+            sFilename_out (str, optional): Output screenshot file path.
+                If None, displays interactive viewer. Supports formats: .png, .jpg, .svg
+            dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
+                Valid range: -180 to 180. Default is 0.0 (prime meridian).
+            dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
+                Valid range: -90 to 90. Default is 0.0 (equator).
+            dZoom_factor (float, optional): Camera zoom level.
+                Higher values zoom in. Default is 1.4.
+            iFlag_show_coastlines (bool, optional): Show coastline overlay.
+                Default is True.
+            iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
+                Default is True.
+
+        Returns:
+            bool: True if visualization successful, False otherwise
+
+<<<<<<< HEAD
         name = 'ID'
         sUnit = ""
+=======
+        Raises:
+            ImportError: If geovista package is not installed
+            ValueError: If mesh topology data is not available or invalid
+>>>>>>> some update for class functions
 
-        connectivity_masked = np.ma.masked_where(self.aConnectivity == -1, self.aConnectivity)
+        Note:
+            - Requires 'geovista' package: pip install geovista
+            - Interactive mode requires display environment
+            - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
+        """
+        # Validate mesh data availability
+        if self.aVertex_longititude is None or self.aVertex_latitude is None:
+            logger.error('Mesh vertices not available. Build mesh topology first.')
+            return False
 
-        mesh = gv.Transform.from_unstructured(self.aVertex_longititude, self.aVertex_latitude, connectivity=connectivity_masked, crs = crs)
+        if self.aConnectivity is None:
+            logger.error('Mesh connectivity not available. Build mesh topology first.')
+            return False
 
+<<<<<<< HEAD
         mesh.cell_data[name] = self.aCellID
 
         # Plot the mesh.
@@ -1043,114 +1383,612 @@ class uraster:
         plotter.add_coastlines()
         plotter.add_axes()
         plotter.add_graticule(show_labels=True)
+=======
+        if len(self.aVertex_longititude) == 0 or len(self.aVertex_latitude) == 0:
+            logger.error('Mesh vertices are empty.')
+            return False
+
+        if self.aConnectivity.size == 0:
+            logger.error('Mesh connectivity is empty.')
+            return False
+
+        # Validate focus coordinates
+        dLongitude_focus = dLongitude_focus_in if dLongitude_focus_in is not None else 0.0
+        dLatitude_focus = dLatitude_focus_in if dLatitude_focus_in is not None else 0.0
+
+        if not (-180 <= dLongitude_focus <= 180):
+            logger.warning(f'Longitude focus {dLongitude_focus} out of range [-180, 180], clamping')
+            dLongitude_focus = np.clip(dLongitude_focus, -180, 180)
+
+        if not (-90 <= dLatitude_focus <= 90):
+            logger.warning(f'Latitude focus {dLatitude_focus} out of range [-90, 90], clamping')
+            dLatitude_focus = np.clip(dLatitude_focus, -90, 90)
+
+        # Validate zoom factor
+        if dZoom_factor <= 0:
+            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.4')
+            dZoom_factor = 1.4
+
+        # Validate output file path if provided
+>>>>>>> some update for class functions
         if sFilename_out is not None:
-            #save the figure
-            plotter.screenshot(sFilename_out)
-            print(f'Saved screenshot to: {sFilename_out}')
-        else:
-            plotter.show()
-            return
+            if not isinstance(sFilename_out, str) or not sFilename_out.strip():
+                logger.error('Output filename must be a non-empty string')
+                return False
+
+            # Check output directory exists
+            output_dir = os.path.dirname(sFilename_out)
+            if output_dir and not os.path.exists(output_dir):
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                    logger.info(f'Created output directory: {output_dir}')
+                except Exception as e:
+                    logger.error(f'Cannot create output directory {output_dir}: {e}')
+                    return False
+
+            # Check supported file extensions
+            valid_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff']
+            file_ext = os.path.splitext(sFilename_out)[1].lower()
+            if file_ext not in valid_extensions:
+                logger.warning(f'File extension {file_ext} may not be supported. Recommended: .png, .jpg, .svg')
+
+        # Import geovista with error handling
+        try:
+            import geovista as gv
+            logger.info('GeoVista library imported successfully')
+        except ImportError as e:
+            logger.error('GeoVista library not available. Install with: pip install geovista')
+            logger.error(f'Import error: {e}')
+            return False
+
+        try:
+            logger.info('Creating mesh visualization...')
+            logger.info(f'  - Vertices: {len(self.aVertex_longititude)}')
+            logger.info(f'  - Connectivity shape: {self.aConnectivity.shape}')
+            logger.info(f'  - Focus: ({dLongitude_focus:.2f}°, {dLatitude_focus:.2f}°)')
+            logger.info(f'  - Zoom factor: {dZoom_factor}')
+
+            # Prepare mesh metadata
+            name = 'Mesh Cell ID'
+            sUnit = ""
+
+            # Create masked connectivity array (mask invalid indices)
+            connectivity_masked = np.ma.masked_where(
+                self.aConnectivity == -1,
+                self.aConnectivity
+            )
+
+            # Validate connectivity indices
+            valid_connectivity = self.aConnectivity[self.aConnectivity >= 0]
+            if len(valid_connectivity) > 0:
+                max_vertex_idx = len(self.aVertex_longititude) - 1
+                if np.max(valid_connectivity) > max_vertex_idx:
+                    logger.error(f'Connectivity contains invalid vertex index: max={np.max(valid_connectivity)}, vertices={len(self.aVertex_longititude)}')
+                    return False
+
+            # Transform to GeoVista unstructured mesh
+            mesh = gv.Transform.from_unstructured(
+                self.aVertex_longititude,
+                self.aVertex_latitude,
+                connectivity=connectivity_masked,
+                crs=crs
+            )
+
+            logger.info(f'Created GeoVista mesh with {mesh.n_cells} cells and {mesh.n_points} points')
+
+            # Create 3D plotter
+            plotter = gv.GeoPlotter()
+
+            # Configure scalar bar (colorbar) appearance
+            sargs = {
+                "title": f"{name} / {sUnit}" if sUnit else name,
+                "shadow": True,
+                "title_font_size": 10,
+                "label_font_size": 10,
+                "fmt": "%.0f",  # Integer formatting for cell IDs
+                "n_labels": 5,
+            }
+
+            # Add mesh to plotter
+            plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
+
+            # Configure camera position and focus
+            try:
+                focal_point = gv.geodesic.to_cartesian(
+                    [dLongitude_focus],
+                    [dLatitude_focus]
+                )[0]
+
+                camera_position = gv.geodesic.to_cartesian(
+                    [dLongitude_focus],
+                    [dLatitude_focus],
+                    radius=gv.common.RADIUS * 6
+                )[0]
+
+                plotter.camera.focal_point = focal_point
+                plotter.camera.position = camera_position
+                plotter.camera.zoom(dZoom_factor)
+
+                logger.debug(f'Camera configured: focal={focal_point}, position={camera_position}')
+            except Exception as e:
+                logger.warning(f'Error setting camera position: {e}. Using default view.')
+
+            # Add geographic context
+            if iFlag_show_coastlines:
+                try:
+                    plotter.add_coastlines()
+                    logger.debug('Added coastlines overlay')
+                except Exception as e:
+                    logger.warning(f'Could not add coastlines: {e}')
+
+            # Add coordinate axes
+            try:
+                plotter.add_axes()
+                logger.debug('Added coordinate axes')
+            except Exception as e:
+                logger.warning(f'Could not add axes: {e}')
+
+            # Add graticule (coordinate grid)
+            if iFlag_show_graticule:
+                try:
+                    plotter.add_graticule(show_labels=True)
+                    logger.debug('Added coordinate graticule with labels')
+                except Exception as e:
+                    logger.warning(f'Could not add graticule: {e}')
+
+            # Output or display
+            if sFilename_out is not None:
+                # Save screenshot
+                try:
+                    plotter.screenshot(sFilename_out)
+                    logger.info(f'✓ Visualization saved to: {sFilename_out}')
+
+                    # Verify file was created
+                    if os.path.exists(sFilename_out):
+                        file_size = os.path.getsize(sFilename_out)
+                        logger.info(f'  File size: {file_size / 1024:.1f} KB')
+                    else:
+                        logger.warning(f'Screenshot command executed but file not found: {sFilename_out}')
+
+                    plotter.close()
+                    return True
+
+                except Exception as e:
+                    logger.error(f'Failed to save screenshot: {e}')
+                    logger.error(f'Traceback: {traceback.format_exc()}')
+                    plotter.close()
+                    return False
+            else:
+                # Interactive display
+                try:
+                    logger.info('Opening interactive visualization window...')
+                    plotter.show()
+                    return True
+                except Exception as e:
+                    logger.error(f'Failed to display interactive visualization: {e}')
+                    logger.error(f'Ensure display environment is available (X11, Wayland, etc.)')
+                    logger.error(f'Traceback: {traceback.format_exc()}')
+                    plotter.close()
+                    return False
+
+        except ImportError as e:
+            logger.error(f'Missing required GeoVista dependencies: {e}')
+            return False
+
+        except Exception as e:
+            logger.error(f'Unexpected error during mesh visualization: {e}')
+            logger.error(f'Error type: {type(e).__name__}')
+            logger.error(f'Traceback: {traceback.format_exc()}')
+            return False
 
     def visualize_raster(self):
+        """
+        Visualize source raster data using GeoVista.
+
+        Note:
+            Not yet implemented. Placeholder for future raster visualization.
+        """
         #it is possible to visualize the raster using geovista as well
         #if more than one rasters is used, then we may overlap them one by one
+        for idx, sFilename in enumerate(self.aFilename_source_raster, 1):
+            print(f"\n[{idx}] {sFilename}")
+            try:
+                pRaster = sraster(sFilename)
+                pRaster.create_raster_mesh()
+                sFilename_raster_mesh = pRaster.sFilename_mesh
+
+                #use this mesh to visualize, with the raster value as the cell data
+
+
+            except Exception as e:
+                logger.error(f"Error reading raster info: {e}")
         return
 
     def visualize_target_mesh(self, sVariable_in,
-                          sUnit_in=None,
-                          sFilename_out = None,
-                    dLongitude_focus_in=0.0,
-                    dLatitude_focus_in=0.0):
+                               sUnit_in=None,
+                               sFilename_out=None,
+                               dLongitude_focus_in=0.0,
+                               dLatitude_focus_in=0.0,
+                               dZoom_factor=1.4,
+                               iFlag_show_coastlines=True,
+                               iFlag_show_graticule=True,
+                               sColormap='viridis'):
+        """
+        Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
-        import geovista as gv
-        if dLongitude_focus_in is not None:
-            dLongitude_focus = dLongitude_focus_in
-        else:
-            dLongitude_focus = 0.0
-        if dLatitude_focus_in is not None:
-            dLatitude_focus = dLatitude_focus_in
-        else:
-            dLatitude_focus = 0.0
+        Creates an interactive or saved 3D visualization of the mesh with cells colored
+        by computed statistics (mean, min, max, std) from raster processing.
 
-        if sVariable_in is not None:
-            sVariable = sVariable_in
-        else:
+        Args:
+            sVariable_in (str): Variable field name to visualize.
+                Common values: 'mean', 'min', 'max', 'std', 'area'
+            sUnit_in (str, optional): Unit label for the colorbar (e.g., 'mm', 'kg/m²').
+                Default is empty string.
+            sFilename_out (str, optional): Output screenshot file path.
+                If None, displays interactive viewer. Supports: .png, .jpg, .svg
+            dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
+                Valid range: -180 to 180. Default is 0.0.
+            dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
+                Valid range: -90 to 90. Default is 0.0.
+            dZoom_factor (float, optional): Camera zoom level.
+                Higher values zoom in. Default is 1.4.
+            iFlag_show_coastlines (bool, optional): Show coastline overlay.
+                Default is True.
+            iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
+                Default is True.
+            sColormap (str, optional): Matplotlib colormap name.
+                Default is 'viridis'. Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
+
+        Returns:
+            bool: True if visualization successful, False otherwise
+
+        Raises:
+            ImportError: If geovista package is not installed
+            ValueError: If target mesh file or required data is not available
+
+        Note:
+            - Requires 'geovista' package: pip install geovista
+            - Target mesh file must exist (created by run_remap method)
+            - Specified variable must exist as a field in the target mesh
+            - Interactive mode requires display environment
+        """
+        # Validate target mesh file
+        if not self.sFilename_target_mesh:
+            logger.error('No target mesh filename configured')
+            return False
+
+        if not os.path.exists(self.sFilename_target_mesh):
+            logger.error(f'Target mesh file does not exist: {self.sFilename_target_mesh}')
+            return False
+
+        # Validate mesh topology data
+        if self.aVertex_longititude is None or self.aVertex_latitude is None:
+            logger.error('Mesh vertices not available. Build mesh topology first.')
+            return False
+
+        if self.aConnectivity is None:
+            logger.error('Mesh connectivity not available. Build mesh topology first.')
+            return False
+
+        if len(self.aVertex_longititude) == 0 or len(self.aVertex_latitude) == 0:
+            logger.error('Mesh vertices are empty.')
+            return False
+
+        # Validate variable name
+        if not sVariable_in:
+            logger.warning('No variable specified, defaulting to "mean"')
             sVariable = 'mean'
-
-        name = sVariable.capitalize()
-        sUnit = sUnit_in if sUnit_in is not None else ""
-        connectivity_masked = np.ma.masked_where(self.aConnectivity == -1, self.aConnectivity)
-
-        data_list = []
-        # Open the input data source
-        pDataset = ogr.Open(self.sFilename_target_mesh, 0)  # 0 means read-only. 1 means writeable.
-        if pDataset is None:
-            print(f'Failed to open file: {self.sFilename_target_mesh}')
-            return
-        print(f'Opened file: {self.sFilename_target_mesh}')
-        # Get the first layer
-        pLayer = pDataset.GetLayer()
-        if pLayer is None:
-            print('Failed to get layer from the dataset.')
-            return
-
-        # Get the layer definition
-        pLayerDefn = pLayer.GetLayerDefn()
-        if pLayerDefn is None:
-            print('Failed to get layer definition.')
-            return
-
-        iFieldCount = pLayerDefn.GetFieldCount()
-        nFeatures = pLayer.GetFeatureCount()
-        self.nCell_target = nFeatures
-        print(f'Number of fields in the layer: {iFieldCount}')
-        if self.nCell_target != self.nCell_source:
-            print(f'Warning: Number of features in the target mesh ({self.nCell_target}) does not match the number of cells in the source mesh ({len(self.nCell_source)}).')
-
-        #reset the reading to the start
-        pLayer.ResetReading()
-        pFeature = pLayer.GetNextFeature()
-        while pFeature is not None:
-            pGeometry = pFeature.GetGeometryRef()
-            if pGeometry is not None:
-                # Assuming the geometry is a polygon, get the centroid
-                sGeometry_type = pGeometry.GetGeometryName()
-                if sGeometry_type == 'POLYGON':
-                    #get all the coordinates of the polygon
-                    data_list.append(pFeature.GetField(sVariable))
-
-        data = np.array(data_list)
-        mesh = gv.Transform.from_unstructured(self.aVertex_longititude, self.aVertex_latitude, connectivity=connectivity_masked, crs = crs)
-
-        mesh.cell_data[name] = data
-
-        # Plot the mesh.
-        plotter = gv.GeoPlotter()
-        sargs = {"title": f"{name} / {sUnit}",
-               "shadow": True,    "title_font_size": 10,    "label_font_size": 10,    "fmt": "%.1f"        }
-        plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
-        focal_point = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus])[0]
-        camera_position = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus], radius=gv.common.RADIUS *6)[0]
-        plotter.camera.focal_point = focal_point
-        plotter.camera.position = camera_position
-        plotter.camera.zoom(1.4)
-        plotter.add_coastlines()
-        plotter.add_axes()
-        plotter.add_graticule(show_labels=True)
-        if sFilename_out is not None:
-            #save the figure
-            plotter.screenshot(sFilename_out)
-            print(f'Saved screenshot to: {sFilename_out}')
         else:
-            plotter.show()
-            return
+            sVariable = sVariable_in
 
-        return
+        if not isinstance(sVariable, str):
+            logger.error(f'Variable name must be a string, got {type(sVariable).__name__}')
+            return False
+
+        # Validate focus coordinates
+        dLongitude_focus = dLongitude_focus_in if dLongitude_focus_in is not None else 0.0
+        dLatitude_focus = dLatitude_focus_in if dLatitude_focus_in is not None else 0.0
+
+        if not (-180 <= dLongitude_focus <= 180):
+            logger.warning(f'Longitude focus {dLongitude_focus} out of range [-180, 180], clamping')
+            dLongitude_focus = np.clip(dLongitude_focus, -180, 180)
+
+        if not (-90 <= dLatitude_focus <= 90):
+            logger.warning(f'Latitude focus {dLatitude_focus} out of range [-90, 90], clamping')
+            dLatitude_focus = np.clip(dLatitude_focus, -90, 90)
+
+        # Validate zoom factor
+        if dZoom_factor <= 0:
+            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.4')
+            dZoom_factor = 1.4
+
+        # Validate output file path if provided
+        if sFilename_out is not None:
+            if not isinstance(sFilename_out, str) or not sFilename_out.strip():
+                logger.error('Output filename must be a non-empty string')
+                return False
+
+            # Check output directory exists
+            output_dir = os.path.dirname(sFilename_out)
+            if output_dir and not os.path.exists(output_dir):
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                    logger.info(f'Created output directory: {output_dir}')
+                except Exception as e:
+                    logger.error(f'Cannot create output directory {output_dir}: {e}')
+                    return False
+
+            # Check supported file extensions
+            valid_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff']
+            file_ext = os.path.splitext(sFilename_out)[1].lower()
+            if file_ext not in valid_extensions:
+                logger.warning(f'File extension {file_ext} may not be supported. Recommended: .png, .jpg, .svg')
+
+        # Import geovista with error handling
+        try:
+            import geovista as gv
+            logger.info('GeoVista library imported successfully')
+        except ImportError as e:
+            logger.error('GeoVista library not available. Install with: pip install geovista')
+            logger.error(f'Import error: {e}')
+            return False
+
+        try:
+            logger.info(f'Loading target mesh data from: {self.sFilename_target_mesh}')
+
+            # Open target mesh file
+            pDataset = ogr.Open(self.sFilename_target_mesh, 0)  # Read-only
+            if pDataset is None:
+                logger.error(f'Failed to open target mesh file: {self.sFilename_target_mesh}')
+                return False
+
+            # Get first layer
+            pLayer = pDataset.GetLayer(0)
+            if pLayer is None:
+                logger.error('Failed to get layer from target mesh dataset')
+                pDataset = None
+                return False
+
+            # Get layer definition
+            pLayerDefn = pLayer.GetLayerDefn()
+            if pLayerDefn is None:
+                logger.error('Failed to get layer definition from target mesh')
+                pDataset = None
+                return False
+
+            # Get field information
+            iFieldCount = pLayerDefn.GetFieldCount()
+            nFeatures = pLayer.GetFeatureCount()
+            self.nCell_target = nFeatures
+
+            logger.info(f'Target mesh contains {nFeatures} features with {iFieldCount} fields')
+
+            # Check if variable field exists
+            field_names = [pLayerDefn.GetFieldDefn(i).GetName() for i in range(iFieldCount)]
+            if sVariable not in field_names:
+                logger.error(f'Variable "{sVariable}" not found in target mesh')
+                logger.error(f'Available fields: {", ".join(field_names)}')
+                pDataset = None
+                return False
+
+            logger.info(f'Extracting variable: {sVariable}')
+
+            # Validate feature count matches source
+            if self.nCell_source > 0 and self.nCell_target != self.nCell_source:
+                logger.warning(f'Feature count mismatch: target={self.nCell_target}, source={self.nCell_source}')
+
+            # Extract variable data from features
+            data_list = []
+            pLayer.ResetReading()
+            pFeature = pLayer.GetNextFeature()
+            feature_count = 0
+
+            while pFeature is not None:
+                pGeometry = pFeature.GetGeometryRef()
+                if pGeometry is not None:
+                    sGeometry_type = pGeometry.GetGeometryName()
+                    if sGeometry_type == 'POLYGON':
+                        try:
+                            field_value = pFeature.GetField(sVariable)
+                            if field_value is not None:
+                                data_list.append(field_value)
+                            else:
+                                # Handle None values as NaN
+                                data_list.append(np.nan)
+                                logger.warning(f'Feature {feature_count} has None value for {sVariable}')
+                        except Exception as e:
+                            logger.warning(f'Error reading field {sVariable} from feature {feature_count}: {e}')
+                            data_list.append(np.nan)
+                    else:
+                        logger.warning(f'Feature {feature_count} has unsupported geometry type: {sGeometry_type}')
+                        data_list.append(np.nan)
+                else:
+                    logger.warning(f'Feature {feature_count} has no geometry')
+                    data_list.append(np.nan)
+
+                feature_count += 1
+                pFeature = pLayer.GetNextFeature()
+
+            # Close dataset
+            pDataset = None
+
+            if not data_list:
+                logger.error('No data extracted from target mesh')
+                return False
+
+            # Convert to numpy array
+            data = np.array(data_list, dtype=np.float64)
+
+            # Validate data
+            valid_data_mask = np.isfinite(data)
+            valid_data_count = np.sum(valid_data_mask)
+
+            if valid_data_count == 0:
+                logger.error(f'All values for variable "{sVariable}" are invalid (NaN/Inf)')
+                return False
+
+            if valid_data_count < len(data):
+                logger.warning(f'{len(data) - valid_data_count} of {len(data)} values are invalid')
+
+            # Log data statistics
+            valid_values = data[valid_data_mask]
+            logger.info(f'Data statistics for "{sVariable}":')
+            logger.info(f'  - Valid values: {valid_data_count}/{len(data)}')
+            logger.info(f'  - Min: {np.min(valid_values):.4f}')
+            logger.info(f'  - Max: {np.max(valid_values):.4f}')
+            logger.info(f'  - Mean: {np.mean(valid_values):.4f}')
+            logger.info(f'  - Std: {np.std(valid_values):.4f}')
+
+            # Create masked connectivity array
+            connectivity_masked = np.ma.masked_where(
+                self.aConnectivity == -1,
+                self.aConnectivity
+            )
+
+            # Validate connectivity indices
+            valid_connectivity = self.aConnectivity[self.aConnectivity >= 0]
+            if len(valid_connectivity) > 0:
+                max_vertex_idx = len(self.aVertex_longititude) - 1
+                if np.max(valid_connectivity) > max_vertex_idx:
+                    logger.error(f'Connectivity contains invalid vertex index: max={np.max(valid_connectivity)}, vertices={len(self.aVertex_longititude)}')
+                    return False
+
+            # Transform to GeoVista unstructured mesh
+            logger.info('Creating GeoVista mesh...')
+            mesh = gv.Transform.from_unstructured(
+                self.aVertex_longititude,
+                self.aVertex_latitude,
+                connectivity=connectivity_masked,
+                crs=crs
+            )
+
+            logger.info(f'Created mesh with {mesh.n_cells} cells and {mesh.n_points} points')
+
+            # Attach data to mesh
+            name = sVariable.capitalize()
+            sUnit = sUnit_in if sUnit_in is not None else ""
+            mesh.cell_data[name] = data
+
+            # Create 3D plotter
+            plotter = gv.GeoPlotter()
+
+            # Configure scalar bar (colorbar) appearance
+            sargs = {
+                "title": f"{name} / {sUnit}" if sUnit else name,
+                "shadow": True,
+                "title_font_size": 10,
+                "label_font_size": 10,
+                "fmt": "%.2f",  # Floating point formatting for statistics
+                "n_labels": 5,
+            }
+
+            # Add mesh to plotter with colormap
+            plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs, cmap=sColormap)
+
+            # Configure camera position and focus
+            try:
+                focal_point = gv.geodesic.to_cartesian(
+                    [dLongitude_focus],
+                    [dLatitude_focus]
+                )[0]
+
+                camera_position = gv.geodesic.to_cartesian(
+                    [dLongitude_focus],
+                    [dLatitude_focus],
+                    radius=gv.common.RADIUS * 6
+                )[0]
+
+                plotter.camera.focal_point = focal_point
+                plotter.camera.position = camera_position
+                plotter.camera.zoom(dZoom_factor)
+
+                logger.debug(f'Camera configured: focal={focal_point}, position={camera_position}')
+            except Exception as e:
+                logger.warning(f'Error setting camera position: {e}. Using default view.')
+
+            # Add geographic context
+            if iFlag_show_coastlines:
+                try:
+                    plotter.add_coastlines()
+                    logger.debug('Added coastlines overlay')
+                except Exception as e:
+                    logger.warning(f'Could not add coastlines: {e}')
+
+            # Add coordinate axes
+            try:
+                plotter.add_axes()
+                logger.debug('Added coordinate axes')
+            except Exception as e:
+                logger.warning(f'Could not add axes: {e}')
+
+            # Add graticule (coordinate grid)
+            if iFlag_show_graticule:
+                try:
+                    plotter.add_graticule(show_labels=True)
+                    logger.debug('Added coordinate graticule with labels')
+                except Exception as e:
+                    logger.warning(f'Could not add graticule: {e}')
+
+            # Output or display
+            if sFilename_out is not None:
+                # Save screenshot
+                try:
+                    plotter.screenshot(sFilename_out)
+                    logger.info(f'✓ Visualization saved to: {sFilename_out}')
+
+                    # Verify file was created
+                    if os.path.exists(sFilename_out):
+                        file_size = os.path.getsize(sFilename_out)
+                        logger.info(f'  File size: {file_size / 1024:.1f} KB')
+                    else:
+                        logger.warning(f'Screenshot command executed but file not found: {sFilename_out}')
+
+                    plotter.close()
+                    return True
+
+                except Exception as e:
+                    logger.error(f'Failed to save screenshot: {e}')
+                    logger.error(f'Traceback: {traceback.format_exc()}')
+                    plotter.close()
+                    return False
+            else:
+                # Interactive display
+                try:
+                    logger.info('Opening interactive visualization window...')
+                    plotter.show()
+                    return True
+                except Exception as e:
+                    logger.error(f'Failed to display interactive visualization: {e}')
+                    logger.error(f'Ensure display environment is available (X11, Wayland, etc.)')
+                    logger.error(f'Traceback: {traceback.format_exc()}')
+                    plotter.close()
+                    return False
+
+        except ImportError as e:
+            logger.error(f'Missing required GeoVista dependencies: {e}')
+            return False
+
+        except Exception as e:
+            logger.error(f'Unexpected error during target mesh visualization: {e}')
+            logger.error(f'Error type: {type(e).__name__}')
+            logger.error(f'Traceback: {traceback.format_exc()}')
+            return False
 
     def _process_single_polygon(self, polygon, aFilename_source_raster, gdal_warp_options_base, feature_id):
         """
-        Process a single polygon with GDAL Warp
-        Returns: (dataset, data_array, geotransform) or (None, None, None) on failure
+        Process a single polygon with GDAL Warp operation.
+
+        Args:
+            polygon: OGR Polygon geometry to clip raster
+            aFilename_source_raster: List of source raster filenames
+            gdal_warp_options_base: Base GDAL warp options dictionary
+            feature_id: Feature identifier for logging
+
+        Returns:
+            tuple: (dataset, data_array, geotransform) or (None, None, None) on failure
+
+        Raises:
+            TimeoutError: If operation exceeds WARP_TIMEOUT_SECONDS
         """
         try:
             # Use WKT for faster performance
@@ -1164,11 +2002,11 @@ class uraster:
 
             # Set a timeout for the operation (using alarm signal on Unix)
             def timeout_handler(signum, frame):
-                raise TimeoutError(f"GDAL Warp operation timed out after 30 seconds for feature {feature_id}")
+                raise TimeoutError(f"GDAL Warp operation timed out after {WARP_TIMEOUT_SECONDS} seconds for feature {feature_id}")
 
             if hasattr(signal, 'SIGALRM'):  # Unix systems only
                 signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(30)  # 30 second timeout
+                signal.alarm(WARP_TIMEOUT_SECONDS)
 
             logger.debug(f"Starting GDAL Warp for single polygon feature {feature_id}")
             pDataset_clip_warped = gdal.Warp('', aFilename_source_raster, options=pWrapOption)
@@ -1210,8 +2048,22 @@ class uraster:
 
     def _process_multipolygon_idl(self, multipolygon, aFilename_source_raster, gdal_warp_options_base, feature_id, dMissing_value):
         """
-        Process a multipolygon (IDL crossing) by handling each part separately and merging results
-        Returns: (merged_data_array, merged_geotransform) or (None, None) on failure
+        Process a multipolygon that crosses the International Date Line (IDL).
+
+        Handles IDL-crossing features by processing each polygon part separately
+        and merging the results into a single data array.
+
+        Args:
+            multipolygon: OGR MultiPolygon geometry that crosses IDL
+            aFilename_source_raster: List of source raster filenames
+            gdal_warp_options_base: Base GDAL warp options dictionary
+            feature_id: Feature identifier for logging
+            dMissing_value: Missing/NoData value for the raster
+
+        Returns:
+            tuple: (merged_data_array, merged_geotransform) or (None, None) on failure
+            - merged_data_array: 1D array containing all valid data values
+            - merged_geotransform: Geotransform from first polygon part
         """
         try:
             nGeometries = multipolygon.GetGeometryCount()
@@ -1257,9 +2109,21 @@ class uraster:
 
     def _merge_raster_parts(self, data_arrays, transforms, feature_id, dMissing_value):
         """
-        Merge multiple raster arrays from IDL-split polygons
-        Returns only valid data as a 1D array for statistics calculation
-        Returns: (merged_1D_array, dummy_transform)
+        Merge multiple raster arrays from IDL-split polygons into a single data array.
+
+        Extracts all valid (non-missing) data values from multiple raster arrays
+        and concatenates them into a single 1D array for statistics calculation.
+
+        Args:
+            data_arrays: List of numpy arrays from different polygon parts
+            transforms: List of geotransforms (one per data array)
+            feature_id: Feature identifier for logging
+            dMissing_value: Missing/NoData value to exclude from results
+
+        Returns:
+            tuple: (merged_1D_array, first_transform)
+            - merged_1D_array: 1D array containing all valid data values
+            - first_transform: Geotransform from first polygon part (dummy value)
         """
         try:
             if len(data_arrays) == 1:

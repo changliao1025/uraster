@@ -1,19 +1,17 @@
 import os
-import os
 # Import GDAL spatial reference
 from osgeo import osr
 from osgeo import gdal
 # Define a class named 'sraster'
 from pyearth.toolbox.management.raster.reproject import reproject_raster_gdalwarp
-from uraster.mesh.raster.create_square_mesh import create_square_mesh
-from uraster.mesh.raster.create_latlon_mesh import create_latlon_mesh
+from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
+from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
 
 pSpatialRef_wgs84 = osr.SpatialReference()
 pSpatialRef_wgs84.ImportFromEPSG(4326)
 wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
 class sraster:
-    sFilename = None
-    sFilename_mesh = None
+
     def __init__(self, sFilename_in=None):
         # File path
 
@@ -40,12 +38,23 @@ class sraster:
         #check the file exists
         if sFilename_in is not None:
             if os.path.isfile(sFilename_in):
-                #setup the mesh filename
-                self.sFilename_mesh = sFilename_in.replace('.tif', '_mesh.geojson')
+                #setup the mesh filename using robust path handling
+                base, ext = os.path.splitext(sFilename_in)
+                self.sFilename_mesh = f"{base}_mesh.geojson"
             else:
                 raise FileNotFoundError(f"File does not exist: {sFilename_in}")
         # NoData value
         self.dNoData = None
+
+        # Resolution attributes
+        self.dResolution_x = None
+        self.dResolution_y = None
+
+        # WGS84 extent bounds
+        self.dLongitude_left = None
+        self.dLongitude_right = None
+        self.dLatitude_bottom = None
+        self.dLatitude_top = None
         return
 
     def read_metadata(self):
@@ -58,42 +67,66 @@ class sraster:
         if not os.path.isfile(sFilename):
             raise FileNotFoundError(f"File does not exist: {sFilename}")
 
-        pDataset = gdal.Open(sFilename)
-        if pDataset is None:
-            raise FileNotFoundError(f"Unable to open file: {sFilename}")
+        pDataset = None
+        try:
+            pDataset = gdal.Open(sFilename)
+            if pDataset is None:
+                raise RuntimeError(f"Unable to open file: {sFilename}")
 
-        self.sCrs = pDataset.GetProjection()
-        self.pSpatialRef.ImportFromWkt(self.sCrs)
-        self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
+            self.sCrs = pDataset.GetProjection()
+            self.pSpatialRef.ImportFromWkt(self.sCrs)
+            self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
 
-        self.iWidth = pDataset.RasterXSize
-        self.iHeight = pDataset.RasterYSize
-        self.iBandCount = pDataset.RasterCount
-        self.eType = pDataset.GetRasterBand(1).DataType if self.iBandCount > 0 else None
-        self.sDtype = gdal.GetDataTypeName(self.eType) if self.iBandCount > 0 else None
-        self.pTransform = pDataset.GetGeoTransform()
-        self.dResolution_x = self.pTransform[1]
-        self.dResolution_y = -self.pTransform[5]
-        self.dNoData = pDataset.GetRasterBand(1).GetNoDataValue() if self.iBandCount > 0 else None
+            self.iWidth = pDataset.RasterXSize
+            self.iHeight = pDataset.RasterYSize
+            self.iBandCount = pDataset.RasterCount
+            self.eType = pDataset.GetRasterBand(1).DataType if self.iBandCount > 0 else None
+            self.sDtype = gdal.GetDataTypeName(self.eType) if self.iBandCount > 0 else None
+            self.pTransform = pDataset.GetGeoTransform()
+            self.dResolution_x = self.pTransform[1]
+            self.dResolution_y = -self.pTransform[5]
+            self.dNoData = pDataset.GetRasterBand(1).GetNoDataValue() if self.iBandCount > 0 else None
 
-        #obtain the spatial extent
-        self.aExtent = (self.pTransform[0], self.pTransform[3], self.pTransform[1], self.pTransform[4])
+            # Calculate the actual spatial extent (minX, minY, maxX, maxY)
+            minX = self.pTransform[0]
+            maxY = self.pTransform[3]
+            maxX = minX + (self.iWidth * self.pTransform[1])
+            minY = maxY + (self.iHeight * self.pTransform[5])  # pTransform[5] is negative
+            self.aExtent = (minX, minY, maxX, maxY)
 
+            # If the spatial reference is not in WGS84, transform the extent to WGS84
+            if self.pSpatialRef_wkt != wkt_wgs84:
+                try:
+                    pSpatialRef_wgs84_target = osr.SpatialReference()
+                    pSpatialRef_wgs84_target.ImportFromEPSG(4326)
+                    transform = osr.CoordinateTransformation(self.pSpatialRef, pSpatialRef_wgs84_target)
 
-        #if the spatial reference is not in WGS84, transform the extent to WGS84
-        if not self.pSpatialRef_wkt == wkt_wgs84:
-            transform = osr.CoordinateTransformation(self.pSpatialRef, osr.SpatialReference().ImportFromEPSG(4326))
-            (minX, maxY, _) = transform.TransformPoint(self.aExtent[0], self.aExtent[1])
-            (maxX, minY, _) = transform.TransformPoint(self.aExtent[0] + self.aExtent[2], self.aExtent[1] + self.aExtent[3])
-            self.aExtent_wgs84 = (minX, minY, maxX, maxY)
-        else:
+                    # Transform all 4 corners to handle rotated rasters
+                    (x1, y1, _) = transform.TransformPoint(minX, minY)  # Lower-left
+                    (x2, y2, _) = transform.TransformPoint(maxX, minY)  # Lower-right
+                    (x3, y3, _) = transform.TransformPoint(maxX, maxY)  # Upper-right
+                    (x4, y4, _) = transform.TransformPoint(minX, maxY)  # Upper-left
 
-            self.aExtent_wgs84 = self.aExtent
+                    # Get the bounding box of all transformed corners
+                    all_x = [x1, x2, x3, x4]
+                    all_y = [y1, y2, y3, y4]
+                    self.aExtent_wgs84 = (min(all_x), min(all_y), max(all_x), max(all_y))
 
-        self.dLongitude_left = self.aExtent_wgs84[0]
-        self.dLongitude_right = self.aExtent_wgs84[2]
-        self.dLatitude_bottom = self.aExtent_wgs84[1]
-        self.dLatitude_top = self.aExtent_wgs84[3]
+                except Exception as e:
+                    print(f"Warning: Failed to transform extent to WGS84: {e}")
+                    self.aExtent_wgs84 = self.aExtent
+            else:
+                self.aExtent_wgs84 = self.aExtent
+
+            self.dLongitude_left = self.aExtent_wgs84[0]
+            self.dLongitude_right = self.aExtent_wgs84[2]
+            self.dLatitude_bottom = self.aExtent_wgs84[1]
+            self.dLatitude_top = self.aExtent_wgs84[3]
+
+        finally:
+            # Ensure dataset is properly closed
+            if pDataset is not None:
+                pDataset = None
 
         return
 
@@ -116,72 +149,88 @@ class sraster:
 
     def create_raster_mesh(self):
         """
-        Create a raster mesh from the given mesh filename.
+        Create a raster mesh from the raster file.
+        Creates either a square mesh (for projected CRS) or a lat/lon mesh (for WGS84).
         """
 
         #check raster file sFilename exists
         if not os.path.isfile(self.sFilename):
             raise FileNotFoundError(f"Raster file does not exist: {self.sFilename}")
 
+        # Ensure metadata has been read
+        if self.iWidth is None or self.iHeight is None:
+            raise RuntimeError("Metadata not loaded. Call read_metadata() first.")
+
         #check mesh file exists, if yes, delete it
         if self.sFilename_mesh and os.path.isfile(self.sFilename_mesh):
             os.remove(self.sFilename_mesh)
 
-        #Placeholder for actual mesh creation logic
-        #we need to use pyflowline approach to create the mesh?
-        if not self.pSpatialRef_wkt == wkt_wgs84:
-            dX_left_in= self.aExtent[0]
-            dY_bot_in= self.aExtent[1]
-            dResolution_meter_in= self.dResolution_x,
-            ncolumn_in= self.iWidth
-            nrow_in= self.iHeight
-            sFilename_output_in= self.sFilename_mesh
+        # Create mesh based on coordinate system
+        if self.pSpatialRef_wkt != wkt_wgs84:
+            # Projected coordinate system - use square mesh
+            dX_left_in = self.aExtent[0]
+            dY_bot_in = self.aExtent[1]
+            dResolution_meter_in = self.dResolution_x  # Fixed: removed trailing comma
+            ncolumn_in = self.iWidth
+            nrow_in = self.iHeight
+            sFilename_output_in = self.sFilename_mesh
             pProjection_reference_in = self.pSpatialRef_wkt
+
             create_square_mesh(dX_left_in, dY_bot_in,
                         dResolution_meter_in,
                         ncolumn_in, nrow_in,
                         sFilename_output_in,
                         pProjection_reference_in)
-            pass
-
         else:
-            dLongitude_left_in= self.dLongitude_left
-            dLatitude_bot_in= self.dLatitude_bottom
-            dResolution_degree_in= self.dResolution_x
-            ncolumn_in= self.iWidth
-            nrow_in= self.iHeight
-            sFilename_output_in= self.sFilename_mesh
+            # WGS84 geographic coordinate system - use lat/lon mesh
+            dLongitude_left_in = self.dLongitude_left
+            dLatitude_bot_in = self.dLatitude_bottom
+            dResolution_degree_in = self.dResolution_x
+            ncolumn_in = self.iWidth
+            nrow_in = self.iHeight
+            sFilename_output_in = self.sFilename_mesh
+
             create_latlon_mesh(dLongitude_left_in,
                        dLatitude_bot_in,
                        dResolution_degree_in,
                        ncolumn_in, nrow_in,
                        sFilename_output_in)
 
-            pass
-
-
+        return self.sFilename_mesh
 
     def convert_to_wgs84(self):
         """
         Convert the raster to WGS84 coordinate system.
+        Returns a new sraster instance for the reprojected file.
         """
+        # Check if already in WGS84
+        if self.pSpatialRef_wkt == wkt_wgs84:
+            print("Raster is already in WGS84 coordinate system.")
+            return self
+
         # Define the target spatial reference (WGS84)
         pSpatialRef_wgs84 = osr.SpatialReference()
         pSpatialRef_wgs84.ImportFromEPSG(4326)
         pSpatialRef_wgs84_wkt = pSpatialRef_wgs84.ExportToWkt()
 
-        #define a new filename for the converted raster
-        sFilename_raster_wgs84 = self.sFilename.replace('.tif', '_wgs84.tif')
-        #delete the file if it already exists
+        # Define a new filename for the converted raster using robust path handling
+        base, ext = os.path.splitext(self.sFilename)
+        sFilename_raster_wgs84 = f"{base}_wgs84{ext}"
+
+        # Delete the file if it already exists
         if os.path.isfile(sFilename_raster_wgs84):
             os.remove(sFilename_raster_wgs84)
-        #use/copy a function from the pyearth package to do the conversion
+
+        # Use/copy a function from the pyearth package to do the conversion
         reproject_raster_gdalwarp(self.sFilename, sFilename_raster_wgs84, pSpatialRef_wgs84_wkt,
-                              xRes=None, yRes=None,
+                              xRes = None, yRes = None,
                                sResampleAlg = 'near',
                                  iFlag_force_resolution_in = 0)
 
-        return sraster(sFilename=sFilename_raster_wgs84)
+        # Create and return a new sraster instance for the reprojected file
+        pRaster_wgs84 = sraster(sFilename_in=sFilename_raster_wgs84)
+        pRaster_wgs84.read_metadata()
+        return pRaster_wgs84
 
 
 
