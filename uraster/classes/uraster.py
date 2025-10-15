@@ -693,14 +693,12 @@ class uraster:
             self.aCenter_latitude = cell_lats_1d
             self.aConnectivity = connectivity
 
-<<<<<<< HEAD
             # Ensure aCellID matches the number of valid mesh cells
             if len(aCellID) != len(cell_lons_1d):
                 logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)}), truncating to match")
                 aCellID = aCellID[:len(cell_lons_1d)]
 
             self.aCellID = np.array(aCellID)
-=======
             # Calculate and store area statistics
             if area_list:
                 area_array = np.array(area_list)
@@ -718,7 +716,6 @@ class uraster:
                     self.dArea_min = 0.0
                     self.dArea_max = 0.0
                     self.dArea_mean = 0.0
->>>>>>> some update for class functions
 
             # Enhanced validation of final results
             validation_passed = True
@@ -1363,7 +1360,6 @@ class uraster:
             logger.error('Mesh connectivity not available. Build mesh topology first.')
             return False
 
-<<<<<<< HEAD
         mesh.cell_data[name] = self.aCellID
 
         # Plot the mesh.
@@ -1383,7 +1379,6 @@ class uraster:
         plotter.add_coastlines()
         plotter.add_axes()
         plotter.add_graticule(show_labels=True)
-=======
         if len(self.aVertex_longititude) == 0 or len(self.aVertex_latitude) == 0:
             logger.error('Mesh vertices are empty.')
             return False
@@ -1410,7 +1405,6 @@ class uraster:
             dZoom_factor = 1.4
 
         # Validate output file path if provided
->>>>>>> some update for class functions
         if sFilename_out is not None:
             if not isinstance(sFilename_out, str) or not sFilename_out.strip():
                 logger.error('Output filename must be a non-empty string')
