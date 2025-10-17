@@ -10,7 +10,7 @@ from osgeo import gdal, ogr, osr
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_extension
+
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
@@ -905,7 +905,7 @@ class uraster:
             return
 
         # Determine output vector format from filename extension
-        sVectorDriverName = get_vector_driver_from_extension(sFilename_vector_out)
+        sVectorDriverName = get_vector_driver_from_filename(sFilename_vector_out)
         pDriver_vector = ogr.GetDriverByName(sVectorDriverName)
 
         #check the input raster data format and decide gdal driver
@@ -1343,25 +1343,6 @@ class uraster:
             logger.error('Mesh connectivity not available. Build mesh topology first.')
             return False
 
-        mesh.cell_data[name] = self.aCellID
-
-        # Plot the mesh.
-        plotter = gv.GeoPlotter()
-        sargs = {"title": f"{name} / {sUnit}",
-               "shadow": True,
-                "title_font_size": 10,
-                    "label_font_size": 10,
-                        "fmt": "%.1f",
-        }
-        plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
-        focal_point = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus])[0]
-        camera_position = gv.geodesic.to_cartesian([dLongitude_focus], [dLatitude_focus], radius=gv.common.RADIUS *6)[0]
-        plotter.camera.focal_point = focal_point
-        plotter.camera.position = camera_position
-        plotter.camera.zoom(1.4)
-        plotter.add_coastlines()
-        plotter.add_axes()
-        plotter.add_graticule(show_labels=True)
         if len(self.aVertex_longititude) == 0 or len(self.aVertex_latitude) == 0:
             logger.error('Mesh vertices are empty.')
             return False
@@ -1451,6 +1432,9 @@ class uraster:
                 crs=crs
             )
 
+
+            mesh.cell_data[name] = self.aCellID
+
             logger.info(f'Created GeoVista mesh with {mesh.n_cells} cells and {mesh.n_points} points')
 
             # Create 3D plotter
@@ -1468,7 +1452,6 @@ class uraster:
 
             # Add mesh to plotter
             plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
-
             # Configure camera position and focus
             try:
                 focal_point = gv.geodesic.to_cartesian(

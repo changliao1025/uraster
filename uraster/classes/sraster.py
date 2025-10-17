@@ -3,7 +3,7 @@ import os
 from osgeo import osr
 from osgeo import gdal
 # Define a class named 'sraster'
-from pyearth.toolbox.management.raster.reproject import reproject_raster_gdalwarp
+from pyearth.toolbox.management.raster.reproject import reproject_raster
 from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
 from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
 
@@ -17,8 +17,8 @@ class sraster:
 
         self.sFilename = sFilename_in
         # Raster dimensions
-        self.iWidth = None
-        self.iHeight = None
+        self.ncolumn = None
+        self.nrow = None
         # Number of bands
         self.iBandCount = None
         # Data type (e.g., uint8, float32)
@@ -49,6 +49,8 @@ class sraster:
         # Resolution attributes
         self.dResolution_x = None
         self.dResolution_y = None
+        self.nrow = None
+        self.ncolumn = None
 
         # WGS84 extent bounds
         self.dLongitude_left = None
@@ -77,8 +79,8 @@ class sraster:
             self.pSpatialRef.ImportFromWkt(self.sCrs)
             self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
 
-            self.iWidth = pDataset.RasterXSize
-            self.iHeight = pDataset.RasterYSize
+            self.ncolumn = pDataset.RasterXSize
+            self.nrow = pDataset.RasterYSize
             self.iBandCount = pDataset.RasterCount
             self.eType = pDataset.GetRasterBand(1).DataType if self.iBandCount > 0 else None
             self.sDtype = gdal.GetDataTypeName(self.eType) if self.iBandCount > 0 else None
@@ -90,8 +92,8 @@ class sraster:
             # Calculate the actual spatial extent (minX, minY, maxX, maxY)
             minX = self.pTransform[0]
             maxY = self.pTransform[3]
-            maxX = minX + (self.iWidth * self.pTransform[1])
-            minY = maxY + (self.iHeight * self.pTransform[5])  # pTransform[5] is negative
+            maxX = minX + (self.ncolumn * self.pTransform[1])
+            minY = maxY + (self.nrow * self.pTransform[5])  # pTransform[5] is negative
             self.aExtent = (minX, minY, maxX, maxY)
 
             # If the spatial reference is not in WGS84, transform the extent to WGS84
@@ -135,8 +137,8 @@ class sraster:
         Print raster metadata information.
         """
         print(f"Filename: {self.sFilename}")
-        print(f"Width: {self.iWidth}")
-        print(f"Height: {self.iHeight}")
+        print(f"Width: {self.ncolumn}")
+        print(f"Height: {self.nrow}")
         print(f"Band Count: {self.iBandCount}")
         print(f"Data Type: {self.sDtype}")
         print(f"NoData Value: {self.dNoData}")
@@ -158,7 +160,7 @@ class sraster:
             raise FileNotFoundError(f"Raster file does not exist: {self.sFilename}")
 
         # Ensure metadata has been read
-        if self.iWidth is None or self.iHeight is None:
+        if self.ncolumn is None or self.nrow is None:
             raise RuntimeError("Metadata not loaded. Call read_metadata() first.")
 
         #check mesh file exists, if yes, delete it
@@ -171,8 +173,8 @@ class sraster:
             dX_left_in = self.aExtent[0]
             dY_bot_in = self.aExtent[1]
             dResolution_meter_in = self.dResolution_x  # Fixed: removed trailing comma
-            ncolumn_in = self.iWidth
-            nrow_in = self.iHeight
+            ncolumn_in = self.ncolumn
+            nrow_in = self.nrow
             sFilename_output_in = self.sFilename_mesh
             pProjection_reference_in = self.pSpatialRef_wkt
 
@@ -186,8 +188,8 @@ class sraster:
             dLongitude_left_in = self.dLongitude_left
             dLatitude_bot_in = self.dLatitude_bottom
             dResolution_degree_in = self.dResolution_x
-            ncolumn_in = self.iWidth
-            nrow_in = self.iHeight
+            ncolumn_in = self.ncolumn
+            nrow_in = self.nrow
             sFilename_output_in = self.sFilename_mesh
 
             create_latlon_mesh(dLongitude_left_in,
@@ -222,7 +224,7 @@ class sraster:
             os.remove(sFilename_raster_wgs84)
 
         # Use/copy a function from the pyearth package to do the conversion
-        reproject_raster_gdalwarp(self.sFilename, sFilename_raster_wgs84, pSpatialRef_wgs84_wkt,
+        reproject_raster(self.sFilename, sFilename_raster_wgs84, pSpatialRef_wgs84_wkt,
                               xRes = None, yRes = None,
                                sResampleAlg = 'near',
                                  iFlag_force_resolution_in = 0)
