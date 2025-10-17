@@ -11,12 +11,11 @@ from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_extension
-from pyearth.gis.gdal.read.raster.gdal_read_geotiff_file import gdal_read_geotiff_file
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
-from pyearth.gis.gdal.gdal_vector_format_support import get_format_from_extension
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename, get_vector_format_from_filename
 
 from .sraster import sraster
 
@@ -400,13 +399,6 @@ class uraster:
         """
 
         try:
-            # Determine file format and get driver
-            sFormat = get_format_from_extension(self.sFilename_source_mesh)
-            pDriver = ogr.GetDriverByName(sFormat)
-            if pDriver is None:
-                logger.error(f'{sFormat} driver not available.')
-                return None
-
             # Open the input data source
             pDataset = ogr.Open(self.sFilename_source_mesh, 0)  # Read-only
             if pDataset is None:
@@ -505,7 +497,7 @@ class uraster:
                                 dArea = calculate_polygon_area(lons, lats)
                                 area_list.append(dArea)
                             except Exception as area_error:
-                                logger.warning(f'Could not calculate area for feature {feature_count}: {area_error}')
+                                logger.warning(f'Could not calculate area for feature {iFeature_index}: {area_error}')
                                 area_list.append(0.0)
 
                             # Get field data if available
@@ -1336,15 +1328,6 @@ class uraster:
 
         Returns:
             bool: True if visualization successful, False otherwise
-
-<<<<<<< HEAD
-        name = 'ID'
-        sUnit = ""
-=======
-        Raises:
-            ImportError: If geovista package is not installed
-            ValueError: If mesh topology data is not available or invalid
->>>>>>> some update for class functions
 
         Note:
             - Requires 'geovista' package: pip install geovista
