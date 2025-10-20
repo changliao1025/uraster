@@ -1,34 +1,38 @@
-import os
-import glob
+import os, sys, platform
+sPlatform_os = platform.system()
+
+if sPlatform_os == 'Windows':
+    sPath  = 'C:\\workspace\\python\\uraster\\uraster'
+    sys.path.append(os.path.dirname(sPath))
+    sFilename_source_mesh = 'C:\\scratch\\04model\\pyhexwatershed\\global\\pyflowline20250926004\\mpas.geojson' #use the L10-100 test mesh
+    sFilename_hydrosheds_dem = 'Z:\\00raw\\hydrology\\hydrosheds\\hydrosheds\\hyd_glo_dem_15s.tif'
+else:
+    #macOS
+    if sPlatform_os == 'Darwin':
+        sFilename_source_mesh = '/Users/liao313/scratch/04model/pyhexwatershed/global/pyflowline20250926004//mpas.geojson' #use the L10-100 test mesh
+        sFilename_hydrosheds_dem = '/Users/liao313/scratch/00raw/hydrology/hydrosheds/hydrosheds/hyd_glo_dem_15s.tif'
+    else:
+        #linux
+        sFilename_source_mesh = '/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926004/mpas.geojson' #use the L10-100 test mesh
+        sFilename_hydrosheds_dem = '/compyfs/liao313/00raw/hydrology/hydrosheds/hydrosheds/hyd_glo_dem_15s.tif'
+
 from uraster.classes.uraster import uraster
-
-
-#create a uraster object using the dict
-
 aConfig=dict()
-aConfig['sFilename_target_mesh']='/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926003/mpas.geojson' #use the L10-100 test mesh
+aConfig['sFilename_source_mesh']= sFilename_source_mesh #use the L10-100 test mesh
+aFilename_source_raster = []
 
-aFilename_source_raster = list()
-#find all the tif under the gebco folder
-sFolder_gebco = '/compyfs/liao313/00raw/dem/global/gebco/normal/'
-sPattern_gebco = os.path.join(sFolder_gebco, '*.tif')
-for sFilename in glob.glob(sPattern_gebco):
-    aFilename_source_raster.append(sFilename) #dem from gebco 2020
-
-aConfig['aFilename_source_raster']=aFilename_source_raster  #resolution of the input raster in degrees
-
-
-sFilename_hydrosheds_dem = '/compyfs/liao313/00raw/hydrology/hydrosheds/hydrosheds/hyd_glo_dem_15s.tif'
-aFilename_source_raster.clear()
 aFilename_source_raster.append(sFilename_hydrosheds_dem) #dem from hydros
+aConfig['aFilename_source_raster']= aFilename_source_raster
 pRaster = uraster(aConfig)
 
-#print the uraster object attributes
+pRaster.setup()
+pRaster.report_inputs()
+pRaster.visualize_source_mesh()
 
-pRaster.check_raster_files()
-pRaster.print_raster_info()
-#specify the output file, which is a vector file similar to the mesh file
-sFilename_out_vector = '/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926003/mpas_uraster.shp'
 
-#sFolder_raster_out = '/compyfs/liao313/04model/pyhexwatershed/global/dem'
-pRaster.remap_raster_to_uraster(sFilename_out_vector)
+#sFilename_out_vector = '/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926003/mpas_uraster.geojson'
+#pRaster.run_remap(sFilename_out_vector)
+#pRaster.report_outputs()
+#pRaster.visualize_target_mesh()
+
+print('done')
