@@ -6,15 +6,18 @@ if sPlatform_os == 'Windows':
     sys.path.append(os.path.dirname(sPath))
     sFilename_source_mesh = 'C:\\scratch\\04model\\pyhexwatershed\\global\\pyflowline20250926004\\mpas.geojson' #use the L10-100 test mesh
     sFilename_hydrosheds_dem = 'Z:\\00raw\\hydrology\\hydrosheds\\hydrosheds\\hyd_glo_dem_15s.tif'
-
 else:
-    sFilename_source_mesh = '/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926004/mpas.geojson' #use the L10-100 test mesh
-    sFilename_hydrosheds_dem = '/compyfs/liao313/00raw/hydrology/hydrosheds/hydrosheds/hyd_glo_dem_15s.tif'
+    #macOS
+    if sPlatform_os == 'Darwin':
+        sFilename_source_mesh = '/Users/liao313/scratch/04model/pyhexwatershed/global/pyflowline20250926004//mpas.geojson' #use the L10-100 test mesh
+        sFilename_hydrosheds_dem = '/Users/liao313/scratch/00raw/hydrology/hydrosheds/hydrosheds/hyd_glo_dem_15s.tif'
+    else:
+        #linux
+        sFilename_source_mesh = '/compyfs/liao313/04model/pyhexwatershed/global/pyflowline20250926004/mpas.geojson' #use the L10-100 test mesh
+        sFilename_hydrosheds_dem = '/compyfs/liao313/00raw/hydrology/hydrosheds/hydrosheds/hyd_glo_dem_15s.tif'
 
 from uraster.classes.uraster import uraster
-
 aConfig=dict()
-
 aConfig['sFilename_source_mesh']= sFilename_source_mesh #use the L10-100 test mesh
 aFilename_source_raster = []
 
@@ -31,3 +34,5 @@ pRaster.visualize_source_mesh()
 #pRaster.run_remap(sFilename_out_vector)
 #pRaster.report_outputs()
 #pRaster.visualize_target_mesh()
+
+print('done')
