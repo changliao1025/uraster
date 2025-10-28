@@ -26,14 +26,15 @@ aFilename_source_raster = []
 
 aFilename_source_raster.append(sFilename_hydrosheds_dem) #dem from hydros
 aConfig['aFilename_source_raster']= aFilename_source_raster
+aConfig['sFilename_target_mesh']= sFilename_out_vector
 pRaster = uraster(aConfig)
 
 pRaster.setup()
-pRaster.report_inputs()
+#pRaster.report_inputs()
 #pRaster.visualize_source_mesh()
 
-pRaster.run_remap(sFilename_out_vector)
-pRaster.report_outputs()
+#pRaster.run_remap(sFilename_out_vector)
+#pRaster.report_outputs()
 pRaster.visualize_target_mesh()
 
 print('done')

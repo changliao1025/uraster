@@ -393,7 +393,6 @@ class uraster:
 
         return recommended_method, recommended_code
 
-
     def rebuild_mesh_topology(self):
         """
         Rebuild mesh topology from source mesh file by extracting vertices,
@@ -465,16 +464,14 @@ class uraster:
                     continue
 
                 sGeometry_type = pGeometry.GetGeometryName()
-
                 if sGeometry_type == 'POLYGON':
                     try:
                         # Validate geometry before processing
                         if not pGeometry.IsValid():
-                            logger.warning(f'Feature {iFeature_index} has invalid geometry, skipping')
-                            iFeature_index += 1
+                            logger.warning(f'Feature {iFeature_index} has invalid geometry')
                             invalid_geometry_count += 1
                             print(pGeometry.ExportToWkt())
-                            continue
+                            #continue
                         # Get coordinates of the polygon
                         aCoord = get_geometry_coordinates(pGeometry)
                         if aCoord is not None and len(aCoord) > 0:
@@ -849,7 +846,7 @@ class uraster:
 
         print("="*60)
 
-    def run_remap(self, sFilename_vector_out,
+    def run_remap(self, sFilename_vector_out = None,
                     sFilename_source_mesh_in = None,
                     aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
@@ -894,6 +891,11 @@ class uraster:
             sFilename_source_mesh = self.sFilename_source_mesh
         else:
             sFilename_source_mesh = sFilename_source_mesh_in
+
+        if sFilename_vector_out is None:
+            sFilename_vector_out = self.sFilename_target_mesh
+        else:
+            self.sFilename_target_mesh = sFilename_vector_out
 
         #check input files
         for sFilename_raster in aFilename_source_raster:
@@ -1049,8 +1051,6 @@ class uraster:
             dLon_max = np.max(aCoord[:,0])
             if dLon_max - dLon_min > IDL_LONGITUDE_THRESHOLD:  # Use constant
                 if not pPolygon.IsValid():
-                    pPolygon.FlattenTo2D()
-                    print(pPolygon.ExportToWkt())
                     logger.warning(f'Feature {i} has invalid geometry crossing IDL')
 
                 # Create multipolygon to handle IDL crossing
@@ -1070,12 +1070,6 @@ class uraster:
                     polygon_part.AddGeometry(ring)
                     # check validity
                     if not polygon_part.IsValid():
-                        aCoord = get_geometry_coordinates(pPolygon)
-                        pPolygon_new = convert_idl_polygon_to_valid_polygon(pPolygon)
-                        pPolygon_new.FlattenTo2D()
-                        wskt= pPolygon.ExportToWkt()
-                        logger.warning(f'Feature {i} has invalid geometry crossing IDL.')
-                        gdal_write_wkt_to_vector_file(wskt, 'invalid_idl_polygon.geojson')
                         polygon_part.FlattenTo2D()
                         print(polygon_part.ExportToWkt())
                         logger.warning(f'Polygon part of feature {i} is invalid after splitting at IDL.')
@@ -1236,7 +1230,15 @@ class uraster:
                         pDataset_clip = None
 
                 aCoords_gcs = get_geometry_coordinates(pPolygon)
-                dArea = calculate_polygon_area(aCoords_gcs[:,0], aCoords_gcs[:,1])
+                sGeometry_type = pPolygon.GetGeometryName()
+                if sGeometry_type == 'POLYGON':
+                    dArea = calculate_polygon_area(aCoords_gcs[:,0], aCoords_gcs[:,1])
+                else:
+                    dArea = 0.0
+                    for iPart in range(pPolygon.GetGeometryCount()):
+                        pPolygon_part = pPolygon.GetGeometryRef(iPart)
+                        aCoords_part = get_geometry_coordinates(pPolygon_part)
+                        dArea += calculate_polygon_area(aCoords_part[:,0], aCoords_part[:,1])
                 #create a polygon feature to save the output
                 pFeature_out.SetGeometry(pPolygon.Clone())
                 pFeature_out.SetField('id', i)
@@ -1765,7 +1767,7 @@ class uraster:
                 pGeometry = pFeature.GetGeometryRef()
                 if pGeometry is not None:
                     sGeometry_type = pGeometry.GetGeometryName()
-                    if sGeometry_type == 'POLYGON':
+                    if sGeometry_type == 'POLYGON' or sGeometry_type == 'MULTIPOLYGON':
                         try:
                             field_value = pFeature.GetField(sVariable)
                             if field_value is not None:
