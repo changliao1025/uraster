@@ -9,20 +9,25 @@ import numpy as np
 from osgeo import gdal, ogr, osr
 from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename, get_vector_format_from_filename
+from pyearth.gis.gdal.write.vector.gdal_write_wkt_to_vector_file import gdal_write_wkt_to_vector_file
 
-from .sraster import sraster
+from pyearth.gis.geometry.convert_idl_polygon_to_valid_polygon import convert_idl_polygon_to_valid_polygon
+
+from uraster.classes.sraster import sraster
 
 # Set up logging for crash detection
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
+pDriver_geojson = ogr.GetDriverByName('GeoJSON')
+pDriver_shp = ogr.GetDriverByName('ESRI Shapefile')
+srs_wgs84 = osr.SpatialReference()
+srs_wgs84.ImportFromEPSG(4326)
 def signal_handler(signum, frame):
     """Handle system signals (like SIGSEGV) for crash detection"""
     logger.error(f"Received signal {signum}. Process may have crashed.")
@@ -845,8 +850,8 @@ class uraster:
         print("="*60)
 
     def run_remap(self, sFilename_vector_out,
-                    sFilename_target_mesh_in = None,
-                                aFilename_source_raster_in = None,
+                    sFilename_source_mesh_in = None,
+                    aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
                   iFlag_save_clipped_raster_in=0,
                   sFolder_raster_out_in = None,
@@ -859,7 +864,7 @@ class uraster:
 
         Args:
             sFilename_vector_out (str): Output vector file path with computed statistics
-            sFilename_target_mesh_in (str, optional): Input mesh polygon file.
+            sFilename_source_mesh_in (str, optional): Input mesh polygon file.
                 Defaults to configured target mesh.
             aFilename_source_raster_in (list, optional): List of source raster files.
                 Defaults to configured source rasters.
@@ -885,10 +890,10 @@ class uraster:
         else:
             aFilename_source_raster = aFilename_source_raster_in
 
-        if sFilename_target_mesh_in is None:
-            sFilename_target_mesh = self.sFilename_target_mesh
+        if sFilename_source_mesh_in is None:
+            sFilename_source_mesh = self.sFilename_source_mesh
         else:
-            sFilename_target_mesh = sFilename_target_mesh_in
+            sFilename_source_mesh = sFilename_source_mesh_in
 
         #check input files
         for sFilename_raster in aFilename_source_raster:
@@ -898,16 +903,14 @@ class uraster:
                 print('The raster file does not exist!')
                 return
 
-        if os.path.exists(sFilename_target_mesh ):
+        if os.path.exists(sFilename_source_mesh):
             pass
         else:
             print('The vector mesh file does not exist!')
             return
 
         # Determine output vector format from filename extension
-        sVectorDriverName = get_vector_driver_from_filename(sFilename_vector_out)
-        pDriver_vector = ogr.GetDriverByName(sVectorDriverName)
-
+        pDriver_vector = get_vector_driver_from_filename(sFilename_vector_out)
         #check the input raster data format and decide gdal driver
         if sFormat_in is not None:
             sDriverName = sFormat_in
@@ -918,7 +921,7 @@ class uraster:
             #remove the file using the vector driver
             pDriver_vector.DeleteDataSource(sFilename_vector_out)
 
-        pDriver = gdal.GetDriverByName(sDriverName)
+        pDriver_raster = gdal.GetDriverByName(sDriverName)
 
         #get the raster file extension
         sFilename_raster = aFilename_source_raster[0]  #just use the first raster to get the extension
@@ -974,7 +977,7 @@ class uraster:
 
 
         #get the spatial reference of the mesh vector file
-        pDataset_mesh = ogr.Open( sFilename_target_mesh )
+        pDataset_mesh = ogr.Open( sFilename_source_mesh, 0 ) #0 means read-only. 1 means writeable.
         pLayer_mesh = pDataset_mesh.GetLayer(0)
         nFeature = pLayer_mesh.GetFeatureCount()
         pSpatialRef_target = pLayer_mesh.GetSpatialRef()
@@ -1044,9 +1047,10 @@ class uraster:
             aCoord = get_geometry_coordinates(pPolygon)
             dLon_min = np.min(aCoord[:,0])
             dLon_max = np.max(aCoord[:,0])
-
             if dLon_max - dLon_min > IDL_LONGITUDE_THRESHOLD:  # Use constant
                 if not pPolygon.IsValid():
+                    pPolygon.FlattenTo2D()
+                    print(pPolygon.ExportToWkt())
                     logger.warning(f'Feature {i} has invalid geometry crossing IDL')
 
                 # Create multipolygon to handle IDL crossing
@@ -1064,6 +1068,18 @@ class uraster:
                     # Create polygon from ring
                     polygon_part = ogr.Geometry(ogr.wkbPolygon)
                     polygon_part.AddGeometry(ring)
+                    # check validity
+                    if not polygon_part.IsValid():
+                        aCoord = get_geometry_coordinates(pPolygon)
+                        pPolygon_new = convert_idl_polygon_to_valid_polygon(pPolygon)
+                        pPolygon_new.FlattenTo2D()
+                        wskt= pPolygon.ExportToWkt()
+                        logger.warning(f'Feature {i} has invalid geometry crossing IDL.')
+                        gdal_write_wkt_to_vector_file(wskt, 'invalid_idl_polygon.geojson')
+                        polygon_part.FlattenTo2D()
+                        print(polygon_part.ExportToWkt())
+                        logger.warning(f'Polygon part of feature {i} is invalid after splitting at IDL.')
+
                     pMultipolygon.AddGeometry(polygon_part)  # Add polygon, not ring
 
                 #create a feature from the multipolygon and add it to the list
@@ -1097,6 +1113,8 @@ class uraster:
                 minY > dY_top or maxY < dY_bot or
                 not pPolygon or pPolygon.IsEmpty() or not pPolygon.IsValid()):
                 i += 1
+                print(f"Skipping feature {i} due to envelope check.")
+                print(pPolygon.ExportToWkt())
                 continue
 
             # Process valid polygons with comprehensive error handling
@@ -1201,12 +1219,12 @@ class uraster:
                         # Delete existing file if it exists (GDAL Create() doesn't overwrite)
                         if os.path.exists(sFilename_raster_out):
                             try:
-                                pDriver.Delete(sFilename_raster_out)
+                                pDriver_raster.Delete(sFilename_raster_out)
                             except:
                                 os.remove(sFilename_raster_out)  # Fallback if GDAL delete fails
                         iNewWidth = aData_clip.shape[1]
                         iNewHeigh = aData_clip.shape[0]
-                        pDataset_clip = pDriver.Create(sFilename_raster_out, iNewWidth, iNewHeigh, 1, eType , options= options)
+                        pDataset_clip = pDriver_raster.Create(sFilename_raster_out, iNewWidth, iNewHeigh, 1, eType , options= options)
                         pDataset_clip.SetGeoTransform( newGeoTransform )
                         pDataset_clip.SetProjection( pSpatialRef_target_wkt)
                         #set the no data value
@@ -1564,7 +1582,7 @@ class uraster:
                 logger.error(f"Error reading raster info: {e}")
         return
 
-    def visualize_target_mesh(self, sVariable_in,
+    def visualize_target_mesh(self, sVariable_in=None,
                                sUnit_in=None,
                                sFilename_out=None,
                                dLongitude_focus_in=0.0,
@@ -1953,9 +1971,22 @@ class uraster:
         try:
             # Use WKT for faster performance
             pPolygonWKT = polygon.ExportToWkt()
-            warp_options = gdal_warp_options_base.copy()
-            warp_options['cutlineWKT'] = pPolygonWKT
-            pWrapOption = gdal.WarpOptions(**warp_options)
+            #make a copy of the warp options to modify
+            gdal_warp_options = gdal_warp_options_base.copy()
+            #save WKT to a temporary file using the memory driver
+            pPolygonWKT_file = '/vsimem/polygon_wkt_' + str(feature_id) + '.shp'
+            pDataset_clip = pDriver_shp.CreateDataSource(pPolygonWKT_file)
+            pLayer_clip = pDataset_clip.CreateLayer('polygon_layer', geom_type=ogr.wkbPolygon, srs=srs_wgs84)
+            pFeature_clip = ogr.Feature(pLayer_clip.GetLayerDefn())
+            pFeature_clip.SetGeometry(polygon)
+            pLayer_clip.CreateFeature(pFeature_clip)
+            pDataset_clip.FlushCache()
+            #save and cleanup
+
+            gdal_warp_options['cutlineDSName'] = pPolygonWKT_file
+
+            # Create WarpOptions explicitly
+            pWrapOption = gdal.WarpOptions(**gdal_warp_options)
 
             # Capture GDAL errors during Warp operation
             gdal.PushErrorHandler('CPLQuietErrorHandler')
@@ -1996,6 +2027,9 @@ class uraster:
                 logger.warning(f"Empty data array for single polygon feature {feature_id}")
                 pDataset_clip_warped = None
                 return None, None, None
+
+            pLayer_clip = None
+            pFeature_clip = None
 
             return pDataset_clip_warped, aData_clip, newGeoTransform
 
