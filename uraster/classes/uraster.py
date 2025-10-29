@@ -11,12 +11,10 @@ from multiprocessing import Pool, cpu_count
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
+from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename, get_vector_format_from_filename
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from pyearth.gis.gdal.write.vector.gdal_write_wkt_to_vector_file import gdal_write_wkt_to_vector_file
-
-from pyearth.gis.geometry.convert_idl_polygon_to_valid_polygon import convert_idl_polygon_to_valid_polygon
 
 from uraster.classes.sraster import sraster
 
@@ -26,8 +24,7 @@ logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
 pDriver_geojson = ogr.GetDriverByName('GeoJSON')
 pDriver_shp = ogr.GetDriverByName('ESRI Shapefile')
-srs_wgs84 = osr.SpatialReference()
-srs_wgs84.ImportFromEPSG(4326)
+
 def signal_handler(signum, frame):
     """Handle system signals (like SIGSEGV) for crash detection"""
     logger.error(f"Received signal {signum}. Process may have crashed.")
@@ -202,6 +199,7 @@ class uraster:
         aFilename_source_raster_out = []
 
         # Create WGS84 spatial reference for comparison
+        pSpatialRef_wgs84 = None
         try:
             pSpatialRef_wgs84 = osr.SpatialReference()
             pSpatialRef_wgs84.ImportFromEPSG(4326)
@@ -209,6 +207,10 @@ class uraster:
         except Exception as e:
             logger.error(f'Failed to create WGS84 spatial reference: {e}')
             return None
+        finally:
+            # Clean up spatial reference object
+            if pSpatialRef_wgs84 is not None:
+                pSpatialRef_wgs84 = None
 
         # Process each raster file
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
@@ -434,7 +436,7 @@ class uraster:
                 pDataset = None
                 return None
 
-            aCellID= list(range(nFeatures))
+            aCellID= []  # Will be populated dynamically as features are processed
 
             logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
 
@@ -471,14 +473,13 @@ class uraster:
                             logger.warning(f'Feature {iFeature_index} has invalid geometry')
                             invalid_geometry_count += 1
                             print(pGeometry.ExportToWkt())
-                            #continue
+                            continue
                         # Get coordinates of the polygon
                         aCoord = get_geometry_coordinates(pGeometry)
                         if aCoord is not None and len(aCoord) > 0:
                             # Validate coordinate bounds
                             lons = aCoord[:, 0]
                             lats = aCoord[:, 1]
-
                             # Check for reasonable coordinate ranges
                             if (np.any(lons < -180) or np.any(lons > 180) or
                                 np.any(lats < -90) or np.any(lats > 90)):
@@ -512,12 +513,14 @@ class uraster:
                                     else:
                                         data_list.append(0)
 
-                                    aCellID[iFeature_index] = int(field_value) if field_value is not None else iFeature_index
+                                    aCellID.append(int(field_value) if field_value is not None else iFeature_index)
                                 except (ValueError, TypeError) as e:
                                     logger.warning(f'Could not convert field value for feature {iFeature_index}: {e}')
                                     data_list.append(iFeature_index)
+                                    aCellID.append(iFeature_index)
                             else:
                                 data_list.append(iFeature_index)  # Use feature index as default
+                                aCellID.append(iFeature_index)
                         else:
                             logger.warning(f'Failed to extract coordinates from feature {iFeature_index}')
                             invalid_geometry_count += 1
@@ -526,7 +529,87 @@ class uraster:
                         logger.warning(f'Error processing feature {iFeature_index}: {str(e)}')
                         invalid_geometry_count += 1
 
-                elif sGeometry_type in ['MULTIPOLYGON', 'POINT', 'LINESTRING']:
+                elif sGeometry_type == 'MULTIPOLYGON':
+                    try:
+                        # Process multipolygon by extracting each constituent polygon
+                        logger.info(f'Processing multipolygon feature {iFeature_index} with {pGeometry.GetGeometryCount()} parts')
+
+                        multipolygon_processed = False
+
+                        for iPart in range(pGeometry.GetGeometryCount()):
+                            pPolygon_part = pGeometry.GetGeometryRef(iPart)
+
+                            if pPolygon_part is None:
+                                logger.warning(f'Multipolygon part {iPart} is None in feature {iFeature_index}')
+                                continue
+
+                            if not pPolygon_part.IsValid():
+                                logger.warning(f'Multipolygon part {iPart} has invalid geometry in feature {iFeature_index}')
+                                continue
+
+                            # Get coordinates of the polygon part
+                            aCoord_part = get_geometry_coordinates(pPolygon_part)
+                            if aCoord_part is not None and len(aCoord_part) > 0:
+                                # Validate coordinate bounds for this part
+                                lons_part = aCoord_part[:, 0]
+                                lats_part = aCoord_part[:, 1]
+
+                                # Check for reasonable coordinate ranges
+                                if (np.any(lons_part < -180) or np.any(lons_part > 180) or
+                                    np.any(lats_part < -90) or np.any(lats_part > 90)):
+                                    logger.warning(f'Multipolygon part {iPart} in feature {iFeature_index} has coordinates outside valid range')
+
+                                # Check for minimum polygon area (avoid degenerate polygons)
+                                if len(aCoord_part) < 3:
+                                    logger.warning(f'Multipolygon part {iPart} in feature {iFeature_index} has fewer than 3 vertices, skipping part')
+                                    continue
+
+                                lons_list.append(lons_part)
+                                lats_list.append(lats_part)
+
+                                # Calculate polygon area for this part
+                                try:
+                                    dArea_part = calculate_polygon_area(lons_part, lats_part)
+                                    area_list.append(dArea_part)
+                                except Exception as area_error:
+                                    logger.warning(f'Could not calculate area for multipolygon part {iPart} in feature {iFeature_index}: {area_error}')
+                                    area_list.append(0.0)
+
+                                # For multipolygon, use the original feature index for all parts
+                                # but track that this is a multipolygon part
+                                if sVariable:
+                                    try:
+                                        field_value = pFeature.GetField(sVariable)
+                                        if field_value is not None:
+                                            data_list.append(int(field_value))
+                                        else:
+                                            data_list.append(0)
+                                        # Maintain original aCellID for multipolygon features
+                                        # Each part gets the same CellID as the original feature
+                                        aCellID.append(int(field_value) if field_value is not None else iFeature_index)
+                                    except (ValueError, TypeError) as e:
+                                        logger.warning(f'Could not convert field value for multipolygon part {iPart} in feature {iFeature_index}: {e}')
+                                        data_list.append(iFeature_index)
+                                        aCellID.append(iFeature_index)
+                                else:
+                                    data_list.append(iFeature_index)
+                                    aCellID.append(iFeature_index)
+
+                                multipolygon_processed = True
+                            else:
+                                logger.warning(f'Failed to extract coordinates from multipolygon part {iPart} in feature {iFeature_index}')
+
+                        if not multipolygon_processed:
+                            logger.warning(f'No valid parts found in multipolygon feature {iFeature_index}')
+                            invalid_geometry_count += 1
+                        else:
+                            logger.info(f'Successfully processed multipolygon feature {iFeature_index}')
+
+                    except Exception as e:
+                        logger.warning(f'Error processing multipolygon feature {iFeature_index}: {str(e)}')
+                        invalid_geometry_count += 1
+
+                elif sGeometry_type in ['POINT', 'LINESTRING']:
                     logger.warning(f'Geometry type {sGeometry_type} not supported in feature {iFeature_index}, skipping')
                     invalid_geometry_count += 1
                 else:
@@ -536,12 +619,18 @@ class uraster:
                 iFeature_index += 1
 
             # Report processing statistics
-            valid_features = len(lons_list)
+            valid_mesh_cells = len(lons_list)
             logger.info(f'Feature processing summary:')
-            logger.info(f'  - Total features: {iFeature_index}')
-            logger.info(f'  - Valid polygons: {valid_features}')
-            logger.info(f'  - Invalid/skipped: {invalid_geometry_count}')
-            logger.info(f'  - Success rate: {(valid_features/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
+            logger.info(f'  - Total input features: {iFeature_index}')
+            logger.info(f'  - Valid mesh cells created: {valid_mesh_cells}')
+            logger.info(f'  - Invalid/skipped features: {invalid_geometry_count}')
+            logger.info(f'  - Success rate: {((iFeature_index-invalid_geometry_count)/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
+
+            # Report multipolygon handling statistics
+            multipolygon_cells = valid_mesh_cells - (iFeature_index - invalid_geometry_count)
+            if multipolygon_cells > 0:
+                logger.info(f'  - Additional cells from multipolygons: {multipolygon_cells}')
+                logger.info(f'  - Total mesh cells (including multipolygon parts): {valid_mesh_cells}')
 
             # Clean up dataset
             pDataset = None
@@ -689,10 +778,21 @@ class uraster:
 
             # Ensure aCellID matches the number of valid mesh cells
             if len(aCellID) != len(cell_lons_1d):
-                logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)}), truncating to match")
-                aCellID = aCellID[:len(cell_lons_1d)]
+                logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)})")
+                if len(aCellID) > len(cell_lons_1d):
+                    # Truncate aCellID to match mesh cells
+                    logger.warning("Truncating aCellID to match mesh cell count")
+                    aCellID = aCellID[:len(cell_lons_1d)]
+                else:
+                    # Extend aCellID with sequential indices
+                    logger.warning("Extending aCellID with sequential indices to match mesh cell count")
+                    missing_count = len(cell_lons_1d) - len(aCellID)
+                    aCellID.extend(range(len(aCellID), len(aCellID) + missing_count))
 
             self.aCellID = np.array(aCellID)
+
+            logger.info(f'Final aCellID array length: {len(self.aCellID)}')
+            logger.info(f'aCellID range: [{np.min(self.aCellID)}, {np.max(self.aCellID)}]')
             # Calculate and store area statistics
             if area_list:
                 area_array = np.array(area_list)
@@ -978,13 +1078,13 @@ class uraster:
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
 
-        #get the spatial reference of the mesh vector file
+        # Get the spatial reference of the mesh vector file
         pDataset_mesh = ogr.Open( sFilename_source_mesh, 0 ) #0 means read-only. 1 means writeable.
         pLayer_mesh = pDataset_mesh.GetLayer(0)
         nFeature = pLayer_mesh.GetFeatureCount()
         pSpatialRef_target = pLayer_mesh.GetSpatialRef()
 
-        pSpatialRef_target_wkt = pSpatialRef_target.ExportToWkt()
+        pSpatialRef_target_wkt = pSpatialRef_target.ExportToWkt() if pSpatialRef_target else None
 
         #check whether the polygon has only one or more features
         if nFeature > 1:
@@ -1046,44 +1146,51 @@ class uraster:
         while pFeature_mesh is not None:
             # Check if feature crosses the international date line
             pPolygon = pFeature_mesh.GetGeometryRef()
-            aCoord = get_geometry_coordinates(pPolygon)
-            dLon_min = np.min(aCoord[:,0])
-            dLon_max = np.max(aCoord[:,0])
-            if dLon_max - dLon_min > IDL_LONGITUDE_THRESHOLD:  # Use constant
-                if not pPolygon.IsValid():
-                    logger.warning(f'Feature {i} has invalid geometry crossing IDL')
+            sGeometry_type = pPolygon.GetGeometryName()
+            if sGeometry_type == "POLYGON":
+                aCoord = get_geometry_coordinates(pPolygon)
+                #first check whether a geometry crosses the IDL
+                if check_cross_international_date_line_polygon(aCoord):  # Use constant
+                    # Create multipolygon to handle IDL crossing
+                    logger.info(f'Feature {i} crosses the international date line, splitting into multiple parts.')
+                    pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
+                    aCoord_gcs_split = split_international_date_line_polygon_coordinates(aCoord)
 
-                # Create multipolygon to handle IDL crossing
-                logger.info(f'Feature {i} crosses the international date line, splitting into multiple parts.')
-                pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
-                aCoord_gcs_split = split_polygon_cross_idl(aCoord)
+                    for aCoord_gcs in aCoord_gcs_split:
+                        #create a polygon (not just ring) and add it to the multipolygon
+                        ring = ogr.Geometry(ogr.wkbLinearRing)
+                        for iCoord in range(aCoord_gcs.shape[0]):
+                            ring.AddPoint(aCoord_gcs[iCoord, 0], aCoord_gcs[iCoord, 1])
 
-                for aCoord_gcs in aCoord_gcs_split:
-                    #create a polygon (not just ring) and add it to the multipolygon
-                    ring = ogr.Geometry(ogr.wkbLinearRing)
-                    for iCoord in range(aCoord_gcs.shape[0]):
-                        ring.AddPoint(aCoord_gcs[iCoord, 0], aCoord_gcs[iCoord, 1])
+                        ring.CloseRings()
+                        # Create polygon from ring
+                        polygon_part = ogr.Geometry(ogr.wkbPolygon)
+                        polygon_part.AddGeometry(ring)
+                        # check validity
+                        if not polygon_part.IsValid():
+                            polygon_part.FlattenTo2D()
+                            print(polygon_part.ExportToWkt())
+                            logger.warning(f'Polygon part of feature {i} is invalid after splitting at IDL.')
 
-                    ring.CloseRings()
-                    # Create polygon from ring
-                    polygon_part = ogr.Geometry(ogr.wkbPolygon)
-                    polygon_part.AddGeometry(ring)
-                    # check validity
-                    if not polygon_part.IsValid():
-                        polygon_part.FlattenTo2D()
-                        print(polygon_part.ExportToWkt())
-                        logger.warning(f'Polygon part of feature {i} is invalid after splitting at IDL.')
+                        pMultipolygon.AddGeometry(polygon_part)  # Add polygon, not ring
 
-                    pMultipolygon.AddGeometry(polygon_part)  # Add polygon, not ring
-
-                #create a feature from the multipolygon and add it to the list
-                pFeature_new = ogr.Feature(pLayer_mesh.GetLayerDefn())
-                pFeature_new.SetGeometry(pMultipolygon)
-                aFeatures.append(pFeature_new)
-                pFeature_mesh = pLayer_mesh.GetNextFeature()
+                    #create a feature from the multipolygon and add it to the list
+                    pFeature_new = ogr.Feature(pLayer_mesh.GetLayerDefn())
+                    pFeature_new.SetGeometry(pMultipolygon)
+                    aFeatures.append(pFeature_new)
+                    pFeature_mesh = pLayer_mesh.GetNextFeature()
+                else:
+                    aFeatures.append(pFeature_mesh.Clone())
+                    pFeature_mesh = pLayer_mesh.GetNextFeature()
             else:
+                #a feature may still have multipolygon
                 aFeatures.append(pFeature_mesh.Clone())
                 pFeature_mesh = pLayer_mesh.GetNextFeature()
+                #if sGeometry_type == "POLYGON":
+                #elif sGeometry_type == "MULTIPOLYGON":
+                #    logger.info(f'Feature {i} is a multipolygon, adding directly.') #this might break the following up code?
+                #    aFeatures.append(pFeature_mesh.Clone())
+                #    pFeature_mesh = pLayer_mesh.GetNextFeature()
 
             i += 1
 
@@ -1129,6 +1236,17 @@ class uraster:
                 sGeometry_type = pPolygon.GetGeometryName()
                 geometry_type_name = self._get_geometry_type_name(geometry_type)
                 logger.debug(f"Feature {i} geometry type: {geometry_type} ({geometry_type_name})")
+
+                # Calculate area early - this is independent of raster processing
+                aCoords_gcs = get_geometry_coordinates(pPolygon)
+                if sGeometry_type == 'POLYGON':
+                    dArea = calculate_polygon_area(aCoords_gcs[:,0], aCoords_gcs[:,1])
+                else:
+                    dArea = 0.0
+                    for iPart in range(pPolygon.GetGeometryCount()):
+                        pPolygon_part = pPolygon.GetGeometryRef(iPart)
+                        aCoords_part = get_geometry_coordinates(pPolygon_part)
+                        dArea += calculate_polygon_area(aCoords_part[:,0], aCoords_part[:,1])
 
                 if sGeometry_type == "POLYGON":
                     # Simple polygon - process normally
@@ -1229,16 +1347,6 @@ class uraster:
                         pDataset_clip.FlushCache()
                         pDataset_clip = None
 
-                aCoords_gcs = get_geometry_coordinates(pPolygon)
-                sGeometry_type = pPolygon.GetGeometryName()
-                if sGeometry_type == 'POLYGON':
-                    dArea = calculate_polygon_area(aCoords_gcs[:,0], aCoords_gcs[:,1])
-                else:
-                    dArea = 0.0
-                    for iPart in range(pPolygon.GetGeometryCount()):
-                        pPolygon_part = pPolygon.GetGeometryRef(iPart)
-                        aCoords_part = get_geometry_coordinates(pPolygon_part)
-                        dArea += calculate_polygon_area(aCoords_part[:,0], aCoords_part[:,1])
                 #create a polygon feature to save the output
                 pFeature_out.SetGeometry(pPolygon.Clone())
                 pFeature_out.SetField('id', i)
@@ -1286,6 +1394,9 @@ class uraster:
         pDataset_out = None        # Close the dataset
         pDataset_mesh = None
 
+        # Clean up spatial reference objects to prevent memory leaks
+        pSpatialRef_target = None
+
         # Report processing summary
         total_time = time.time() - start_time
         logger.info(f"Processing completed in {total_time:.2f} seconds")
@@ -1323,7 +1434,7 @@ class uraster:
                               sFilename_out=None,
                               dLongitude_focus_in=0.0,
                               dLatitude_focus_in=0.0,
-                              dZoom_factor=1.4,
+                              dZoom_factor=0.7,
                               iFlag_show_coastlines=True,
                               iFlag_show_graticule=True):
         """
@@ -1340,7 +1451,7 @@ class uraster:
             dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
                 Valid range: -90 to 90. Default is 0.0 (equator).
             dZoom_factor (float, optional): Camera zoom level.
-                Higher values zoom in. Default is 1.4.
+                Higher values zoom in. Default is 0.7.
             iFlag_show_coastlines (bool, optional): Show coastline overlay.
                 Default is True.
             iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
@@ -1385,8 +1496,8 @@ class uraster:
 
         # Validate zoom factor
         if dZoom_factor <= 0:
-            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.4')
-            dZoom_factor = 1.4
+            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 0.7')
+            dZoom_factor = 0.7
 
         # Validate output file path if provided
         if sFilename_out is not None:
@@ -1474,16 +1585,28 @@ class uraster:
             plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
             # Configure camera position and focus
             try:
-                focal_point = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus]
-                )[0]
+                # Use PyVista/VTK coordinate conversion instead of deprecated geodesic
+                import math
 
-                camera_position = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus],
-                    radius=gv.common.RADIUS * 6
-                )[0]
+                # Convert longitude/latitude to radians
+                lon_rad = math.radians(dLongitude_focus)
+                lat_rad = math.radians(dLatitude_focus)
+
+                # Earth radius (approximately 6371 km, but use normalized units)
+                earth_radius = 1.0
+                camera_distance = earth_radius * 3.0  # Position camera 3x earth radius away
+
+                # Convert spherical coordinates to Cartesian (x, y, z)
+                x_focal = earth_radius * math.cos(lat_rad) * math.cos(lon_rad)
+                y_focal = earth_radius * math.cos(lat_rad) * math.sin(lon_rad)
+                z_focal = earth_radius * math.sin(lat_rad)
+
+                x_camera = camera_distance * math.cos(lat_rad) * math.cos(lon_rad)
+                y_camera = camera_distance * math.cos(lat_rad) * math.sin(lon_rad)
+                z_camera = camera_distance * math.sin(lat_rad)
+
+                focal_point = [x_focal, y_focal, z_focal]
+                camera_position = [x_camera, y_camera, z_camera]
 
                 plotter.camera.focal_point = focal_point
                 plotter.camera.position = camera_position
@@ -1589,15 +1712,20 @@ class uraster:
                                sFilename_out=None,
                                dLongitude_focus_in=0.0,
                                dLatitude_focus_in=0.0,
-                               dZoom_factor=1.4,
+                               dZoom_factor=0.75,
                                iFlag_show_coastlines=True,
                                iFlag_show_graticule=True,
-                               sColormap='viridis'):
+                               sColormap='viridis',
+                               iFlag_create_animation=False,
+                               iAnimation_frames=36,
+                               dAnimation_speed=10.0,
+                               sAnimation_format='mp4'):
         """
         Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
         Creates an interactive or saved 3D visualization of the mesh with cells colored
-        by computed statistics (mean, min, max, std) from raster processing.
+        by computed statistics (mean, min, max, std) from raster processing. Can also
+        create rotating animations by generating multiple frames.
 
         Args:
             sVariable_in (str): Variable field name to visualize.
@@ -1606,18 +1734,27 @@ class uraster:
                 Default is empty string.
             sFilename_out (str, optional): Output screenshot file path.
                 If None, displays interactive viewer. Supports: .png, .jpg, .svg
+                For animations, this becomes the base filename (e.g., 'animation.mp4')
             dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
-                Valid range: -180 to 180. Default is 0.0.
+                Valid range: -180 to 180. Default is 0.0. For animations, this is the starting longitude.
             dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
                 Valid range: -90 to 90. Default is 0.0.
             dZoom_factor (float, optional): Camera zoom level.
-                Higher values zoom in. Default is 1.4.
+                Higher values zoom in. Default is 0.75.
             iFlag_show_coastlines (bool, optional): Show coastline overlay.
                 Default is True.
             iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
                 Default is True.
             sColormap (str, optional): Matplotlib colormap name.
                 Default is 'viridis'. Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
+            iFlag_create_animation (bool, optional): Create rotating animation.
+                Default is False. When True, generates frames for 360° rotation.
+            iAnimation_frames (int, optional): Number of frames for 360° rotation.
+                Default is 36 (10° per frame). More frames = smoother animation.
+            dAnimation_speed (float, optional): Animation speed in degrees per frame.
+                Default is 10.0. Calculated as 360 / iAnimation_frames if not specified.
+            sAnimation_format (str, optional): Animation output format.
+                Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
 
         Returns:
             bool: True if visualization successful, False otherwise
@@ -1631,6 +1768,7 @@ class uraster:
             - Target mesh file must exist (created by run_remap method)
             - Specified variable must exist as a field in the target mesh
             - Interactive mode requires display environment
+            - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
         """
         # Validate target mesh file
         if not self.sFilename_target_mesh:
@@ -1679,8 +1817,8 @@ class uraster:
 
         # Validate zoom factor
         if dZoom_factor <= 0:
-            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.4')
-            dZoom_factor = 1.4
+            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.0')
+            dZoom_factor = 0.75
 
         # Validate output file path if provided
         if sFilename_out is not None:
@@ -1757,7 +1895,9 @@ class uraster:
             if self.nCell_source > 0 and self.nCell_target != self.nCell_source:
                 logger.warning(f'Feature count mismatch: target={self.nCell_target}, source={self.nCell_source}')
 
-            # Extract variable data from features
+            # Extract variable data from features, handling multipolygons correctly
+            # This must match the logic used in rebuild_mesh_topology() where multipolygon
+            # parts are added as separate mesh cells
             data_list = []
             pLayer.ResetReading()
             pFeature = pLayer.GetNextFeature()
@@ -1767,7 +1907,9 @@ class uraster:
                 pGeometry = pFeature.GetGeometryRef()
                 if pGeometry is not None:
                     sGeometry_type = pGeometry.GetGeometryName()
-                    if sGeometry_type == 'POLYGON' or sGeometry_type == 'MULTIPOLYGON':
+
+                    if sGeometry_type == 'POLYGON':
+                        # Single polygon - add one data value
                         try:
                             field_value = pFeature.GetField(sVariable)
                             if field_value is not None:
@@ -1778,6 +1920,39 @@ class uraster:
                                 logger.warning(f'Feature {feature_count} has None value for {sVariable}')
                         except Exception as e:
                             logger.warning(f'Error reading field {sVariable} from feature {feature_count}: {e}')
+                            data_list.append(np.nan)
+
+                    elif sGeometry_type == 'MULTIPOLYGON':
+                        # Multipolygon - add the same data value for each polygon part
+                        # This matches the mesh topology building logic
+                        try:
+                            field_value = pFeature.GetField(sVariable)
+                            data_value = field_value if field_value is not None else np.nan
+
+                            if field_value is None:
+                                logger.warning(f'Feature {feature_count} has None value for {sVariable}')
+
+                            # Add the same data value for each polygon part in the multipolygon
+                            nGeometryParts = pGeometry.GetGeometryCount()
+                            valid_parts = 0
+
+                            for iPart in range(nGeometryParts):
+                                pPolygon_part = pGeometry.GetGeometryRef(iPart)
+                                if pPolygon_part is not None and pPolygon_part.IsValid():
+                                    # Only add data for valid polygon parts (matching mesh topology logic)
+                                    data_list.append(data_value)
+                                    valid_parts += 1
+                                else:
+                                    logger.warning(f'Invalid polygon part {iPart} in multipolygon feature {feature_count}')
+
+                            if valid_parts == 0:
+                                logger.warning(f'No valid parts found in multipolygon feature {feature_count}')
+                                data_list.append(np.nan)  # Add at least one value to maintain count
+                            else:
+                                logger.debug(f'Added {valid_parts} data values for multipolygon feature {feature_count}')
+
+                        except Exception as e:
+                            logger.warning(f'Error reading field {sVariable} from multipolygon feature {feature_count}: {e}')
                             data_list.append(np.nan)
                     else:
                         logger.warning(f'Feature {feature_count} has unsupported geometry type: {sGeometry_type}')
@@ -1845,16 +2020,21 @@ class uraster:
             logger.info(f'Created mesh with {mesh.n_cells} cells and {mesh.n_points} points')
 
             # Attach data to mesh
-            name = sVariable.capitalize()
+            scalars = sVariable.capitalize()
             sUnit = sUnit_in if sUnit_in is not None else ""
-            mesh.cell_data[name] = data
+            mesh.cell_data[scalars] = data
 
             # Create 3D plotter
-            plotter = gv.GeoPlotter()
+            if sFilename_out is not None:
+                plotter = gv.GeoPlotter(off_screen=True)
+            else:
+                plotter = gv.GeoPlotter()
+
+            plotter.show(auto_close=False)
 
             # Configure scalar bar (colorbar) appearance
             sargs = {
-                "title": f"{name} / {sUnit}" if sUnit else name,
+                "title": f"{scalars} / {sUnit}" if sUnit else scalars,
                 "shadow": True,
                 "title_font_size": 10,
                 "label_font_size": 10,
@@ -1863,20 +2043,32 @@ class uraster:
             }
 
             # Add mesh to plotter with colormap
-            plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs, cmap=sColormap)
+            plotter.add_mesh(mesh, scalars = scalars, scalar_bar_args=sargs, cmap=sColormap)
 
             # Configure camera position and focus
             try:
-                focal_point = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus]
-                )[0]
+                # Use PyVista/VTK coordinate conversion instead of deprecated geodesic
+                import math
 
-                camera_position = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus],
-                    radius=gv.common.RADIUS * 6
-                )[0]
+                # Convert longitude/latitude to radians
+                lon_rad = math.radians(dLongitude_focus)
+                lat_rad = math.radians(dLatitude_focus)
+
+                # Earth radius (approximately 6371 km, but use normalized units)
+                earth_radius = 1.0
+                camera_distance = earth_radius * 3.0  # Position camera 3x earth radius away
+
+                # Convert spherical coordinates to Cartesian (x, y, z)
+                x_focal = earth_radius * math.cos(lat_rad) * math.cos(lon_rad)
+                y_focal = earth_radius * math.cos(lat_rad) * math.sin(lon_rad)
+                z_focal = earth_radius * math.sin(lat_rad)
+
+                x_camera = camera_distance * math.cos(lat_rad) * math.cos(lon_rad)
+                y_camera = camera_distance * math.cos(lat_rad) * math.sin(lon_rad)
+                z_camera = camera_distance * math.sin(lat_rad)
+
+                focal_point = [x_focal, y_focal, z_focal]
+                camera_position = [x_camera, y_camera, z_camera]
 
                 plotter.camera.focal_point = focal_point
                 plotter.camera.position = camera_position
@@ -1904,45 +2096,66 @@ class uraster:
             # Add graticule (coordinate grid)
             if iFlag_show_graticule:
                 try:
-                    plotter.add_graticule(show_labels=True)
+                    #plotter.add_graticule(show_labels=True)
                     logger.debug('Added coordinate graticule with labels')
                 except Exception as e:
                     logger.warning(f'Could not add graticule: {e}')
 
+
             # Output or display
             if sFilename_out is not None:
-                # Save screenshot
-                try:
-                    plotter.screenshot(sFilename_out)
-                    logger.info(f'✓ Visualization saved to: {sFilename_out}')
+                if iFlag_create_animation:
+                    # Create rotating animation (plotter is now properly initialized)
+                    try:
+                        success = self._create_rotation_animation(
+                            plotter,  sFilename_out, dLongitude_focus, dLatitude_focus
+                            , iAnimation_frames, dAnimation_speed, sAnimation_format
+                        )
+                        plotter.close()
+                        return success
+                    except Exception as e:
+                        logger.error(f'Failed to create animation: {e}')
+                        logger.error(f'Traceback: {traceback.format_exc()}')
+                        plotter.close()
+                        return False
+                else:
+                    # Save single screenshot
+                    try:
+                        plotter.screenshot(sFilename_out)
+                        logger.info(f'✓ Visualization saved to: {sFilename_out}')
 
-                    # Verify file was created
-                    if os.path.exists(sFilename_out):
-                        file_size = os.path.getsize(sFilename_out)
-                        logger.info(f'  File size: {file_size / 1024:.1f} KB')
-                    else:
-                        logger.warning(f'Screenshot command executed but file not found: {sFilename_out}')
+                        # Verify file was created
+                        if os.path.exists(sFilename_out):
+                            file_size = os.path.getsize(sFilename_out)
+                            logger.info(f'  File size: {file_size / 1024:.1f} KB')
+                        else:
+                            logger.warning(f'Screenshot command executed but file not found: {sFilename_out}')
 
-                    plotter.close()
-                    return True
+                        plotter.close()
+                        return True
 
-                except Exception as e:
-                    logger.error(f'Failed to save screenshot: {e}')
-                    logger.error(f'Traceback: {traceback.format_exc()}')
-                    plotter.close()
-                    return False
+                    except Exception as e:
+                        logger.error(f'Failed to save screenshot: {e}')
+                        logger.error(f'Traceback: {traceback.format_exc()}')
+                        plotter.close()
+                        return False
             else:
-                # Interactive display
-                try:
-                    logger.info('Opening interactive visualization window...')
-                    plotter.show()
-                    return True
-                except Exception as e:
-                    logger.error(f'Failed to display interactive visualization: {e}')
-                    logger.error(f'Ensure display environment is available (X11, Wayland, etc.)')
-                    logger.error(f'Traceback: {traceback.format_exc()}')
+                if iFlag_create_animation:
+                    logger.error('Animation requires output filename (sFilename_out)')
                     plotter.close()
                     return False
+                else:
+                    # Interactive display
+                    try:
+                        logger.info('Opening interactive visualization window...')
+                        plotter.show()
+                        return True
+                    except Exception as e:
+                        logger.error(f'Failed to display interactive visualization: {e}')
+                        logger.error(f'Ensure display environment is available (X11, Wayland, etc.)')
+                        logger.error(f'Traceback: {traceback.format_exc()}')
+                        plotter.close()
+                        return False
 
         except ImportError as e:
             logger.error(f'Missing required GeoVista dependencies: {e}')
@@ -1970,8 +2183,14 @@ class uraster:
         Raises:
             TimeoutError: If operation exceeds WARP_TIMEOUT_SECONDS
         """
+        srs_wgs84 = None
+        pDataset_clip = None
+        pLayer_clip = None
+        pFeature_clip = None
         try:
             # Use WKT for faster performance
+            srs_wgs84 = osr.SpatialReference()
+            srs_wgs84.ImportFromEPSG(4326)
             pPolygonWKT = polygon.ExportToWkt()
             #make a copy of the warp options to modify
             gdal_warp_options = gdal_warp_options_base.copy()
@@ -1983,7 +2202,6 @@ class uraster:
             pFeature_clip.SetGeometry(polygon)
             pLayer_clip.CreateFeature(pFeature_clip)
             pDataset_clip.FlushCache()
-            #save and cleanup
 
             gdal_warp_options['cutlineDSName'] = pPolygonWKT_file
 
@@ -2030,9 +2248,6 @@ class uraster:
                 pDataset_clip_warped = None
                 return None, None, None
 
-            pLayer_clip = None
-            pFeature_clip = None
-
             return pDataset_clip_warped, aData_clip, newGeoTransform
 
         except TimeoutError as e:
@@ -2041,6 +2256,16 @@ class uraster:
         except Exception as e:
             logger.error(f"Unexpected exception during single polygon processing for feature {feature_id}: {str(e)}")
             return None, None, None
+        finally:
+            # Clean up all spatial reference and OGR objects to prevent memory leaks
+            if srs_wgs84 is not None:
+                srs_wgs84 = None
+            if pFeature_clip is not None:
+                pFeature_clip = None
+            if pLayer_clip is not None:
+                pLayer_clip = None
+            if pDataset_clip is not None:
+                pDataset_clip = None
 
     def _process_multipolygon_idl(self, multipolygon, aFilename_source_raster, gdal_warp_options_base, feature_id, dMissing_value):
         """
@@ -2156,3 +2381,194 @@ class uraster:
         except Exception as e:
             logger.error(f"Error merging raster parts for feature {feature_id}: {str(e)}")
             return None, None
+
+    def _create_rotation_animation(self, plotter,  sFilename_out, dLongitude_start, dLatitude_focus,
+                                    iAnimation_frames, dAnimation_speed, sAnimation_format):
+        """
+        Create a rotating animation of the 3D globe visualization with sine wave latitude pattern.
+
+        Generates frames by rotating the camera around the globe while varying latitude in a
+        sine wave pattern that visits Arctic and Antarctic regions before returning to start.
+
+        Args:
+            plotter: GeoVista plotter instance with mesh already added
+            sFilename_out (str): Output animation file path
+            dLongitude_start (float): Starting longitude for rotation
+            dLatitude_focus (float): Starting latitude focus point (center of sine wave)
+            iAnimation_frames (int): Number of frames for 360° rotation
+            dAnimation_speed (float): Degrees per frame for longitude
+            sAnimation_format (str): Output format ('mp4', 'gif', 'avi')
+
+        Returns:
+            bool: True if animation created successfully, False otherwise
+
+        Note:
+            Animation pattern: longitude rotates 360°, latitude follows sine wave with ±75° amplitude
+            Sequence: start → Arctic → start → Antarctic → start (complete cycle)
+        """
+        try:
+            # Import required libraries
+            try:
+                import imageio
+                logger.info('ImageIO library imported successfully for animation creation')
+
+                # Check available plugins/backends
+                # Check specifically for video codecs
+                try:
+                    import imageio_ffmpeg
+                    logger.info('FFmpeg backend available for MP4 creation')
+                except ImportError:
+                    logger.warning('FFmpeg backend not available. MP4 creation may fail.')
+                    logger.warning('Install with: pip install imageio[ffmpeg]')
+
+            except ImportError as e:
+                logger.error('ImageIO library not available. Install with: pip install imageio[ffmpeg]')
+                logger.error(f'Import error: {e}')
+                return False
+
+
+            import math
+
+            # Validate animation parameters
+            if iAnimation_frames <= 0:
+                logger.error(f'Invalid number of animation frames: {iAnimation_frames}')
+                return False
+
+            # Ensure proper animation speed calculation
+            if dAnimation_speed <= 0 or dAnimation_speed is None:
+                dAnimation_speed = 360.0 / iAnimation_frames
+                logger.info(f'Auto-calculated animation speed: {dAnimation_speed:.2f}° per frame')
+            else:
+                logger.info(f'Using provided animation speed: {dAnimation_speed:.2f}° per frame')
+
+            # Validate output format and check backend availability
+            valid_formats = ['mp4', 'gif', 'avi']
+            original_format = sAnimation_format.lower()
+
+            if original_format not in valid_formats:
+                logger.warning(f'Unsupported format {original_format}, defaulting to gif')
+                sAnimation_format = 'gif'
+            else:
+                sAnimation_format = original_format
+
+            #delete any existing animation file
+            if os.path.exists(sFilename_out):
+                try:
+                    os.remove(sFilename_out)
+                    logger.info(f'Deleted existing animation file: {sFilename_out}')
+                except Exception as e:
+                    logger.error(f'Cannot delete existing animation file {sFilename_out}: {e}')
+                    return False
+
+            # Prepare output filename
+            base_name = os.path.splitext(sFilename_out)[0]
+            animation_filename = f"{base_name}.{sAnimation_format.lower()}"
+
+            if sAnimation_format != original_format:
+                logger.info(f'Output format changed from {original_format} to {sAnimation_format}')
+
+            # Use PyVista's built-in movie functionality - no temporary files needed
+            logger.info(f'Creating {iAnimation_frames} frames for 360° rotation animation...')
+            logger.info(f'Animation will be saved as: {animation_filename}')
+
+            # Use PyVista's built-in movie functionality
+            logger.info('Creating animation using PyVista movie writer...')
+            try:
+                # Open movie file for writing
+                plotter.open_movie(animation_filename, framerate=30)
+                logger.info(f'Opened movie file: {animation_filename}')
+                # Generate animation frames directly to movie
+                for i in range(iAnimation_frames):
+                    # Calculate current longitude (rotate around globe)
+                    longitude_increment = (360.0 * i) / iAnimation_frames
+                    current_longitude = (dLongitude_start + longitude_increment) % 360.0
+                    # Normalize to [-180, 180] range
+                    if current_longitude > 180.0:
+                        current_longitude -= 360.0
+                    # Calculate sine wave latitude pattern
+                    progress = i / iAnimation_frames
+                    latitude_amplitude = 75.0
+                    current_latitude = dLatitude_focus + latitude_amplitude * math.sin(2 * math.pi * progress)
+                    current_latitude = max(-90.0, min(90.0, current_latitude))
+                    # Convert to radians and calculate camera position
+                    lon_rad = math.radians(current_longitude)
+                    lat_rad = math.radians(current_latitude)
+                    earth_radius = 1.0
+                    camera_distance = earth_radius * 3.0
+                    # Convert spherical coordinates to Cartesian
+                    x_focal = earth_radius * math.cos(lat_rad) * math.cos(lon_rad)
+                    y_focal = earth_radius * math.cos(lat_rad) * math.sin(lon_rad)
+                    z_focal = earth_radius * math.sin(lat_rad)
+                    x_camera = camera_distance * math.cos(lat_rad) * math.cos(lon_rad)
+                    y_camera = camera_distance * math.cos(lat_rad) * math.sin(lon_rad)
+                    z_camera = camera_distance * math.sin(lat_rad)
+                    focal_point = [x_focal, y_focal, z_focal]
+                    camera_position = [x_camera, y_camera, z_camera]
+                    # Update camera position
+                    plotter.camera.focal_point = focal_point
+                    plotter.camera.position = camera_position
+                    #plotter.camera.zoom(1.0) #apply zoom if needed, but be careful of cumulative zooming
+                    plotter.add_axes()  # Re-add axes to ensure visibility
+                    plotter.render()  # Render the scene
+                    plotter.write_frame()  # Write current frame to movie
+                    # Progress reporting
+                    if (i + 1) % max(1, iAnimation_frames // 10) == 0:
+                        progress_pct = (i + 1) / iAnimation_frames * 100
+                        logger.info(f'  Frame {i+1}/{iAnimation_frames} ({progress_pct:.1f}%) - Lon: {current_longitude:.1f}°, Lat: {current_latitude:.1f}°')
+                    # Force garbage collection every 10 frames
+                    if (i + 1) % 10 == 0:
+                        import gc
+                        gc.collect()
+                # Close movie file
+
+                logger.info('Movie file closed')
+                # Verify animation file was created
+                if os.path.exists(animation_filename):
+                    file_size = os.path.getsize(animation_filename)
+                    logger.info(f'✓ Animation created successfully: {animation_filename}')
+                    logger.info(f'  File size: {file_size / (1024*1024):.2f} MB')
+                    logger.info(f'  Frames: {iAnimation_frames}')
+                    logger.info(f'  Format: {sAnimation_format.upper()}')
+                    return True
+                else:
+                    logger.error('Animation file was not created')
+                    return False
+
+            except Exception as e:
+                logger.error(f'Failed to create animation using PyVista movie writer: {e}')
+                logger.error(f'Traceback: {traceback.format_exc()}')
+                # Try to close movie file if it was opened
+                try:
+                    plotter.close_movie()
+                except:
+                    pass
+                return False
+            finally:
+                # Final cleanup to prevent memory leaks
+                import gc
+                gc.collect()
+                logger.debug('Performed final garbage collection after animation creation')
+
+        except Exception as e:
+            logger.error(f'Unexpected error during animation creation: {e}')
+            logger.error(f'Traceback: {traceback.format_exc()}')
+            return False
+        finally:
+            # Ensure cleanup even if exceptions occur
+            try:
+                import gc
+                gc.collect()
+            except:
+                pass
+
+
+    def cleanup(self):
+        """
+        Cleanup method to release spatial reference objects and other resources.
+        """
+        try:
+            if hasattr(self, 'pSpatialRef') and self.pSpatialRef is not None:
+                self.pSpatialRef = None
+                logger.debug('Spatial reference object cleaned up successfully')
+        except Exception as e:
+            logger.warning(f'Error during cleanup of spatial reference: {e}')

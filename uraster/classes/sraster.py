@@ -10,6 +10,7 @@ from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
 pSpatialRef_wgs84 = osr.SpatialReference()
 pSpatialRef_wgs84.ImportFromEPSG(4326)
 wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
+pSpatialRef_wgs84 = None  # Clean up
 class sraster:
 
     def __init__(self, sFilename_in=None):
@@ -25,7 +26,7 @@ class sraster:
         self.sDtype = None
         # Coordinate Reference System (CRS)
         self.sCrs = None
-        # GDAL Spatial Reference object
+        # GDAL Spatial Reference object - initialize to prevent AttributeError
         self.pSpatialRef = osr.SpatialReference()
         self.pSpatialRef_wkt = None
 
@@ -33,7 +34,6 @@ class sraster:
         self.pTransform = None
         self.aExtent = None
         self.aExtent_wgs84 = None
-
         self.sFilename_mesh = None
         #check the file exists
         if sFilename_in is not None:
@@ -64,6 +64,7 @@ class sraster:
         Read raster metadata from the given filename using GDAL.
         """
 
+
         #check if file exists
         sFilename = self.sFilename
         if not os.path.isfile(sFilename):
@@ -76,8 +77,11 @@ class sraster:
                 raise RuntimeError(f"Unable to open file: {sFilename}")
 
             self.sCrs = pDataset.GetProjection()
-            self.pSpatialRef.ImportFromWkt(self.sCrs)
-            self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt() if self.sCrs else None
+            if self.sCrs:
+                self.pSpatialRef.ImportFromWkt(self.sCrs)
+                self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt()
+            else:
+                self.pSpatialRef_wkt = None
 
             self.ncolumn = pDataset.RasterXSize
             self.nrow = pDataset.RasterYSize
@@ -98,6 +102,8 @@ class sraster:
 
             # If the spatial reference is not in WGS84, transform the extent to WGS84
             if self.pSpatialRef_wkt != wkt_wgs84:
+                pSpatialRef_wgs84_target = None
+                transform = None
                 try:
                     pSpatialRef_wgs84_target = osr.SpatialReference()
                     pSpatialRef_wgs84_target.ImportFromEPSG(4326)
@@ -117,6 +123,12 @@ class sraster:
                 except Exception as e:
                     print(f"Warning: Failed to transform extent to WGS84: {e}")
                     self.aExtent_wgs84 = self.aExtent
+                finally:
+                    # Clean up spatial reference and transformation objects
+                    if pSpatialRef_wgs84_target is not None:
+                        pSpatialRef_wgs84_target = None
+                    if transform is not None:
+                        transform = None
             else:
                 self.aExtent_wgs84 = self.aExtent
 
@@ -210,10 +222,6 @@ class sraster:
             print("Raster is already in WGS84 coordinate system.")
             return self
 
-        # Define the target spatial reference (WGS84)
-        pSpatialRef_wgs84 = osr.SpatialReference()
-        pSpatialRef_wgs84.ImportFromEPSG(4326)
-        pSpatialRef_wgs84_wkt = pSpatialRef_wgs84.ExportToWkt()
 
         # Define a new filename for the converted raster using robust path handling
         base, ext = os.path.splitext(self.sFilename)
@@ -224,7 +232,7 @@ class sraster:
             os.remove(sFilename_raster_wgs84)
 
         # Use/copy a function from the pyearth package to do the conversion
-        reproject_raster(self.sFilename, sFilename_raster_wgs84, pSpatialRef_wgs84_wkt,
+        reproject_raster(self.sFilename, sFilename_raster_wgs84, wkt_wgs84,
                               xRes = None, yRes = None,
                                sResampleAlg = 'near',
                                  iFlag_force_resolution_in = 0)
