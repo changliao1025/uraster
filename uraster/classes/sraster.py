@@ -7,10 +7,7 @@ from pyearth.toolbox.management.raster.reproject import reproject_raster
 from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
 from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
 
-pSpatialRef_wgs84 = osr.SpatialReference()
-pSpatialRef_wgs84.ImportFromEPSG(4326)
-wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
-pSpatialRef_wgs84 = None  # Clean up
+
 class sraster:
 
     def __init__(self, sFilename_in=None):
@@ -63,6 +60,10 @@ class sraster:
         """
         Read raster metadata from the given filename using GDAL.
         """
+        pSpatialRef_wgs84 = osr.SpatialReference()
+        pSpatialRef_wgs84.ImportFromEPSG(4326)
+        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
+        pSpatialRef_wgs84 = None  # Clean up
 
 
         #check if file exists
@@ -166,6 +167,10 @@ class sraster:
         Create a raster mesh from the raster file.
         Creates either a square mesh (for projected CRS) or a lat/lon mesh (for WGS84).
         """
+        pSpatialRef_wgs84 = osr.SpatialReference()
+        pSpatialRef_wgs84.ImportFromEPSG(4326)
+        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
+        pSpatialRef_wgs84 = None  # Clean up
 
         #check raster file sFilename exists
         if not os.path.isfile(self.sFilename):
@@ -217,6 +222,10 @@ class sraster:
         Convert the raster to WGS84 coordinate system.
         Returns a new sraster instance for the reprojected file.
         """
+        pSpatialRef_wgs84 = osr.SpatialReference()
+        pSpatialRef_wgs84.ImportFromEPSG(4326)
+        wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
+        pSpatialRef_wgs84 = None  # Clean up
         # Check if already in WGS84
         if self.pSpatialRef_wkt == wkt_wgs84:
             print("Raster is already in WGS84 coordinate system.")

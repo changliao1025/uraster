@@ -14,7 +14,6 @@ from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from pyearth.gis.gdal.write.vector.gdal_write_wkt_to_vector_file import gdal_write_wkt_to_vector_file
 
 from uraster.classes.sraster import sraster
 
@@ -265,6 +264,8 @@ class uraster:
                 logger.debug(f'  - Data type: {pRaster.eType}')
                 if hasattr(pRaster, 'dNoData'):
                     logger.debug(f'  - NoData value: {pRaster.dNoData}')
+
+                pRaster.pSpatialRef = None  # Clean up spatial reference
 
             except AttributeError as e:
                 logger.error(f'Missing expected attribute in sraster: {sFilename_raster_in}: {e}')
@@ -1103,7 +1104,7 @@ class uraster:
         pFeature_out = ogr.Feature(pLayer_defn_out)
 
         #add id, area and mean, min, max, std of the raster
-        pLayer_out.CreateField(ogr.FieldDefn('id', ogr.OFTInteger))
+        pLayer_out.CreateField(ogr.FieldDefn('cellid', ogr.OFTInteger))
         #define a field
         pField = ogr.FieldDefn('area', ogr.OFTReal)
         pField.SetWidth(32)
@@ -1139,14 +1140,18 @@ class uraster:
         # Batch processing variables
         i = 1
 
-        # Pre-fetch all features for potential parallel processing
+        # Pre-fetch all features and their cellids for potential parallel processing
         aFeatures = []
+        aCellIDs_features = []  # Parallel array to store cellids for each feature
         pLayer_mesh.ResetReading()
         pFeature_mesh = pLayer_mesh.GetNextFeature()
         while pFeature_mesh is not None:
             # Check if feature crosses the international date line
             pPolygon = pFeature_mesh.GetGeometryRef()
             sGeometry_type = pPolygon.GetGeometryName()
+            # Read cellid from current feature
+            current_cellid = pFeature_mesh.GetField('cellid')
+
             if sGeometry_type == "POLYGON":
                 aCoord = get_geometry_coordinates(pPolygon)
                 #first check whether a geometry crosses the IDL
@@ -1178,13 +1183,16 @@ class uraster:
                     pFeature_new = ogr.Feature(pLayer_mesh.GetLayerDefn())
                     pFeature_new.SetGeometry(pMultipolygon)
                     aFeatures.append(pFeature_new)
+                    aCellIDs_features.append(current_cellid)
                     pFeature_mesh = pLayer_mesh.GetNextFeature()
                 else:
                     aFeatures.append(pFeature_mesh.Clone())
+                    aCellIDs_features.append(current_cellid)
                     pFeature_mesh = pLayer_mesh.GetNextFeature()
             else:
                 #a feature may still have multipolygon
                 aFeatures.append(pFeature_mesh.Clone())
+                aCellIDs_features.append(current_cellid)
                 pFeature_mesh = pLayer_mesh.GetNextFeature()
                 #if sGeometry_type == "POLYGON":
                 #elif sGeometry_type == "MULTIPOLYGON":
@@ -1349,7 +1357,9 @@ class uraster:
 
                 #create a polygon feature to save the output
                 pFeature_out.SetGeometry(pPolygon.Clone())
-                pFeature_out.SetField('id', i)
+                # Use the pre-read cellid from the parallel array
+                actual_cellid = aCellIDs_features[idx]
+                pFeature_out.SetField('cellid', actual_cellid)
                 pFeature_out.SetField('area', dArea)
 
                 if iFlag_stat_in == 1:

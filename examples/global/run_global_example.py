@@ -41,13 +41,13 @@ pRaster.visualize_target_mesh(
     sFilename_out='global_uraster_dem.png',
     sColormap=sColormap)
 
-pRaster.visualize_target_mesh(
-    sFilename_out='global_uraster_dem.mp4',
-    sColormap=sColormap,
-    iFlag_create_animation=True,
-    iAnimation_frames=360,       # 1° longitude per frame
-    sAnimation_format='mp4')
+#pRaster.visualize_target_mesh(
+#    sFilename_out='global_uraster_dem.mp4',
+#    sColormap=sColormap,
+#    iFlag_create_animation=True,
+#    iAnimation_frames=360,       # 1° longitude per frame
+#    sAnimation_format='mp4')
 
-pRaster.cleanup()
+#pRaster.cleanup()
 
 print('done')
