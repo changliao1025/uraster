@@ -76,6 +76,7 @@ class uraster:
 
         # File paths
         self.sFilename_source_mesh = aConfig.get('sFilename_source_mesh', None)
+        self.sField_unique_id = aConfig.get('sField_unique_id', None)
         self.sFilename_target_mesh = aConfig.get('sFilename_target_mesh', None)
         self.aFilename_source_raster = aConfig.get('aFilename_source_raster', [])
 
@@ -442,7 +443,14 @@ class uraster:
             logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
 
             # Get the first field name (assuming it contains the data variable)
-            sVariable = pLayerDefn.GetFieldDefn(0).GetName() if iFieldCount > 0 else None
+            if self.sField_unique_id is None:
+                sVariable = pLayerDefn.GetFieldDefn(0).GetName() if iFieldCount > 0 else None
+                #search whether it has a field name used for id
+                #for idx, pFeature_base in enumerate(pLayer):
+                #    fid = pFeature_base.GetFID()
+                #sVariable = None
+            else:
+                sVariable = self.sField_unique_id
 
             # Initialize lists for storing geometry data
             lons_list = []
@@ -947,7 +955,7 @@ class uraster:
 
         print("="*60)
 
-    def run_remap(self, sFilename_vector_out = None,
+    def run_remap(self, sFilename_target_mesh_out = None,
                     sFilename_source_mesh_in = None,
                     aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
@@ -993,36 +1001,41 @@ class uraster:
         else:
             sFilename_source_mesh = sFilename_source_mesh_in
 
-        if sFilename_vector_out is None:
-            sFilename_vector_out = self.sFilename_target_mesh
+        if sFilename_target_mesh_out is None:
+            sFilename_target_mesh = self.sFilename_target_mesh
         else:
-            self.sFilename_target_mesh = sFilename_vector_out
+            sFilename_target_mesh = sFilename_target_mesh_out
+            self.sFilename_target_mesh = sFilename_target_mesh_out
 
+        logger.info("run_remap: Starting input file validation...")
         #check input files
-        for sFilename_raster in aFilename_source_raster:
+        for idx, sFilename_raster in enumerate(aFilename_source_raster):
+            logger.info(f"Checking raster file {idx+1}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster)}")
             if os.path.exists(sFilename_raster):
                 pass
             else:
-                print('The raster file does not exist!')
+                logger.error('The raster file does not exist!')
                 return
 
+        logger.info(f"Checking source mesh file: {os.path.basename(sFilename_source_mesh)}")
         if os.path.exists(sFilename_source_mesh):
             pass
         else:
-            print('The vector mesh file does not exist!')
+            logger.error('The vector mesh file does not exist!')
             return
+        logger.info("Input file validation completed successfully")
 
         # Determine output vector format from filename extension
-        pDriver_vector = get_vector_driver_from_filename(sFilename_vector_out)
+        pDriver_vector = get_vector_driver_from_filename(sFilename_target_mesh)
         #check the input raster data format and decide gdal driver
         if sFormat_in is not None:
             sDriverName = sFormat_in
         else:
             sDriverName = 'GTiff'
 
-        if os.path.exists(sFilename_vector_out):
+        if os.path.exists(sFilename_target_mesh):
             #remove the file using the vector driver
-            pDriver_vector.DeleteDataSource(sFilename_vector_out)
+            pDriver_vector.DeleteDataSource(sFilename_target_mesh)
 
         pDriver_raster = gdal.GetDriverByName(sDriverName)
 
@@ -1032,6 +1045,7 @@ class uraster:
         sName = os.path.basename(sFilename_raster)
         sRasterName_no_extension = os.path.splitext(sName)[0]
 
+        logger.info("run_remap: Reading raster metadata and determining processing bounds...")
         #use the sraster class the check the raster
         dX_left = -180.0
         dX_right = 180.0
@@ -1041,7 +1055,8 @@ class uraster:
         pPixelHeight = None
         #narrow the range to speed up the processing
         #also get the highest resolution
-        for sFilename_raster in aFilename_source_raster:
+        for idx, sFilename_raster in enumerate(aFilename_source_raster):
+            logger.info(f"Reading metadata for raster {idx+1}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster)}")
             sRaster = sraster(sFilename_raster)
             sRaster.read_metadata()
             eType = sRaster.eType
@@ -1079,10 +1094,18 @@ class uraster:
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
 
+        logger.info("run_remap: Opening mesh dataset and analyzing features...")
         # Get the spatial reference of the mesh vector file
         pDataset_mesh = ogr.Open( sFilename_source_mesh, 0 ) #0 means read-only. 1 means writeable.
+        if pDataset_mesh is None:
+            logger.error(f"Failed to open mesh dataset: {sFilename_source_mesh}")
+            return
         pLayer_mesh = pDataset_mesh.GetLayer(0)
+        if pLayer_mesh is None:
+            logger.error("Failed to get layer from mesh dataset")
+            return
         nFeature = pLayer_mesh.GetFeatureCount()
+        logger.info(f"Found {nFeature} features in mesh dataset")
         pSpatialRef_target = pLayer_mesh.GetSpatialRef()
 
         pSpatialRef_target_wkt = pSpatialRef_target.ExportToWkt() if pSpatialRef_target else None
@@ -1098,8 +1121,8 @@ class uraster:
         sDriverName = 'MEM'
 
         #create a polygon feature to save the output
-        pDataset_out = pDriver_vector.CreateDataSource(sFilename_vector_out)
-        pLayer_out = pDataset_out.CreateLayer('cell', pSpatialRef_target, ogr.wkbPolygon)
+        pDataset_out = pDriver_vector.CreateDataSource(sFilename_target_mesh_out)
+        pLayer_out = pDataset_out.CreateLayer('uraster', pSpatialRef_target, ogr.wkbPolygon)
         pLayer_defn_out = pLayer_out.GetLayerDefn()
         pFeature_out = ogr.Feature(pLayer_defn_out)
 
@@ -1134,12 +1157,15 @@ class uraster:
             'srcSRS': 'EPSG:4326',  # Explicitly set source CRS
         }
 
-        # Enable GDAL multi-threading
-        gdal.SetConfigOption('GDAL_NUM_THREADS', str(cpu_count()))
+        # Enable GDAL multi-threading (but limit to prevent resource exhaustion)
+        num_threads = min(5, cpu_count())  # Limit to 5 threads to prevent hanging
+        gdal.SetConfigOption('GDAL_NUM_THREADS', str(num_threads))
+        logger.info(f"Set GDAL to use {num_threads} threads")
 
         # Batch processing variables
         i = 1
 
+        logger.info("run_remap: Pre-fetching features and analyzing geometries...")
         # Pre-fetch all features and their cellids for potential parallel processing
         aFeatures = []
         aCellIDs_features = []  # Parallel array to store cellids for each feature
@@ -1202,6 +1228,11 @@ class uraster:
 
             i += 1
 
+            # Progress reporting during feature pre-processing
+            if i % 1000 == 0:
+                logger.info(f"Pre-processed {i} features...")
+
+        logger.info(f"run_remap: Pre-processing completed. Found {len(aFeatures)} features to process")
         print(f"Processing {len(aFeatures)} features...")
         start_time = time.time()
 
@@ -1209,15 +1240,36 @@ class uraster:
         failed_features = []
         successful_features = 0
 
+        # Initialize memory monitoring once (if available)
+        memory_monitor = None
+        try:
+            import psutil
+            memory_monitor = psutil.Process()
+            logger.info("Memory monitoring enabled")
+        except ImportError:
+            logger.debug("psutil not available - memory monitoring disabled")
+
         #reset i
         i = 1
 
         # Process features
         for idx, pFeature_mesh in enumerate(aFeatures):
+            # Enhanced progress reporting for debugging (reduce frequency for large datasets)
+            if i == 1 or i % 1000 == 0:
+                elapsed = time.time() - start_time
+                rate = i / elapsed if elapsed > 0 else 0
+                logger.info(f"Starting feature {i}/{len(aFeatures)} (Rate: {rate:.2f} features/sec)")
+            logger.debug(f"Processing feature {i}: Getting geometry and envelope...")
             sClip = f"{i:08d}"  # f-string is faster than format
             pPolygon = pFeature_mesh.GetGeometryRef()
+            if pPolygon is None:
+                logger.error(f"Feature {i} has no geometry!")
+                i += 1
+                continue
             # Fast envelope check first
+            logger.debug(f"Feature {i}: Getting envelope...")
             minX, maxX, minY, maxY = pPolygon.GetEnvelope()
+            logger.debug(f"Feature {i}: Envelope = ({minX:.3f}, {maxX:.3f}, {minY:.3f}, {maxY:.3f})")
             if (minX > dX_right or maxX < dX_left or
                 minY > dY_top or maxY < dY_bot or
                 not pPolygon or pPolygon.IsEmpty() or not pPolygon.IsValid()):
@@ -1228,16 +1280,16 @@ class uraster:
 
             # Process valid polygons with comprehensive error handling
             feature_start_time = time.time()
+            #logger.info(f"Feature {i}: Starting GDAL processing (envelope: {minX:.1f} to {maxX:.1f}, {minY:.1f} to {maxY:.1f})")
             try:
-                # Monitor memory usage (optional - requires psutil)
-                try:
-                    import psutil
-                    process = psutil.Process()
-                    memory_percent = process.memory_percent()
-                    if memory_percent > MEMORY_WARNING_THRESHOLD:  # Use constant
-                        logger.warning(f"High memory usage: {memory_percent:.1f}% at feature {i}")
-                except ImportError:
-                    pass  # psutil not available
+                # Monitor memory usage periodically (only every 1000 features to avoid overhead)
+                if memory_monitor is not None and i % 1000 == 0:
+                    try:
+                        memory_percent = memory_monitor.memory_percent()
+                        if memory_percent > MEMORY_WARNING_THRESHOLD:  # Use constant
+                            logger.warning(f"High memory usage: {memory_percent:.1f}% at feature {i}")
+                    except Exception:
+                        pass  # Ignore memory monitoring errors
 
                 # Handle polygon vs multipolygon differently
                 geometry_type = pPolygon.GetGeometryType()
@@ -1258,8 +1310,10 @@ class uraster:
 
                 if sGeometry_type == "POLYGON":
                     # Simple polygon - process normally
+                    #logger.info(f"Feature {i}: Calling _process_single_polygon...")
                     pDataset_clip_warped, aData_clip, newGeoTransform = self._process_single_polygon(
                         pPolygon, aFilename_source_raster, gdal_warp_options_base, i)
+                    #logger.info(f"Feature {i}: _process_single_polygon completed")
 
                     if pDataset_clip_warped is None:
                         error_msg = f"Failed to process single polygon for feature {i}"
@@ -1306,8 +1360,6 @@ class uraster:
                 logger.error(error_msg)
                 failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
                 # Force garbage collection
-                import gc
-                gc.collect()
                 i += 1
                 continue
 
@@ -1423,7 +1475,7 @@ class uraster:
         # Save failure report to file
         if failed_features:
             # Generate failure report filename by replacing extension with '_failures.log'
-            base_name = os.path.splitext(sFilename_vector_out)[0]
+            base_name = os.path.splitext(sFilename_target_mesh_out)[0]
             failure_report_file = f"{base_name}_failures.log"
             try:
                 with open(failure_report_file, 'w') as f:
@@ -1579,7 +1631,10 @@ class uraster:
             logger.info(f'Created GeoVista mesh with {mesh.n_cells} cells and {mesh.n_points} points')
 
             # Create 3D plotter
-            plotter = gv.GeoPlotter()
+            if sFilename_out is not None:
+                plotter = gv.GeoPlotter(off_screen=True)
+            else:
+                plotter = gv.GeoPlotter()
 
             # Configure scalar bar (colorbar) appearance
             sargs = {
@@ -2039,8 +2094,7 @@ class uraster:
                 plotter = gv.GeoPlotter(off_screen=True)
             else:
                 plotter = gv.GeoPlotter()
-
-            plotter.show(auto_close=False)
+                plotter.show(auto_close=False)
 
             # Configure scalar bar (colorbar) appearance
             sargs = {
@@ -2197,6 +2251,7 @@ class uraster:
         pDataset_clip = None
         pLayer_clip = None
         pFeature_clip = None
+        pPolygonWKT_file = None
         try:
             # Use WKT for faster performance
             srs_wgs84 = osr.SpatialReference()
@@ -2205,6 +2260,7 @@ class uraster:
             #make a copy of the warp options to modify
             gdal_warp_options = gdal_warp_options_base.copy()
             #save WKT to a temporary file using the memory driver
+
             pPolygonWKT_file = '/vsimem/polygon_wkt_' + str(feature_id) + '.shp'
             pDataset_clip = pDriver_shp.CreateDataSource(pPolygonWKT_file)
             pLayer_clip = pDataset_clip.CreateLayer('polygon_layer', geom_type=ogr.wkbPolygon, srs=srs_wgs84)
@@ -2229,8 +2285,11 @@ class uraster:
                 signal.signal(signal.SIGALRM, timeout_handler)
                 signal.alarm(WARP_TIMEOUT_SECONDS)
 
-            logger.debug(f"Starting GDAL Warp for single polygon feature {feature_id}")
+            #logger.info(f"Feature {feature_id}: Starting GDAL Warp (timeout: {WARP_TIMEOUT_SECONDS}s)")
+            warp_start_time = time.time()
             pDataset_clip_warped = gdal.Warp('', aFilename_source_raster, options=pWrapOption)
+            warp_duration = time.time() - warp_start_time
+            #logger.info(f"Feature {feature_id}: GDAL Warp completed in {warp_duration:.2f}s")
 
             if hasattr(signal, 'SIGALRM'):
                 signal.alarm(0)  # Cancel the alarm
@@ -2268,6 +2327,11 @@ class uraster:
             return None, None, None
         finally:
             # Clean up all spatial reference and OGR objects to prevent memory leaks
+            if pPolygonWKT_file is not None:
+                try:
+                    gdal.Unlink(pPolygonWKT_file)
+                except Exception:
+                    pass
             if srs_wgs84 is not None:
                 srs_wgs84 = None
             if pFeature_clip is not None:
@@ -2392,7 +2456,7 @@ class uraster:
             logger.error(f"Error merging raster parts for feature {feature_id}: {str(e)}")
             return None, None
 
-    def _create_rotation_animation(self, plotter,  sFilename_out, dLongitude_start, dLatitude_focus,
+    def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
                                     iAnimation_frames, dAnimation_speed, sAnimation_format):
         """
         Create a rotating animation of the 3D globe visualization with sine wave latitude pattern.
@@ -2527,8 +2591,7 @@ class uraster:
                         logger.info(f'  Frame {i+1}/{iAnimation_frames} ({progress_pct:.1f}%) - Lon: {current_longitude:.1f}°, Lat: {current_latitude:.1f}°')
                     # Force garbage collection every 10 frames
                     if (i + 1) % 10 == 0:
-                        import gc
-                        gc.collect()
+                        pass  # No operation needed here
                 # Close movie file
 
                 logger.info('Movie file closed')
@@ -2555,8 +2618,6 @@ class uraster:
                 return False
             finally:
                 # Final cleanup to prevent memory leaks
-                import gc
-                gc.collect()
                 logger.debug('Performed final garbage collection after animation creation')
 
         except Exception as e:
@@ -2566,8 +2627,7 @@ class uraster:
         finally:
             # Ensure cleanup even if exceptions occur
             try:
-                import gc
-                gc.collect()
+                pass
             except:
                 pass
 

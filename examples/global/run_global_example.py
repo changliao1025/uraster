@@ -30,10 +30,10 @@ aConfig['sFilename_target_mesh']= sFilename_out_vector
 pRaster = uraster(aConfig)
 
 pRaster.setup()
-#pRaster.report_inputs()
-#pRaster.visualize_source_mesh(sFilename_out='mesh.jpg',)
+pRaster.report_inputs()
+pRaster.visualize_source_mesh(sFilename_out='mesh.jpg')
 
-#pRaster.run_remap(sFilename_out_vector)
+pRaster.run_remap(sFilename_out_vector)
 #pRaster.report_outputs()
 sColormap = 'terrain'
 
