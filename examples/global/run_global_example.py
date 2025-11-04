@@ -33,7 +33,7 @@ pRaster.setup()
 pRaster.report_inputs()
 pRaster.visualize_source_mesh(sFilename_out='mesh.jpg')
 
-pRaster.run_remap(sFilename_out_vector)
+pRaster.run_remap()
 #pRaster.report_outputs()
 sColormap = 'terrain'
 

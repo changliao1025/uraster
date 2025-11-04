@@ -1121,7 +1121,7 @@ class uraster:
         sDriverName = 'MEM'
 
         #create a polygon feature to save the output
-        pDataset_out = pDriver_vector.CreateDataSource(sFilename_target_mesh_out)
+        pDataset_out = pDriver_vector.CreateDataSource(sFilename_target_mesh)
         pLayer_out = pDataset_out.CreateLayer('uraster', pSpatialRef_target, ogr.wkbPolygon)
         pLayer_defn_out = pLayer_out.GetLayerDefn()
         pFeature_out = ogr.Feature(pLayer_defn_out)
