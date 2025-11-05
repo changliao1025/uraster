@@ -358,7 +358,7 @@ class uraster:
 
         return f"Unknown geometry type: {geometry_type}"
 
-    def _determine_optimal_resampling(self, dPixelWidth, dPixelHeight):
+    def _determine_optimal_resampling(self, dPixelWidth, dPixelHeight, iFlag_verbose=False):
         """
         Determine optimal resampling method based on mesh and raster resolution comparison.
 
@@ -369,6 +369,8 @@ class uraster:
         Args:
             dPixelWidth (float): Raster pixel width in degrees
             dPixelHeight (float): Raster pixel height in degrees (absolute value)
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
 
         Returns:
             tuple: (resample_method_string, resample_method_code)
@@ -388,12 +390,13 @@ class uraster:
         # Calculate resolution ratio (mesh size / raster size)
         dResolution_ratio = dMesh_characteristic_size / dRaster_resolution
 
-        logger.info("="*60)
-        logger.info("Resolution Comparison Analysis:")
-        logger.info(f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution*111:.2f} km at equator)")
-        logger.info(f"  Mean mesh cell size: {dMesh_characteristic_size:.6f} degrees ({dMesh_characteristic_size*111:.2f} km at equator)")
-        logger.info(f"  Resolution ratio (mesh/raster): {dResolution_ratio:.2f}")
-        logger.info(f"  Threshold for weighted averaging: {self.dResolution_ratio_threshold:.2f}")
+        if iFlag_verbose:
+            logger.info("="*60)
+            logger.info("Resolution Comparison Analysis:")
+            logger.info(f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution*111:.2f} km at equator)")
+            logger.info(f"  Mean mesh cell size: {dMesh_characteristic_size:.6f} degrees ({dMesh_characteristic_size*111:.2f} km at equator)")
+            logger.info(f"  Resolution ratio (mesh/raster): {dResolution_ratio:.2f}")
+            logger.info(f"  Threshold for weighted averaging: {self.dResolution_ratio_threshold:.2f}")
 
         # Decision logic
         if dResolution_ratio < self.dResolution_ratio_threshold:
@@ -401,17 +404,20 @@ class uraster:
             # Use weighted averaging to properly capture sub-pixel variations
             recommended_method = 'average'
             recommended_code = 3
-            logger.warning(f"Mesh resolution is close to raster resolution (ratio: {dResolution_ratio:.2f})")
-            logger.warning(f"Switching to WEIGHTED AVERAGING (average) for accuracy")
-            logger.warning("Consider using higher resolution raster data for better results")
+            if iFlag_verbose:
+                logger.warning(f"Mesh resolution is close to raster resolution (ratio: {dResolution_ratio:.2f})")
+                logger.warning(f"Switching to WEIGHTED AVERAGING (average) for accuracy")
+                logger.warning("Consider using higher resolution raster data for better results")
         else:
             # Raster is much finer than mesh - nearest neighbor is appropriate
             recommended_method = 'near'
             recommended_code = 1
-            logger.info(f"Raster is significantly finer than mesh (ratio: {dResolution_ratio:.2f})")
-            logger.info(f"Using NEAREST NEIGHBOR resampling (sufficient for this resolution ratio)")
+            if iFlag_verbose:
+                logger.info(f"Raster is significantly finer than mesh (ratio: {dResolution_ratio:.2f})")
+                logger.info(f"Using NEAREST NEIGHBOR resampling (sufficient for this resolution ratio)")
 
-        logger.info("="*60)
+        if iFlag_verbose:
+            logger.info("="*60)
 
         return recommended_method, recommended_code
 
@@ -1117,7 +1123,7 @@ class uraster:
 
         # Determine optimal resampling method based on resolution comparison
         # This will override iFlag_remap_method if mesh resolution is too coarse
-        sRemap_method_auto, iRemap_method_auto = self._determine_optimal_resampling(dPixelWidth, abs(pPixelHeight))
+        sRemap_method_auto, iRemap_method_auto = self._determine_optimal_resampling(dPixelWidth, abs(pPixelHeight), iFlag_verbose)
 
         # Use automatically determined method if it's more conservative than user setting
         # Priority: weighted averaging > nearest neighbor
@@ -1661,6 +1667,15 @@ class uraster:
             name = 'Mesh Cell ID'
             sUnit = ""
 
+            # Validate connectivity array structure
+            if self.aConnectivity.size == 0:
+                logger.error('Connectivity array is empty')
+                return False
+
+            if self.aConnectivity.ndim != 2:
+                logger.error(f'Connectivity array must be 2D, got {self.aConnectivity.ndim}D')
+                return False
+
             # Create masked connectivity array (mask invalid indices)
             connectivity_masked = np.ma.masked_where(
                 self.aConnectivity == -1,
@@ -1683,17 +1698,38 @@ class uraster:
                 crs=crs
             )
 
+            # Validate cell data array length matches mesh cells
+            if len(self.aCellID) != mesh.n_cells:
+                logger.error(f'Cell ID array length ({len(self.aCellID)}) does not match mesh cells ({mesh.n_cells})')
+                logger.error(f'This indicates a mismatch between mesh topology and cell data')
+                return False
 
             mesh.cell_data[name] = self.aCellID
 
             if iFlag_verbose:
                 logger.info(f'Created GeoVista mesh with {mesh.n_cells} cells and {mesh.n_points} points')
 
-            # Create 3D plotter
-            if sFilename_out is not None:
-                plotter = gv.GeoPlotter(off_screen=True)
-            else:
-                plotter = gv.GeoPlotter()
+            # Create 3D plotter with enhanced error handling
+            try:
+                if sFilename_out is not None:
+                    # Off-screen rendering for saving files
+                    plotter = gv.GeoPlotter(off_screen=True)
+                    if iFlag_verbose:
+                        logger.debug('Created off-screen plotter for file output')
+                else:
+                    # Interactive rendering
+                    plotter = gv.GeoPlotter()
+                    if iFlag_verbose:
+                        logger.debug('Created interactive plotter')
+
+            except Exception as e:
+                logger.error(f'Failed to create GeoVista plotter: {e}')
+                logger.error('This may be due to missing graphics context or display')
+                if sFilename_out is not None:
+                    logger.error('For headless systems, ensure proper OpenGL/Mesa setup')
+                else:
+                    logger.error('For interactive mode, ensure display environment (X11/Wayland) is available')
+                return False
 
             # Configure scalar bar (colorbar) appearance
             sargs = {
@@ -1721,10 +1757,13 @@ class uraster:
                 camera_distance = earth_radius * 3.0  # Position camera 3x earth radius away
 
                 # Convert spherical coordinates to Cartesian (x, y, z)
+                # Focal point is ON the Earth surface at the specified coordinates
                 x_focal = earth_radius * math.cos(lat_rad) * math.cos(lon_rad)
                 y_focal = earth_radius * math.cos(lat_rad) * math.sin(lon_rad)
                 z_focal = earth_radius * math.sin(lat_rad)
 
+                # Camera position is AWAY from Earth at the same angular position
+                # This creates a proper viewing angle from outside looking in
                 x_camera = camera_distance * math.cos(lat_rad) * math.cos(lon_rad)
                 y_camera = camera_distance * math.cos(lat_rad) * math.sin(lon_rad)
                 z_camera = camera_distance * math.sin(lat_rad)
@@ -1732,14 +1771,39 @@ class uraster:
                 focal_point = [x_focal, y_focal, z_focal]
                 camera_position = [x_camera, y_camera, z_camera]
 
+                # Validate camera setup - ensure camera and focal point are different
+                camera_distance_check = math.sqrt(
+                    (x_camera - x_focal)**2 + (y_camera - y_focal)**2 + (z_camera - z_focal)**2
+                )
+
+                if camera_distance_check < 0.1:  # Too close or identical
+                    logger.warning('Camera and focal point are too close, using default view')
+                    raise ValueError('Invalid camera positioning')
+
                 plotter.camera.focal_point = focal_point
                 plotter.camera.position = camera_position
                 plotter.camera.zoom(dZoom_factor)
 
-                if iFlag_verbose:
-                    logger.debug(f'Camera configured: focal={focal_point}, position={camera_position}')
+                # Set up vector for proper orientation
+                plotter.camera.up = [0, 0, 1]  # Z-up orientation
+
+                # Verify camera setup was successful
+                if hasattr(plotter.camera, 'position') and plotter.camera.position:
+                    if iFlag_verbose:
+                        logger.debug(f'Camera configured successfully:')
+                        logger.debug(f'  Focal point: [{x_focal:.3f}, {y_focal:.3f}, {z_focal:.3f}]')
+                        logger.debug(f'  Camera position: [{x_camera:.3f}, {y_camera:.3f}, {z_camera:.3f}]')
+                        logger.debug(f'  Distance: {camera_distance_check:.3f}')
+                else:
+                    logger.warning('Camera configuration may not have been applied correctly')
+
             except Exception as e:
                 logger.warning(f'Error setting camera position: {e}. Using default view.')
+                # Reset to default camera view
+                try:
+                    plotter.reset_camera()
+                except Exception:
+                    pass
 
             # Add geographic context
             if iFlag_show_coastlines:

@@ -21,9 +21,9 @@ pRaster = uraster(aConfig)
 pRaster.setup()
 pRaster.report_inputs()
 pRaster.visualize_source_mesh(sFilename_out='/Users/liao313/workspace/python/uraster/data/output/rhpx/mesh.jpg')
-
+exit()
 pRaster.run_remap()
-#pRaster.report_outputs()
+pRaster.report_outputs()
 sColormap = 'terrain'
 
 pRaster.visualize_target_mesh(
