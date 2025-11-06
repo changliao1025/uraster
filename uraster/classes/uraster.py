@@ -926,9 +926,9 @@ class uraster:
                     sFilename_source_mesh_in = None,
                     aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
+                  iFlag_remap_method_in = 1,
                   iFlag_save_clipped_raster_in=0,
                   sFolder_raster_out_in = None,
-                  sFormat_in='GTiff',
                   iFlag_verbose=False):
         """
         Perform zonal statistics by clipping raster data to mesh polygons.
@@ -951,9 +951,15 @@ class uraster:
             sFilename_target_mesh = sFilename_target_mesh_out
             self.sFilename_target_mesh = sFilename_target_mesh_out
         return extract.run_remap(
-             sFilename_target_mesh, sFilename_source_mesh, aFilename_source_raster,
-            iFlag_stat_in, iFlag_save_clipped_raster_in, sFolder_raster_out_in, sFormat_in, iFlag_verbose
-        )
+             sFilename_target_mesh,
+               sFilename_source_mesh,
+               aFilename_source_raster,
+             self.dArea_mean,
+             iFlag_remap_method_in = iFlag_remap_method_in,
+            iFlag_stat_in = iFlag_stat_in,
+              iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
+              sFolder_raster_out_in=sFolder_raster_out_in,
+              iFlag_verbose=iFlag_verbose  )
 
     def visualize_source_mesh(self,
                               sFilename_out=None,
@@ -1012,13 +1018,13 @@ class uraster:
                                sFilename_out=None,
                                dLongitude_focus_in=0.0,
                                dLatitude_focus_in=0.0,
-                               dZoom_factor=0.75,
+                               dZoom_factor=0.7,
                                iFlag_show_coastlines=True,
                                iFlag_show_graticule=True,
                                sColormap='viridis',
                                iFlag_create_animation=False,
-                               iAnimation_frames=36,
-                               dAnimation_speed=10.0,
+                               iAnimation_frames=360,
+                               dAnimation_speed=1.0,
                                sAnimation_format='mp4',
                                iFlag_verbose=False):
         """

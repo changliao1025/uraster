@@ -31,27 +31,27 @@ def main():
 
     pRaster.setup()
 
-    pRaster.report_inputs()
+    #pRaster.report_inputs()
     # visualize source mesh at the Idaho Falls area
     dLongitude_focus_in = -112.033964
     dLatitude_focus_in = 43.491977
     # pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
 
     pRaster.run_remap()
-    pRaster.report_outputs()
+    #pRaster.report_outputs() #not implemented yet
     sColormap = 'terrain'
 
-    # Optional visualization and animation (disabled by default in this script)
-    # pRaster.visualize_target_mesh(
-    #     sFilename_out=sFilename_variable_png,
-    #     sColormap=sColormap)
+    #Optional visualization and animation (disabled by default in this script)
+    #pRaster.visualize_target_mesh(
+    #    sFilename_out=sFilename_variable_png,
+    #    sColormap=sColormap, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
 
-    # pRaster.visualize_target_mesh(
-    #     sFilename_out=sFilename_variable_animation,
-    #     sColormap=sColormap,
-    #     iFlag_create_animation=True,
-    #     iAnimation_frames=360,       # 1° longitude per frame
-    #     sAnimation_format='mp4')
+    pRaster.visualize_target_mesh(
+        sFilename_out=sFilename_variable_animation,
+        sColormap=sColormap,
+        iFlag_create_animation=True,
+        iAnimation_frames=360,       # 1° longitude per frame
+        sAnimation_format='mp4')
 
     pRaster.cleanup()
 

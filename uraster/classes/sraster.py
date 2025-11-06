@@ -64,8 +64,6 @@ class sraster:
         pSpatialRef_wgs84.ImportFromEPSG(4326)
         wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
         pSpatialRef_wgs84 = None  # Clean up
-
-
         #check if file exists
         sFilename = self.sFilename
         if not os.path.isfile(sFilename):

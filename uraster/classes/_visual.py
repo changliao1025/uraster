@@ -214,7 +214,7 @@ def visualize_source_mesh(self,
         # Configure camera position and focus
         try:
             # Use PyVista/VTK coordinate conversion instead of deprecated geodesic
-            import math
+
 
             # Convert longitude/latitude to radians
             lon_rad = math.radians(dLongitude_focus)
@@ -375,13 +375,13 @@ def visualize_target_mesh(self, sVariable_in=None,
                            sFilename_out=None,
                            dLongitude_focus_in=0.0,
                            dLatitude_focus_in=0.0,
-                           dZoom_factor=0.75,
+                           dZoom_factor=0.7,
                            iFlag_show_coastlines=True,
                            iFlag_show_graticule=True,
                            sColormap='viridis',
                            iFlag_create_animation=False,
                            iAnimation_frames=36,
-                           dAnimation_speed=10.0,
+                           dAnimation_speed=1.0,
                            sAnimation_format='mp4',
                            iFlag_verbose=False):
     """
@@ -416,7 +416,7 @@ def visualize_target_mesh(self, sVariable_in=None,
         iAnimation_frames (int, optional): Number of frames for 360° rotation.
             Default is 36 (10° per frame). More frames = smoother animation.
         dAnimation_speed (float, optional): Animation speed in degrees per frame.
-            Default is 10.0. Calculated as 360 / iAnimation_frames if not specified.
+            Default is 1.0. Calculated as 360 / iAnimation_frames if not specified.
         sAnimation_format (str, optional): Animation output format.
             Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
         iFlag_verbose (bool, optional): If True, print detailed progress messages.
@@ -484,7 +484,7 @@ def visualize_target_mesh(self, sVariable_in=None,
     # Validate zoom factor
     if dZoom_factor <= 0:
         logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.0')
-        dZoom_factor = 0.75
+        dZoom_factor = 0.7
 
     # Validate output file path if provided
     if sFilename_out is not None:
@@ -587,7 +587,7 @@ def visualize_target_mesh(self, sVariable_in=None,
                         else:
                             # Handle None values as NaN
                             data_list.append(np.nan)
-                            logger.warning(f'Feature {feature_count} has None value for {sVariable}')
+                            #logger.warning(f'Feature {feature_count} has None value for {sVariable}')
                     except Exception as e:
                         logger.warning(f'Error reading field {sVariable} from feature {feature_count}: {e}')
                         data_list.append(np.nan)
@@ -600,7 +600,8 @@ def visualize_target_mesh(self, sVariable_in=None,
                         data_value = field_value if field_value is not None else np.nan
 
                         if field_value is None:
-                            logger.warning(f'Feature {feature_count} has None value for {sVariable}')
+                            #logger.warning(f'Feature {feature_count} has None value for {sVariable}')
+                            pass
 
                         # Add the same data value for each polygon part in the multipolygon
                         nGeometryParts = pGeometry.GetGeometryCount()
@@ -703,7 +704,14 @@ def visualize_target_mesh(self, sVariable_in=None,
             return False
 
         mesh.cell_data[scalars] = data
+        # Hide/skip cells with NaN by extracting only valid cells
 
+        n_valid = int(np.count_nonzero(valid_data_mask))
+        if n_valid == 0:
+            logger.warning(f'No valid cells to plot for variable "{scalars}"')
+            return False
+
+        valid_cell_indices = np.where(valid_data_mask)[0]
         if iFlag_verbose:
             logger.info(f'Attached data "{scalars}" to mesh cells')
 
@@ -716,7 +724,7 @@ def visualize_target_mesh(self, sVariable_in=None,
             # Validate animation parameters
             if iAnimation_frames <= 0:
                 logger.warning(f'Invalid animation frames {iAnimation_frames}, using default 36')
-                iAnimation_frames = 36
+                iAnimation_frames = 360
 
             if dAnimation_speed <= 0:
                 dAnimation_speed = 360.0 / iAnimation_frames
@@ -743,7 +751,38 @@ def visualize_target_mesh(self, sVariable_in=None,
             }
 
             # Add mesh to plotter
-            plotter.add_mesh(mesh, scalars=scalars, scalar_bar_args=sargs, cmap=sColormap)
+            mesh_valid = mesh.extract_cells(valid_cell_indices)
+            plotter.add_mesh(mesh_valid, scalars=scalars, scalar_bar_args=sargs, cmap=sColormap)
+
+            try:
+                # Convert longitude/latitude to radians
+                lon_rad = math.radians(dLongitude_focus)
+                lat_rad = math.radians(dLatitude_focus)
+
+                # Earth radius (approximately 6371 km, but use normalized units)
+                earth_radius = 1.0
+                camera_distance = earth_radius * 3.0  # Position camera 3x earth radius away
+
+                # Convert spherical coordinates to Cartesian (x, y, z)
+                x_focal = earth_radius * math.cos(lat_rad) * math.cos(lon_rad)
+                y_focal = earth_radius * math.cos(lat_rad) * math.sin(lon_rad)
+                z_focal = earth_radius * math.sin(lat_rad)
+
+                x_camera = camera_distance * math.cos(lat_rad) * math.cos(lon_rad)
+                y_camera = camera_distance * math.cos(lat_rad) * math.sin(lon_rad)
+                z_camera = camera_distance * math.sin(lat_rad)
+
+                focal_point = [x_focal, y_focal, z_focal]
+                camera_position = [x_camera, y_camera, z_camera]
+
+                plotter.camera.focal_point = focal_point
+                plotter.camera.position = camera_position
+                plotter.camera.zoom(dZoom_factor)
+                if iFlag_verbose:
+                    logger.debug(f'Camera configured: focal={focal_point}, position={camera_position}')
+
+            except Exception as e:
+                logger.warning(f'Error setting camera position: {e}. Using default view.')
 
             # Add geographic context
             if iFlag_show_coastlines:
@@ -760,7 +799,7 @@ def visualize_target_mesh(self, sVariable_in=None,
 
             # Create animation
             success = _create_rotation_animation(
-                self, plotter, sFilename_out, dLongitude_focus, dLatitude_focus,
+                plotter, sFilename_out, dLongitude_focus, dLatitude_focus,
                 dZoom_factor, iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose
             )
 
@@ -796,12 +835,11 @@ def visualize_target_mesh(self, sVariable_in=None,
             }
 
             # Add mesh to plotter
-            plotter.add_mesh(mesh, scalars=scalars, scalar_bar_args=sargs, cmap=sColormap)
+            mesh_valid = mesh.extract_cells(valid_cell_indices)
+            plotter.add_mesh(mesh_valid, scalars=scalars, scalar_bar_args=sargs, cmap=sColormap)
 
             # Configure camera position
             try:
-                import math
-
                 # Convert longitude/latitude to radians
                 lon_rad = math.radians(dLongitude_focus)
                 lat_rad = math.radians(dLatitude_focus)
@@ -907,7 +945,7 @@ def visualize_target_mesh(self, sVariable_in=None,
         return False
 
 
-def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
+def _create_rotation_animation(plotter, sFilename_out, dLongitude_start, dLatitude_focus,
                                dZoom_factor, iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose):
     """
     Create a rotating animation of the 3D globe visualization.
@@ -936,7 +974,7 @@ def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, d
             if iFlag_verbose:
                 logger.info('ImageIO library imported for animation creation')
         except ImportError:
-            logger.error('ImageIO library required for animations. Install with: pip install imageio[ffmpeg]')
+            logger.error('ImageIO library required for animations. Install with: conda install imageio[ffmpeg]')
             return False
 
         if iFlag_verbose:
@@ -946,12 +984,15 @@ def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, d
             logger.info(f'  - Rotation speed: {dAnimation_speed:.1f}°/frame')
             logger.info(f'  - Output format: {sAnimation_format}')
 
-        # Prepare temporary frame storage
-        frame_list = []
+
         earth_radius = 1.0
         camera_distance = earth_radius * 3.0
 
         # Generate frames
+        amplitude_deg = 20.0
+        cycles = 1.0
+        phase = 0.0
+        plotter.open_movie(sFilename_out, framerate=30)
         for iFrame in range(iAnimation_frames):
             # Calculate current longitude
             dLongitude_current = dLongitude_start + (iFrame * dAnimation_speed)
@@ -959,9 +1000,19 @@ def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, d
             if dLongitude_current > 180.0:
                 dLongitude_current -= 360.0  # Convert to [-180, 180]
 
+            # Sine-pattern latitude: oscillate latitude as a sine curve while rotating longitude.
+            # amplitude (deg) controls north/south swing; cycles controls how many sine cycles
+            # occur over the full animation. phase shifts the starting point if needed.
+            # Protect against division by zero
+            frames_div = float(iAnimation_frames) if iAnimation_frames > 0 else 1.0
+            theta = 2.0 * math.pi * (float(iFrame) / frames_div) * cycles + phase
+            dLatitude_current = float(dLatitude_focus) + amplitude_deg * math.sin(theta)
+            # Clip to avoid exactly hitting poles (which can cause view issues)
+            dLatitude_current = max(-89.9, min(89.9, dLatitude_current))
+
             # Convert to radians
             lon_rad = math.radians(dLongitude_current)
-            lat_rad = math.radians(dLatitude_focus)
+            lat_rad = math.radians(dLatitude_current)
 
             # Calculate camera position
             x_focal = earth_radius * math.cos(lat_rad) * math.cos(lon_rad)
@@ -978,42 +1029,25 @@ def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, d
             # Update camera
             plotter.camera.focal_point = focal_point
             plotter.camera.position = camera_position
-            plotter.camera.zoom(dZoom_factor)
+            #plotter.camera.zoom(dZoom_factor)
             plotter.camera.up = [0, 0, 1]
+            plotter.add_axes()  # Re-add axes to ensure visibility
+            plotter.render()  # Render the scene
 
             # Render frame
             try:
-                frame_image = plotter.screenshot(return_img=True)
-                frame_list.append(frame_image)
-
-                if iFlag_verbose and (iFrame + 1) % 10 == 0:
-                    logger.debug(f'Generated frame {iFrame + 1}/{iAnimation_frames} (lon: {dLongitude_current:.1f}°)')
+                #use write_frame to get the image as a numpy array
+                plotter.write_frame()
 
             except Exception as e:
                 logger.error(f'Failed to render frame {iFrame + 1}: {e}')
                 return False
 
-        if not frame_list:
-            logger.error('No frames generated for animation')
-            return False
 
-        if iFlag_verbose:
-            logger.info(f'Generated {len(frame_list)} frames, creating animation...')
 
         # Determine output format and settings
         if sAnimation_format.lower() == 'gif':
-            # GIF format
-            output_file = sFilename_out
-            if not output_file.lower().endswith('.gif'):
-                output_file = os.path.splitext(sFilename_out)[0] + '.gif'
-
-            try:
-                imageio.mimsave(output_file, frame_list, duration=0.1, loop=0)
-                if iFlag_verbose:
-                    logger.info(f'✓ GIF animation saved to: {output_file}')
-            except Exception as e:
-                logger.error(f'Failed to save GIF animation: {e}')
-                return False
+            pass
 
         elif sAnimation_format.lower() in ['mp4', 'avi']:
             # Video format
@@ -1024,16 +1058,6 @@ def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, d
                 output_file = os.path.splitext(sFilename_out)[0] + '.avi'
 
             try:
-                # Use appropriate codec and settings
-                if sAnimation_format.lower() == 'mp4':
-                    writer = imageio.get_writer(output_file, fps=10, codec='libx264', quality=8)
-                else:  # avi
-                    writer = imageio.get_writer(output_file, fps=10)
-
-                for frame in frame_list:
-                    writer.append_data(frame)
-                writer.close()
-
                 if iFlag_verbose:
                     logger.info(f'✓ Video animation saved to: {output_file}')
             except Exception as e:
@@ -1046,14 +1070,16 @@ def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, d
             logger.error('Supported formats: mp4, gif, avi')
             return False
 
-        # Verify output file
-        if os.path.exists(output_file):
-            file_size = os.path.getsize(output_file)
+        if os.path.exists(sFilename_out):
+            file_size = os.path.getsize(sFilename_out)
             if iFlag_verbose:
-                logger.info(f'Animation file size: {file_size / (1024*1024):.1f} MB')
+                logger.info(f'✓ Animation created successfully: {sFilename_out}')
+                logger.info(f'  File size: {file_size / (1024*1024):.2f} MB')
+                logger.info(f'  Frames: {iAnimation_frames}')
+                logger.info(f'  Format: {sAnimation_format.upper()}')
             return True
         else:
-            logger.error(f'Animation file was not created: {output_file}')
+            logger.error('Animation file was not created')
             return False
 
     except Exception as e:
