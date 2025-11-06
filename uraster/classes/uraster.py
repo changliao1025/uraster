@@ -2,44 +2,22 @@
 import os
 import logging
 import traceback
-import signal
-import sys
-import time
 import numpy as np
 from osgeo import gdal, ogr, osr
-from multiprocessing import Pool, cpu_count
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-
+gdal.UseExceptions()
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.split_polygon_cross_idl import split_polygon_cross_idl
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename, get_vector_format_from_filename
-
-from .sraster import sraster
+from uraster.classes.sraster import sraster
+from uraster.classes import _visual
+from uraster.operation import extract
 
 # Set up logging for crash detection
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
-def signal_handler(signum, frame):
-    """Handle system signals (like SIGSEGV) for crash detection"""
-    logger.error(f"Received signal {signum}. Process may have crashed.")
-    logger.error(f"Current frame: {frame}")
-    traceback.print_stack(frame)
-    sys.exit(1)
-
-# Register signal handlers for common crash signals
-signal.signal(signal.SIGSEGV, signal_handler)  # Segmentation fault
-signal.signal(signal.SIGABRT, signal_handler)  # Abort
-signal.signal(signal.SIGFPE, signal_handler)   # Floating point exception
-
-# Constants for processing thresholds
-IDL_LONGITUDE_THRESHOLD = 100  # Degrees - threshold for detecting IDL crossing
-MEMORY_WARNING_THRESHOLD = 80  # Percent - warn when memory usage exceeds this
-WARP_TIMEOUT_SECONDS = 30      # Seconds - timeout for GDAL Warp operations
-PROGRESS_REPORT_INTERVAL = 100 # Report progress every N features
+pDriver_geojson = ogr.GetDriverByName('GeoJSON')
+pDriver_shp = ogr.GetDriverByName('ESRI Shapefile')
 
 class uraster:
     """
@@ -75,6 +53,7 @@ class uraster:
 
         # File paths
         self.sFilename_source_mesh = aConfig.get('sFilename_source_mesh', None)
+        self.sField_unique_id = aConfig.get('sField_unique_id', None)
         self.sFilename_target_mesh = aConfig.get('sFilename_target_mesh', None)
         self.aFilename_source_raster = aConfig.get('aFilename_source_raster', [])
 
@@ -106,20 +85,24 @@ class uraster:
             logger.warning(f"Invalid remap method {self.iFlag_remap_method}, defaulting to 1 (nearest neighbor)")
             self.iFlag_remap_method = 1
 
-    def setup(self):
+    def setup(self, iFlag_verbose=False):
         """
         Initialize and validate the uraster configuration.
         Checks raster files and mesh file for existence and validity.
 
+        Args:
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
+
         Returns:
             bool: True if setup successful, False otherwise
         """
-        raster_check = self.check_raster_files()
-        mesh_check = self.check_mesh_file()
+        raster_check = self.check_raster_files(iFlag_verbose=iFlag_verbose)
+        mesh_check = self.check_mesh_file(iFlag_verbose=iFlag_verbose)
 
         return raster_check is not None and mesh_check is not None
 
-    def check_raster_files(self, aFilename_source_raster_in=None):
+    def check_raster_files(self, aFilename_source_raster_in=None, iFlag_verbose=False):
         """
         Validate and prepare input raster files, converting to WGS84 if needed.
 
@@ -132,6 +115,8 @@ class uraster:
         Args:
             aFilename_source_raster_in (list, optional): List of raster file paths.
                 If None, uses self.aFilename_source_raster
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
 
         Returns:
             list: List of WGS84 raster file paths, or None if validation fails
@@ -155,7 +140,8 @@ class uraster:
             logger.error(f'Raster files must be provided as a list, got {type(aFilename_source_raster).__name__}')
             return None
 
-        logger.info(f'Validating {len(aFilename_source_raster)} raster file(s)...')
+        if iFlag_verbose:
+            logger.info(f'Validating {len(aFilename_source_raster)} raster file(s)...')
 
         # Phase 1: Check file existence and readability
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
@@ -191,12 +177,14 @@ class uraster:
                 logger.error(f'Error opening raster with GDAL: {sFilename_raster_in}: {e}')
                 return None
 
-        logger.info('All raster files exist and are readable')
+        if iFlag_verbose:
+            logger.info('All raster files exist and are readable')
 
         # Phase 2: Process and convert rasters to WGS84
         aFilename_source_raster_out = []
 
         # Create WGS84 spatial reference for comparison
+        pSpatialRef_wgs84 = None
         try:
             pSpatialRef_wgs84 = osr.SpatialReference()
             pSpatialRef_wgs84.ImportFromEPSG(4326)
@@ -204,10 +192,15 @@ class uraster:
         except Exception as e:
             logger.error(f'Failed to create WGS84 spatial reference: {e}')
             return None
+        finally:
+            # Clean up spatial reference object
+            if pSpatialRef_wgs84 is not None:
+                pSpatialRef_wgs84 = None
 
         # Process each raster file
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
-            logger.info(f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
+            if iFlag_verbose:
+                logger.info(f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
 
             try:
                 # Create sraster instance and read metadata
@@ -229,11 +222,13 @@ class uraster:
 
                 # Check if coordinate system matches WGS84
                 if pRaster.pSpatialRef_wkt == wkt_wgs84:
-                    logger.info(f'  ✓ Already in WGS84 (EPSG:4326)')
+                    if iFlag_verbose:
+                        logger.info(f'  ✓ Already in WGS84 (EPSG:4326)')
                     aFilename_source_raster_out.append(sFilename_raster_in)
                 else:
                     # Convert to WGS84
-                    logger.info(f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}')
+                    if iFlag_verbose:
+                        logger.info(f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}')
                     try:
                         pRaster_wgs84 = pRaster.convert_to_wgs84()
 
@@ -245,7 +240,8 @@ class uraster:
                             logger.error(f'Converted WGS84 file not found: {pRaster_wgs84.sFilename}')
                             return None
 
-                        logger.info(f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
+                        if iFlag_verbose:
+                            logger.info(f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
                         aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
 
                     except Exception as e:
@@ -254,10 +250,13 @@ class uraster:
                         return None
 
                 # Log raster summary
-                logger.debug(f'  - Dimensions: {pRaster.nrow} x {pRaster.ncolumn} pixels')
-                logger.debug(f'  - Data type: {pRaster.eType}')
-                if hasattr(pRaster, 'dNoData'):
-                    logger.debug(f'  - NoData value: {pRaster.dNoData}')
+                if iFlag_verbose:
+                    logger.debug(f'  - Dimensions: {pRaster.nrow} x {pRaster.ncolumn} pixels')
+                    logger.debug(f'  - Data type: {pRaster.eType}')
+                    if hasattr(pRaster, 'dNoData'):
+                        logger.debug(f'  - NoData value: {pRaster.dNoData}')
+
+                pRaster.pSpatialRef = None  # Clean up spatial reference
 
             except AttributeError as e:
                 logger.error(f'Missing expected attribute in sraster: {sFilename_raster_in}: {e}')
@@ -275,13 +274,18 @@ class uraster:
             logger.error(f'Output count mismatch: expected {len(aFilename_source_raster)}, got {len(aFilename_source_raster_out)}')
             return None
 
-        logger.info(f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
+        if iFlag_verbose:
+            logger.info(f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
 
         return aFilename_source_raster_out
 
-    def check_mesh_file(self):
+    def check_mesh_file(self, iFlag_verbose=False):
         """
         Check if the source mesh file exists and build its topology.
+
+        Args:
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
 
         Returns:
             tuple or None: (vertices_lon, vertices_lat, connectivity) if successful, None otherwise
@@ -294,7 +298,7 @@ class uraster:
             logger.error(f"Source mesh file does not exist: {self.sFilename_source_mesh}")
             return None
 
-        return self.rebuild_mesh_topology()
+        return self.rebuild_mesh_topology(iFlag_verbose=iFlag_verbose)
 
     def _get_geometry_type_name(self, geometry_type):
         """
@@ -331,68 +335,14 @@ class uraster:
 
         return f"Unknown geometry type: {geometry_type}"
 
-    def _determine_optimal_resampling(self, dPixelWidth, dPixelHeight):
-        """
-        Determine optimal resampling method based on mesh and raster resolution comparison.
-
-        Compares the characteristic mesh cell size with raster resolution to decide
-        whether to use nearest neighbor (when raster is much finer) or weighted
-        averaging (when mesh and raster resolutions are comparable).
-
-        Args:
-            dPixelWidth (float): Raster pixel width in degrees
-            dPixelHeight (float): Raster pixel height in degrees (absolute value)
-
-        Returns:
-            tuple: (resample_method_string, resample_method_code)
-                - resample_method_string: 'nearest', 'bilinear', 'cubic', 'average', etc.
-                - resample_method_code: integer code (1, 2, or 3)
-        """
-        if self.dArea_mean is None or self.dArea_mean <= 0:
-            logger.warning("Mesh area statistics not available, defaulting to nearest neighbor")
-            return 'near', 1
-
-        # Estimate characteristic mesh cell dimension (approximate square root of mean area)
-        dMesh_characteristic_size = np.sqrt(self.dArea_mean)
-
-        # Use the coarser of the two raster dimensions
-        dRaster_resolution = max(abs(dPixelWidth), abs(dPixelHeight))
-
-        # Calculate resolution ratio (mesh size / raster size)
-        dResolution_ratio = dMesh_characteristic_size / dRaster_resolution
-
-        logger.info("="*60)
-        logger.info("Resolution Comparison Analysis:")
-        logger.info(f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution*111:.2f} km at equator)")
-        logger.info(f"  Mean mesh cell size: {dMesh_characteristic_size:.6f} degrees ({dMesh_characteristic_size*111:.2f} km at equator)")
-        logger.info(f"  Resolution ratio (mesh/raster): {dResolution_ratio:.2f}")
-        logger.info(f"  Threshold for weighted averaging: {self.dResolution_ratio_threshold:.2f}")
-
-        # Decision logic
-        if dResolution_ratio < self.dResolution_ratio_threshold:
-            # Mesh cells are comparable to or smaller than raster resolution
-            # Use weighted averaging to properly capture sub-pixel variations
-            recommended_method = 'average'
-            recommended_code = 3
-            logger.warning(f"Mesh resolution is close to raster resolution (ratio: {dResolution_ratio:.2f})")
-            logger.warning(f"Switching to WEIGHTED AVERAGING (average) for accuracy")
-            logger.warning("Consider using higher resolution raster data for better results")
-        else:
-            # Raster is much finer than mesh - nearest neighbor is appropriate
-            recommended_method = 'near'
-            recommended_code = 1
-            logger.info(f"Raster is significantly finer than mesh (ratio: {dResolution_ratio:.2f})")
-            logger.info(f"Using NEAREST NEIGHBOR resampling (sufficient for this resolution ratio)")
-
-        logger.info("="*60)
-
-        return recommended_method, recommended_code
-
-
-    def rebuild_mesh_topology(self):
+    def rebuild_mesh_topology(self, iFlag_verbose=False):
         """
         Rebuild mesh topology from source mesh file by extracting vertices,
         connectivity, and centroids for unstructured mesh processing.
+
+        Args:
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
 
         Returns:
             tuple: (vertices_longitude, vertices_latitude, connectivity) or None on failure
@@ -405,7 +355,8 @@ class uraster:
                 logger.error(f'Failed to open file: {self.sFilename_source_mesh}')
                 return None
 
-            logger.info(f'Successfully opened mesh file: {self.sFilename_source_mesh}')
+            if iFlag_verbose:
+                logger.info(f'Successfully opened mesh file: {self.sFilename_source_mesh}')
 
             # Get the first layer
             pLayer = pDataset.GetLayer(0)
@@ -430,12 +381,20 @@ class uraster:
                 pDataset = None
                 return None
 
-            aCellID= list(range(nFeatures))
+            aCellID= []  # Will be populated dynamically as features are processed
 
-            logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
+            if iFlag_verbose:
+                logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
 
             # Get the first field name (assuming it contains the data variable)
-            sVariable = pLayerDefn.GetFieldDefn(0).GetName() if iFieldCount > 0 else None
+            if self.sField_unique_id is None:
+                sVariable = pLayerDefn.GetFieldDefn(0).GetName() if iFieldCount > 0 else None
+                #search whether it has a field name used for id
+                #for idx, pFeature_base in enumerate(pLayer):
+                #    fid = pFeature_base.GetFID()
+                #sVariable = None
+            else:
+                sVariable = self.sField_unique_id
 
             # Initialize lists for storing geometry data
             lons_list = []
@@ -460,13 +419,11 @@ class uraster:
                     continue
 
                 sGeometry_type = pGeometry.GetGeometryName()
-
                 if sGeometry_type == 'POLYGON':
                     try:
                         # Validate geometry before processing
                         if not pGeometry.IsValid():
-                            logger.warning(f'Feature {iFeature_index} has invalid geometry, skipping')
-                            iFeature_index += 1
+                            logger.warning(f'Feature {iFeature_index} has invalid geometry')
                             invalid_geometry_count += 1
                             print(pGeometry.ExportToWkt())
                             continue
@@ -476,7 +433,6 @@ class uraster:
                             # Validate coordinate bounds
                             lons = aCoord[:, 0]
                             lats = aCoord[:, 1]
-
                             # Check for reasonable coordinate ranges
                             if (np.any(lons < -180) or np.any(lons > 180) or
                                 np.any(lats < -90) or np.any(lats > 90)):
@@ -510,12 +466,14 @@ class uraster:
                                     else:
                                         data_list.append(0)
 
-                                    aCellID[iFeature_index] = int(field_value) if field_value is not None else iFeature_index
+                                    aCellID.append(int(field_value) if field_value is not None else iFeature_index)
                                 except (ValueError, TypeError) as e:
                                     logger.warning(f'Could not convert field value for feature {iFeature_index}: {e}')
                                     data_list.append(iFeature_index)
+                                    aCellID.append(iFeature_index)
                             else:
                                 data_list.append(iFeature_index)  # Use feature index as default
+                                aCellID.append(iFeature_index)
                         else:
                             logger.warning(f'Failed to extract coordinates from feature {iFeature_index}')
                             invalid_geometry_count += 1
@@ -524,7 +482,89 @@ class uraster:
                         logger.warning(f'Error processing feature {iFeature_index}: {str(e)}')
                         invalid_geometry_count += 1
 
-                elif sGeometry_type in ['MULTIPOLYGON', 'POINT', 'LINESTRING']:
+                elif sGeometry_type == 'MULTIPOLYGON':
+                    try:
+                        # Process multipolygon by extracting each constituent polygon
+                        if iFlag_verbose:
+                            logger.info(f'Processing multipolygon feature {iFeature_index} with {pGeometry.GetGeometryCount()} parts')
+
+                        multipolygon_processed = False
+
+                        for iPart in range(pGeometry.GetGeometryCount()):
+                            pPolygon_part = pGeometry.GetGeometryRef(iPart)
+
+                            if pPolygon_part is None:
+                                logger.warning(f'Multipolygon part {iPart} is None in feature {iFeature_index}')
+                                continue
+
+                            if not pPolygon_part.IsValid():
+                                logger.warning(f'Multipolygon part {iPart} has invalid geometry in feature {iFeature_index}')
+                                continue
+
+                            # Get coordinates of the polygon part
+                            aCoord_part = get_geometry_coordinates(pPolygon_part)
+                            if aCoord_part is not None and len(aCoord_part) > 0:
+                                # Validate coordinate bounds for this part
+                                lons_part = aCoord_part[:, 0]
+                                lats_part = aCoord_part[:, 1]
+
+                                # Check for reasonable coordinate ranges
+                                if (np.any(lons_part < -180) or np.any(lons_part > 180) or
+                                    np.any(lats_part < -90) or np.any(lats_part > 90)):
+                                    logger.warning(f'Multipolygon part {iPart} in feature {iFeature_index} has coordinates outside valid range')
+
+                                # Check for minimum polygon area (avoid degenerate polygons)
+                                if len(aCoord_part) < 3:
+                                    logger.warning(f'Multipolygon part {iPart} in feature {iFeature_index} has fewer than 3 vertices, skipping part')
+                                    continue
+
+                                lons_list.append(lons_part)
+                                lats_list.append(lats_part)
+
+                                # Calculate polygon area for this part
+                                try:
+                                    dArea_part = calculate_polygon_area(lons_part, lats_part)
+                                    area_list.append(dArea_part)
+                                except Exception as area_error:
+                                    logger.warning(f'Could not calculate area for multipolygon part {iPart} in feature {iFeature_index}: {area_error}')
+                                    area_list.append(0.0)
+
+                                # For multipolygon, use the original feature index for all parts
+                                # but track that this is a multipolygon part
+                                if sVariable:
+                                    try:
+                                        field_value = pFeature.GetField(sVariable)
+                                        if field_value is not None:
+                                            data_list.append(int(field_value))
+                                        else:
+                                            data_list.append(0)
+                                        # Maintain original aCellID for multipolygon features
+                                        # Each part gets the same CellID as the original feature
+                                        aCellID.append(int(field_value) if field_value is not None else iFeature_index)
+                                    except (ValueError, TypeError) as e:
+                                        logger.warning(f'Could not convert field value for multipolygon part {iPart} in feature {iFeature_index}: {e}')
+                                        data_list.append(iFeature_index)
+                                        aCellID.append(iFeature_index)
+                                else:
+                                    data_list.append(iFeature_index)
+                                    aCellID.append(iFeature_index)
+
+                                multipolygon_processed = True
+                            else:
+                                logger.warning(f'Failed to extract coordinates from multipolygon part {iPart} in feature {iFeature_index}')
+
+                        if not multipolygon_processed:
+                            logger.warning(f'No valid parts found in multipolygon feature {iFeature_index}')
+                            invalid_geometry_count += 1
+                        else:
+                            if iFlag_verbose:
+                                logger.info(f'Successfully processed multipolygon feature {iFeature_index}')
+
+                    except Exception as e:
+                        logger.warning(f'Error processing multipolygon feature {iFeature_index}: {str(e)}')
+                        invalid_geometry_count += 1
+
+                elif sGeometry_type in ['POINT', 'LINESTRING']:
                     logger.warning(f'Geometry type {sGeometry_type} not supported in feature {iFeature_index}, skipping')
                     invalid_geometry_count += 1
                 else:
@@ -534,12 +574,19 @@ class uraster:
                 iFeature_index += 1
 
             # Report processing statistics
-            valid_features = len(lons_list)
-            logger.info(f'Feature processing summary:')
-            logger.info(f'  - Total features: {iFeature_index}')
-            logger.info(f'  - Valid polygons: {valid_features}')
-            logger.info(f'  - Invalid/skipped: {invalid_geometry_count}')
-            logger.info(f'  - Success rate: {(valid_features/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
+            valid_mesh_cells = len(lons_list)
+            if iFlag_verbose:
+                logger.info(f'Feature processing summary:')
+                logger.info(f'  - Total input features: {iFeature_index}')
+                logger.info(f'  - Valid mesh cells created: {valid_mesh_cells}')
+                logger.info(f'  - Invalid/skipped features: {invalid_geometry_count}')
+                logger.info(f'  - Success rate: {((iFeature_index-invalid_geometry_count)/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
+
+                # Report multipolygon handling statistics
+                multipolygon_cells = valid_mesh_cells - (iFeature_index - invalid_geometry_count)
+                if multipolygon_cells > 0:
+                    logger.info(f'  - Additional cells from multipolygons: {multipolygon_cells}')
+                    logger.info(f'  - Total mesh cells (including multipolygon parts): {valid_mesh_cells}')
 
             # Clean up dataset
             pDataset = None
@@ -548,7 +595,8 @@ class uraster:
                 logger.error('No valid polygon features found in mesh file')
                 return None
 
-            logger.info(f'Successfully processed {len(lons_list)} polygon features')
+            if iFlag_verbose:
+                logger.info(f'Successfully processed {len(lons_list)} polygon features')
 
             # Calculate maximum vertices and pad coordinates efficiently
             try:
@@ -562,7 +610,8 @@ class uraster:
                     return None
 
                 self.nVertex_max = max_vertices
-                logger.info(f'Maximum vertices per polygon: {max_vertices}')
+                if iFlag_verbose:
+                    logger.info(f'Maximum vertices per polygon: {max_vertices}')
 
                 # Pre-allocate arrays for better memory efficiency
                 num_polygons = len(lons_list)
@@ -644,7 +693,8 @@ class uraster:
                         cell_lons_1d[i] = 0.0
                         cell_lats_1d[i] = 0.0
 
-                logger.info(f'Calculated centroids for {len(cell_lons_1d)} cells')
+                if iFlag_verbose:
+                    logger.info(f'Calculated centroids for {len(cell_lons_1d)} cells')
 
                 # Validate centroid ranges
                 lon_range = (np.min(cell_lons_1d), np.max(cell_lons_1d))
@@ -662,7 +712,8 @@ class uraster:
 
             # Extract unique vertices and connectivity
             try:
-                logger.info('Extracting unique vertices and connectivity...')
+                if iFlag_verbose:
+                    logger.info('Extracting unique vertices and connectivity...')
                 xv, yv, connectivity, vertex_to_index = extract_unique_vertices_and_connectivity(
                     lons_list, lats_list
                 )
@@ -671,8 +722,9 @@ class uraster:
                     logger.error('Failed to extract unique vertices and connectivity')
                     return None
 
-                logger.info(f'Extracted {len(xv)} unique vertices')
-                logger.info(f'Created connectivity matrix with shape: {connectivity.shape}')
+                if iFlag_verbose:
+                    logger.info(f'Extracted {len(xv)} unique vertices')
+                    logger.info(f'Created connectivity matrix with shape: {connectivity.shape}')
 
             except Exception as e:
                 logger.error(f'Error during vertex/connectivity extraction: {str(e)}')
@@ -687,10 +739,22 @@ class uraster:
 
             # Ensure aCellID matches the number of valid mesh cells
             if len(aCellID) != len(cell_lons_1d):
-                logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)}), truncating to match")
-                aCellID = aCellID[:len(cell_lons_1d)]
+                logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)})")
+                if len(aCellID) > len(cell_lons_1d):
+                    # Truncate aCellID to match mesh cells
+                    logger.warning("Truncating aCellID to match mesh cell count")
+                    aCellID = aCellID[:len(cell_lons_1d)]
+                else:
+                    # Extend aCellID with sequential indices
+                    logger.warning("Extending aCellID with sequential indices to match mesh cell count")
+                    missing_count = len(cell_lons_1d) - len(aCellID)
+                    aCellID.extend(range(len(aCellID), len(aCellID) + missing_count))
 
             self.aCellID = np.array(aCellID)
+
+            if iFlag_verbose:
+                logger.info(f'Final aCellID array length: {len(self.aCellID)}')
+                logger.info(f'aCellID range: [{np.min(self.aCellID)}, {np.max(self.aCellID)}]')
             # Calculate and store area statistics
             if area_list:
                 area_array = np.array(area_list)
@@ -699,10 +763,11 @@ class uraster:
                     self.dArea_min = float(np.min(valid_areas))
                     self.dArea_max = float(np.max(valid_areas))
                     self.dArea_mean = float(np.mean(valid_areas))
-                    logger.info(f'Mesh area statistics:')
-                    logger.info(f'  - Min area: {self.dArea_min:.6f}')
-                    logger.info(f'  - Max area: {self.dArea_max:.6f}')
-                    logger.info(f'  - Mean area: {self.dArea_mean:.6f}')
+                    if iFlag_verbose:
+                        logger.info(f'Mesh area statistics:')
+                        logger.info(f'  - Min area: {self.dArea_min:.6f}')
+                        logger.info(f'  - Max area: {self.dArea_max:.6f}')
+                        logger.info(f'  - Mean area: {self.dArea_mean:.6f}')
                 else:
                     logger.warning('No valid polygon areas calculated')
                     self.dArea_min = 0.0
@@ -747,14 +812,15 @@ class uraster:
                 logger.error('Mesh topology rebuild failed validation')
                 return None
 
-            logger.info('Mesh topology successfully rebuilt')
-            logger.info(f'Final mesh statistics:')
-            logger.info(f'  - Unique vertices: {len(self.aVertex_longititude)}')
-            logger.info(f'  - Mesh cells: {len(self.aCenter_longititude)}')
-            logger.info(f'  - Max vertices per cell: {self.nVertex_max}')
-            logger.info(f'  - Connectivity shape: {self.aConnectivity.shape}')
-            logger.info(f'  - Vertex longitude range: [{np.min(self.aVertex_longititude):.3f}, {np.max(self.aVertex_longititude):.3f}]')
-            logger.info(f'  - Vertex latitude range: [{np.min(self.aVertex_latitude):.3f}, {np.max(self.aVertex_latitude):.3f}]')
+            if iFlag_verbose:
+                logger.info('Mesh topology successfully rebuilt')
+                logger.info(f'Final mesh statistics:')
+                logger.info(f'  - Unique vertices: {len(self.aVertex_longititude)}')
+                logger.info(f'  - Mesh cells: {len(self.aCenter_longititude)}')
+                logger.info(f'  - Max vertices per cell: {self.nVertex_max}')
+                logger.info(f'  - Connectivity shape: {self.aConnectivity.shape}')
+                logger.info(f'  - Vertex longitude range: [{np.min(self.aVertex_longititude):.3f}, {np.max(self.aVertex_longititude):.3f}]')
+                logger.info(f'  - Vertex latitude range: [{np.min(self.aVertex_latitude):.3f}, {np.max(self.aVertex_latitude):.3f}]')
 
             return xv, yv, connectivity
 
@@ -844,468 +910,53 @@ class uraster:
 
         print("="*60)
 
-    def run_remap(self, sFilename_vector_out,
-                    sFilename_target_mesh_in = None,
-                                aFilename_source_raster_in = None,
+    def run_remap(self, sFilename_target_mesh_out = None,
+                    sFilename_source_mesh_in = None,
+                    aFilename_source_raster_in = None,
                   iFlag_stat_in = 1,
+                  iFlag_remap_method_in = 1,
                   iFlag_save_clipped_raster_in=0,
                   sFolder_raster_out_in = None,
-                  sFormat_in='GTiff'):
+                  iFlag_verbose=False):
         """
         Perform zonal statistics by clipping raster data to mesh polygons.
 
-        Main processing method that extracts raster values for each mesh cell polygon
-        and computes statistics (mean, min, max, std, sum, count).
-
-        Args:
-            sFilename_vector_out (str): Output vector file path with computed statistics
-            sFilename_target_mesh_in (str, optional): Input mesh polygon file.
-                Defaults to configured target mesh.
-            aFilename_source_raster_in (list, optional): List of source raster files.
-                Defaults to configured source rasters.
-            iFlag_stat_in (int, optional): Flag to compute statistics (1=yes, 0=no).
-                Default is 1.
-            iFlag_save_clipped_raster_in (int, optional): Flag to save clipped rasters (1=yes, 0=no).
-                Default is 0.
-            sFolder_raster_out_in (str, optional): Output folder for clipped rasters.
-                Required if iFlag_save_clipped_raster_in=1.
-            sFormat_in (str, optional): GDAL raster format. Default is 'GTiff'.
-
-        Returns:
-            None
-
-        Note:
-            - Handles IDL-crossing polygons automatically
-            - Generates failure report for problematic features
-            - Supports multiple input rasters (uses first in list)
+        This method delegates to the extract module for implementation.
         """
-
         if aFilename_source_raster_in is None:
             aFilename_source_raster = self.aFilename_source_raster
         else:
             aFilename_source_raster = aFilename_source_raster_in
 
-        if sFilename_target_mesh_in is None:
+        if sFilename_source_mesh_in is None:
+            sFilename_source_mesh = self.sFilename_source_mesh
+        else:
+            sFilename_source_mesh = sFilename_source_mesh_in
+
+        if sFilename_target_mesh_out is None:
             sFilename_target_mesh = self.sFilename_target_mesh
         else:
-            sFilename_target_mesh = sFilename_target_mesh_in
-
-        #check input files
-        for sFilename_raster in aFilename_source_raster:
-            if os.path.exists(sFilename_raster):
-                pass
-            else:
-                print('The raster file does not exist!')
-                return
-
-        if os.path.exists(sFilename_target_mesh ):
-            pass
-        else:
-            print('The vector mesh file does not exist!')
-            return
-
-        # Determine output vector format from filename extension
-        sVectorDriverName = get_vector_driver_from_filename(sFilename_vector_out)
-        pDriver_vector = ogr.GetDriverByName(sVectorDriverName)
-
-        #check the input raster data format and decide gdal driver
-        if sFormat_in is not None:
-            sDriverName = sFormat_in
-        else:
-            sDriverName = 'GTiff'
-
-        if os.path.exists(sFilename_vector_out):
-            #remove the file using the vector driver
-            pDriver_vector.DeleteDataSource(sFilename_vector_out)
-
-        pDriver = gdal.GetDriverByName(sDriverName)
-
-        #get the raster file extension
-        sFilename_raster = aFilename_source_raster[0]  #just use the first raster to get the extension
-        sExtension = os.path.splitext(sFilename_raster)[1]
-        sName = os.path.basename(sFilename_raster)
-        sRasterName_no_extension = os.path.splitext(sName)[0]
-
-        #use the sraster class the check the raster
-        dX_left = -180.0
-        dX_right = 180.0
-        dY_top = 90.0
-        dY_bot = -90.0
-        dPixelWidth = None
-        pPixelHeight = None
-        #narrow the range to speed up the processing
-        #also get the highest resolution
-        for sFilename_raster in aFilename_source_raster:
-            sRaster = sraster(sFilename_raster)
-            sRaster.read_metadata()
-            eType = sRaster.eType
-            dX_left = min(dX_left, sRaster.dLongitude_left)
-            dX_right = max(dX_right, sRaster.dLongitude_right)
-            dY_top = max(dY_top, sRaster.dLatitude_top)
-            dY_bot = min(dY_bot, sRaster.dLatitude_bottom)
-            dMissing_value = sRaster.dNoData
-            if dPixelWidth is None or sRaster.pTransform[1] < dPixelWidth:
-                dPixelWidth = sRaster.pTransform[1]
-
-            if pPixelHeight is None or sRaster.pTransform[5] > pPixelHeight: #is pPixelHeight is negative, then it should be less than
-                pPixelHeight = sRaster.pTransform[5]
-
-        # Determine optimal resampling method based on resolution comparison
-        # This will override iFlag_remap_method if mesh resolution is too coarse
-        sRemap_method_auto, iRemap_method_auto = self._determine_optimal_resampling(dPixelWidth, abs(pPixelHeight))
-
-        # Use automatically determined method if it's more conservative than user setting
-        # Priority: weighted averaging > nearest neighbor
-        if iRemap_method_auto == 3 and self.iFlag_remap_method != 3:
-            logger.warning(f"Overriding user remap method ({self.iFlag_remap_method}) with automatic selection (3 - weighted average)")
-            logger.warning("This is necessary due to mesh/raster resolution compatibility")
-            sRemap_method = sRemap_method_auto
-            iFlag_remap_method_used = iRemap_method_auto
-        else:
-            # Use user's preferred method
-            if self.iFlag_remap_method == 1:
-                sRemap_method = 'near'
-            elif self.iFlag_remap_method == 2:
-                sRemap_method = 'near'
-            elif self.iFlag_remap_method == 3:
-                sRemap_method = 'average'
-            iFlag_remap_method_used = self.iFlag_remap_method
-            logger.info(f"Using user-specified remap method: {sRemap_method}")
-
-
-        #get the spatial reference of the mesh vector file
-        pDataset_mesh = ogr.Open( sFilename_target_mesh )
-        pLayer_mesh = pDataset_mesh.GetLayer(0)
-        nFeature = pLayer_mesh.GetFeatureCount()
-        pSpatialRef_target = pLayer_mesh.GetSpatialRef()
-
-        pSpatialRef_target_wkt = pSpatialRef_target.ExportToWkt()
-
-        #check whether the polygon has only one or more features
-        if nFeature > 1:
-            pass
-        else:
-            print('The polygon file has only one polygons!')
-            return
-
-        options = ['COMPRESS=DEFLATE', 'PREDICTOR=2']
-        sDriverName = 'MEM'
-
-        #create a polygon feature to save the output
-        pDataset_out = pDriver_vector.CreateDataSource(sFilename_vector_out)
-        pLayer_out = pDataset_out.CreateLayer('cell', pSpatialRef_target, ogr.wkbPolygon)
-        pLayer_defn_out = pLayer_out.GetLayerDefn()
-        pFeature_out = ogr.Feature(pLayer_defn_out)
-
-        #add id, area and mean, min, max, std of the raster
-        pLayer_out.CreateField(ogr.FieldDefn('id', ogr.OFTInteger))
-        #define a field
-        pField = ogr.FieldDefn('area', ogr.OFTReal)
-        pField.SetWidth(32)
-        pField.SetPrecision(2)
-        pLayer_out.CreateField(pField)
-
-        #in the future, we will also copy other attributes from the input geojson file
-
-        if iFlag_stat_in == 1:
-            pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
-            pLayer_out.CreateField(ogr.FieldDefn('min', ogr.OFTReal))
-            pLayer_out.CreateField(ogr.FieldDefn('max', ogr.OFTReal))
-            pLayer_out.CreateField(ogr.FieldDefn('std', ogr.OFTReal))
-        else:
-            #treat the raster as categorical?
-            pass
-
-        # Pre-compute GDAL options to avoid repeated object creation
-        # sRemap_method was already determined above based on resolution comparison
-        gdal_warp_options_base = {
-            'cropToCutline': True,
-            'xRes': dPixelWidth,
-            'yRes': abs(pPixelHeight),
-            'dstSRS': pSpatialRef_target,
-            'format': 'MEM',
-            'resampleAlg': sRemap_method,
-            'srcSRS': 'EPSG:4326',  # Explicitly set source CRS
-        }
-
-        # Enable GDAL multi-threading
-        gdal.SetConfigOption('GDAL_NUM_THREADS', str(cpu_count()))
-
-        # Batch processing variables
-        i = 1
-
-        # Pre-fetch all features for potential parallel processing
-        aFeatures = []
-        pLayer_mesh.ResetReading()
-        pFeature_mesh = pLayer_mesh.GetNextFeature()
-        while pFeature_mesh is not None:
-            # Check if feature crosses the international date line
-            pPolygon = pFeature_mesh.GetGeometryRef()
-            aCoord = get_geometry_coordinates(pPolygon)
-            dLon_min = np.min(aCoord[:,0])
-            dLon_max = np.max(aCoord[:,0])
-
-            if dLon_max - dLon_min > IDL_LONGITUDE_THRESHOLD:  # Use constant
-                if not pPolygon.IsValid():
-                    logger.warning(f'Feature {i} has invalid geometry crossing IDL')
-
-                # Create multipolygon to handle IDL crossing
-                logger.info(f'Feature {i} crosses the international date line, splitting into multiple parts.')
-                pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
-                aCoord_gcs_split = split_polygon_cross_idl(aCoord)
-
-                for aCoord_gcs in aCoord_gcs_split:
-                    #create a polygon (not just ring) and add it to the multipolygon
-                    ring = ogr.Geometry(ogr.wkbLinearRing)
-                    for iCoord in range(aCoord_gcs.shape[0]):
-                        ring.AddPoint(aCoord_gcs[iCoord, 0], aCoord_gcs[iCoord, 1])
-
-                    ring.CloseRings()
-                    # Create polygon from ring
-                    polygon_part = ogr.Geometry(ogr.wkbPolygon)
-                    polygon_part.AddGeometry(ring)
-                    pMultipolygon.AddGeometry(polygon_part)  # Add polygon, not ring
-
-                #create a feature from the multipolygon and add it to the list
-                pFeature_new = ogr.Feature(pLayer_mesh.GetLayerDefn())
-                pFeature_new.SetGeometry(pMultipolygon)
-                aFeatures.append(pFeature_new)
-                pFeature_mesh = pLayer_mesh.GetNextFeature()
-            else:
-                aFeatures.append(pFeature_mesh.Clone())
-                pFeature_mesh = pLayer_mesh.GetNextFeature()
-
-            i += 1
-
-        print(f"Processing {len(aFeatures)} features...")
-        start_time = time.time()
-
-        # Add crash tracking variables
-        failed_features = []
-        successful_features = 0
-
-        #reset i
-        i = 1
-
-        # Process features
-        for idx, pFeature_mesh in enumerate(aFeatures):
-            sClip = f"{i:08d}"  # f-string is faster than format
-            pPolygon = pFeature_mesh.GetGeometryRef()
-            # Fast envelope check first
-            minX, maxX, minY, maxY = pPolygon.GetEnvelope()
-            if (minX > dX_right or maxX < dX_left or
-                minY > dY_top or maxY < dY_bot or
-                not pPolygon or pPolygon.IsEmpty() or not pPolygon.IsValid()):
-                i += 1
-                continue
-
-            # Process valid polygons with comprehensive error handling
-            feature_start_time = time.time()
-            try:
-                # Monitor memory usage (optional - requires psutil)
-                try:
-                    import psutil
-                    process = psutil.Process()
-                    memory_percent = process.memory_percent()
-                    if memory_percent > MEMORY_WARNING_THRESHOLD:  # Use constant
-                        logger.warning(f"High memory usage: {memory_percent:.1f}% at feature {i}")
-                except ImportError:
-                    pass  # psutil not available
-
-                # Handle polygon vs multipolygon differently
-                geometry_type = pPolygon.GetGeometryType()
-                sGeometry_type = pPolygon.GetGeometryName()
-                geometry_type_name = self._get_geometry_type_name(geometry_type)
-                logger.debug(f"Feature {i} geometry type: {geometry_type} ({geometry_type_name})")
-
-                if sGeometry_type == "POLYGON":
-                    # Simple polygon - process normally
-                    pDataset_clip_warped, aData_clip, newGeoTransform = self._process_single_polygon(
-                        pPolygon, aFilename_source_raster, gdal_warp_options_base, i)
-
-                    if pDataset_clip_warped is None:
-                        error_msg = f"Failed to process single polygon for feature {i}"
-                        logger.error(error_msg)
-                        failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                        i += 1
-                        continue
-
-                elif sGeometry_type == "MULTIPOLYGON":
-                    # Multipolygon (IDL crossing) - process each part separately and merge
-                    logger.info(f"Processing IDL-crossing multipolygon for feature {i}")
-                    merged_data, merged_transform = self._process_multipolygon_idl(
-                        pPolygon, aFilename_source_raster, gdal_warp_options_base, i, dMissing_value)
-
-                    if merged_data is None:
-                        error_msg = f"Failed to process IDL-crossing multipolygon for feature {i}"
-                        logger.error(error_msg)
-                        failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                        i += 1
-                        continue
-
-                    aData_clip = merged_data
-                    newGeoTransform = merged_transform
-                    pDataset_clip_warped = True  # Flag to indicate successful processing
-
-                else:
-                    error_msg = f"Unsupported geometry type for feature {i}: {geometry_type} ({geometry_type_name})"
-                    logger.error(error_msg)
-                    failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                    i += 1
-                    continue
-
-                logger.debug(f"Successfully processed GDAL Warp for feature {i} in {time.time() - feature_start_time:.2f}s")
-                successful_features += 1
-
-            except TimeoutError as e:
-                logger.error(str(e))
-                failed_features.append({'feature_id': i, 'error': str(e), 'envelope': (minX, maxX, minY, maxY)})
-                i += 1
-                continue
-
-            except MemoryError as e:
-                error_msg = f"Memory error during GDAL Warp for feature {i}: {str(e)}"
-                logger.error(error_msg)
-                failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                # Force garbage collection
-                import gc
-                gc.collect()
-                i += 1
-                continue
-
-            except Exception as e:
-                error_msg = f"Unexpected exception during GDAL Warp for feature {i}: {str(e)}"
-                logger.error(error_msg)
-                logger.error(f"Polygon envelope: {minX}, {maxX}, {minY}, {maxY}")
-                logger.error(f"Exception type: {type(e).__name__}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                # Log polygon geometry for debugging (truncated)
-                try:
-                    pPolygonWKT = pPolygon.ExportToWkt()
-                    logger.debug(f"Polygon WKT (first 200 chars): {pPolygonWKT[:200]}...")
-                except:
-                    logger.debug("Could not log polygon WKT")
-                failed_features.append({'feature_id': i, 'error': error_msg, 'envelope': (minX, maxX, minY, maxY)})
-                i += 1
-                continue
-
-            # Optimize data type conversion and missing value handling
-            if aData_clip is not None:
-                # Use numpy's faster operations
-                aData_clip = aData_clip.astype(np.int32, copy=False)  # Avoid unnecessary copy
-                np.place(aData_clip, aData_clip == dMissing_value, -9999)  # Faster than boolean indexing
-
-                if iFlag_save_clipped_raster_in == 1 :
-                    if geometry_type == ogr.wkbPolygon : #we cannot save the multipolygon directly
-                        sFilename_raster_out = os.path.join(sFolder_raster_out_in, f'{sRasterName_no_extension}_clip_{sClip}{sExtension}')
-                        # Delete existing file if it exists (GDAL Create() doesn't overwrite)
-                        if os.path.exists(sFilename_raster_out):
-                            try:
-                                pDriver.Delete(sFilename_raster_out)
-                            except:
-                                os.remove(sFilename_raster_out)  # Fallback if GDAL delete fails
-                        iNewWidth = aData_clip.shape[1]
-                        iNewHeigh = aData_clip.shape[0]
-                        pDataset_clip = pDriver.Create(sFilename_raster_out, iNewWidth, iNewHeigh, 1, eType , options= options)
-                        pDataset_clip.SetGeoTransform( newGeoTransform )
-                        pDataset_clip.SetProjection( pSpatialRef_target_wkt)
-                        #set the no data value
-                        pBand = pDataset_clip.GetRasterBand(1)
-                        pBand.SetNoDataValue(-9999)
-                        pBand.WriteArray(aData_clip)
-                        pBand.FlushCache()  # Corrected method name to FlushCache()
-                        pDataset_clip.FlushCache()
-                        pDataset_clip = None
-
-                aCoords_gcs = get_geometry_coordinates(pPolygon)
-                dArea = calculate_polygon_area(aCoords_gcs[:,0], aCoords_gcs[:,1])
-                #create a polygon feature to save the output
-                pFeature_out.SetGeometry(pPolygon.Clone())
-                pFeature_out.SetField('id', i)
-                pFeature_out.SetField('area', dArea)
-
-                if iFlag_stat_in == 1:
-                    # Check if aData_clip is already 1D valid data (from IDL merge) or 2D raster
-                    if aData_clip.ndim == 1:
-                        # Already 1D array of valid data from IDL merge
-                        valid_data = aData_clip[aData_clip != -9999]  # Remove any remaining -9999 values
-                    else:
-                        # Standard 2D raster - extract valid data
-                        valid_mask = aData_clip != -9999
-                        valid_data = aData_clip[valid_mask]
-
-                    if valid_data.size > 0:
-                        # Calculate all statistics in one pass for efficiency
-                        valid_data_float = valid_data.astype(np.float64, copy=False)
-                        pFeature_out.SetField('mean', float(np.mean(valid_data_float)))
-                        pFeature_out.SetField('min', float(np.min(valid_data_float)))
-                        pFeature_out.SetField('max', float(np.max(valid_data_float)))
-                        pFeature_out.SetField('std', float(np.std(valid_data_float)))
-
-                pLayer_out.CreateFeature(pFeature_out)
-
-                # Explicit cleanup - handle both single polygon dataset and multipolygon flag
-                if isinstance(pDataset_clip_warped, bool):
-                    # Multipolygon case - cleanup was already handled in helper method
-                    pass
-                else:
-                    # Single polygon case - cleanup the dataset
-                    pDataset_clip_warped = None
-
-                # Progress reporting
-                if i % PROGRESS_REPORT_INTERVAL == 0:
-                    elapsed = time.time() - start_time
-                    rate = i / elapsed
-                    eta = (len(aFeatures) - i) / rate if rate > 0 else 0
-                    print(f"Processed {i}/{len(aFeatures)} features ({rate:.2f} features/sec, ETA: {eta:.0f}s)")
-
-            i += 1
-
-
-        pDataset_out.FlushCache()  # Flush once after all features are added
-        pDataset_out = None        # Close the dataset
-        pDataset_mesh = None
-
-        # Report processing summary
-        total_time = time.time() - start_time
-        logger.info(f"Processing completed in {total_time:.2f} seconds")
-        logger.info(f"Successfully processed: {successful_features} features")
-        logger.info(f"Failed features: {len(failed_features)}")
-
-        if failed_features:
-            logger.warning("Failed features summary:")
-            for failed in failed_features[:10]:  # Show first 10 failures
-                logger.warning(f"  Feature {failed['feature_id']}: {failed['error']}")
-            if len(failed_features) > 10:
-                logger.warning(f"  ... and {len(failed_features) - 10} more failures")
-
-        # Save failure report to file
-        if failed_features:
-            # Generate failure report filename by replacing extension with '_failures.log'
-            base_name = os.path.splitext(sFilename_vector_out)[0]
-            failure_report_file = f"{base_name}_failures.log"
-            try:
-                with open(failure_report_file, 'w') as f:
-                    f.write(f"Processing failure report - {time.ctime()}\n")
-                    f.write(f"Total features processed: {len(aFeatures)}\n")
-                    f.write(f"Successful: {successful_features}\n")
-                    f.write(f"Failed: {len(failed_features)}\n\n")
-                    for failed in failed_features:
-                        f.write(f"Feature {failed['feature_id']}: {failed['error']}\n")
-                        f.write(f"  Envelope: {failed['envelope']}\n\n")
-                logger.info(f"Failure report saved to: {failure_report_file}")
-            except Exception as e:
-                logger.error(f"Could not save failure report: {e}")
-
-        return
+            sFilename_target_mesh = sFilename_target_mesh_out
+            self.sFilename_target_mesh = sFilename_target_mesh_out
+        return extract.run_remap(
+             sFilename_target_mesh,
+               sFilename_source_mesh,
+               aFilename_source_raster,
+             self.dArea_mean,
+             iFlag_remap_method_in = iFlag_remap_method_in,
+            iFlag_stat_in = iFlag_stat_in,
+              iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
+              sFolder_raster_out_in=sFolder_raster_out_in,
+              iFlag_verbose=iFlag_verbose  )
 
     def visualize_source_mesh(self,
                               sFilename_out=None,
                               dLongitude_focus_in=0.0,
                               dLatitude_focus_in=0.0,
-                              dZoom_factor=1.4,
+                              dZoom_factor=0.7,
                               iFlag_show_coastlines=True,
-                              iFlag_show_graticule=True):
+                              iFlag_show_graticule=True,
+                              iFlag_verbose=False):
         """
         Visualize the source mesh topology using GeoVista 3D globe rendering.
 
@@ -1320,11 +971,13 @@ class uraster:
             dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
                 Valid range: -90 to 90. Default is 0.0 (equator).
             dZoom_factor (float, optional): Camera zoom level.
-                Higher values zoom in. Default is 1.4.
+                Higher values zoom in. Default is 0.7.
             iFlag_show_coastlines (bool, optional): Show coastline overlay.
                 Default is True.
             iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
                 Default is True.
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
 
         Returns:
             bool: True if visualization successful, False otherwise
@@ -1334,212 +987,10 @@ class uraster:
             - Interactive mode requires display environment
             - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         """
-        # Validate mesh data availability
-        if self.aVertex_longititude is None or self.aVertex_latitude is None:
-            logger.error('Mesh vertices not available. Build mesh topology first.')
-            return False
-
-        if self.aConnectivity is None:
-            logger.error('Mesh connectivity not available. Build mesh topology first.')
-            return False
-
-        if len(self.aVertex_longititude) == 0 or len(self.aVertex_latitude) == 0:
-            logger.error('Mesh vertices are empty.')
-            return False
-
-        if self.aConnectivity.size == 0:
-            logger.error('Mesh connectivity is empty.')
-            return False
-
-        # Validate focus coordinates
-        dLongitude_focus = dLongitude_focus_in if dLongitude_focus_in is not None else 0.0
-        dLatitude_focus = dLatitude_focus_in if dLatitude_focus_in is not None else 0.0
-
-        if not (-180 <= dLongitude_focus <= 180):
-            logger.warning(f'Longitude focus {dLongitude_focus} out of range [-180, 180], clamping')
-            dLongitude_focus = np.clip(dLongitude_focus, -180, 180)
-
-        if not (-90 <= dLatitude_focus <= 90):
-            logger.warning(f'Latitude focus {dLatitude_focus} out of range [-90, 90], clamping')
-            dLatitude_focus = np.clip(dLatitude_focus, -90, 90)
-
-        # Validate zoom factor
-        if dZoom_factor <= 0:
-            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.4')
-            dZoom_factor = 1.4
-
-        # Validate output file path if provided
-        if sFilename_out is not None:
-            if not isinstance(sFilename_out, str) or not sFilename_out.strip():
-                logger.error('Output filename must be a non-empty string')
-                return False
-
-            # Check output directory exists
-            output_dir = os.path.dirname(sFilename_out)
-            if output_dir and not os.path.exists(output_dir):
-                try:
-                    os.makedirs(output_dir, exist_ok=True)
-                    logger.info(f'Created output directory: {output_dir}')
-                except Exception as e:
-                    logger.error(f'Cannot create output directory {output_dir}: {e}')
-                    return False
-
-            # Check supported file extensions
-            valid_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff']
-            file_ext = os.path.splitext(sFilename_out)[1].lower()
-            if file_ext not in valid_extensions:
-                logger.warning(f'File extension {file_ext} may not be supported. Recommended: .png, .jpg, .svg')
-
-        # Import geovista with error handling
-        try:
-            import geovista as gv
-            logger.info('GeoVista library imported successfully')
-        except ImportError as e:
-            logger.error('GeoVista library not available. Install with: pip install geovista')
-            logger.error(f'Import error: {e}')
-            return False
-
-        try:
-            logger.info('Creating mesh visualization...')
-            logger.info(f'  - Vertices: {len(self.aVertex_longititude)}')
-            logger.info(f'  - Connectivity shape: {self.aConnectivity.shape}')
-            logger.info(f'  - Focus: ({dLongitude_focus:.2f}°, {dLatitude_focus:.2f}°)')
-            logger.info(f'  - Zoom factor: {dZoom_factor}')
-
-            # Prepare mesh metadata
-            name = 'Mesh Cell ID'
-            sUnit = ""
-
-            # Create masked connectivity array (mask invalid indices)
-            connectivity_masked = np.ma.masked_where(
-                self.aConnectivity == -1,
-                self.aConnectivity
-            )
-
-            # Validate connectivity indices
-            valid_connectivity = self.aConnectivity[self.aConnectivity >= 0]
-            if len(valid_connectivity) > 0:
-                max_vertex_idx = len(self.aVertex_longititude) - 1
-                if np.max(valid_connectivity) > max_vertex_idx:
-                    logger.error(f'Connectivity contains invalid vertex index: max={np.max(valid_connectivity)}, vertices={len(self.aVertex_longititude)}')
-                    return False
-
-            # Transform to GeoVista unstructured mesh
-            mesh = gv.Transform.from_unstructured(
-                self.aVertex_longititude,
-                self.aVertex_latitude,
-                connectivity=connectivity_masked,
-                crs=crs
-            )
-
-
-            mesh.cell_data[name] = self.aCellID
-
-            logger.info(f'Created GeoVista mesh with {mesh.n_cells} cells and {mesh.n_points} points')
-
-            # Create 3D plotter
-            plotter = gv.GeoPlotter()
-
-            # Configure scalar bar (colorbar) appearance
-            sargs = {
-                "title": f"{name} / {sUnit}" if sUnit else name,
-                "shadow": True,
-                "title_font_size": 10,
-                "label_font_size": 10,
-                "fmt": "%.0f",  # Integer formatting for cell IDs
-                "n_labels": 5,
-            }
-
-            # Add mesh to plotter
-            plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
-            # Configure camera position and focus
-            try:
-                focal_point = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus]
-                )[0]
-
-                camera_position = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus],
-                    radius=gv.common.RADIUS * 6
-                )[0]
-
-                plotter.camera.focal_point = focal_point
-                plotter.camera.position = camera_position
-                plotter.camera.zoom(dZoom_factor)
-
-                logger.debug(f'Camera configured: focal={focal_point}, position={camera_position}')
-            except Exception as e:
-                logger.warning(f'Error setting camera position: {e}. Using default view.')
-
-            # Add geographic context
-            if iFlag_show_coastlines:
-                try:
-                    plotter.add_coastlines()
-                    logger.debug('Added coastlines overlay')
-                except Exception as e:
-                    logger.warning(f'Could not add coastlines: {e}')
-
-            # Add coordinate axes
-            try:
-                plotter.add_axes()
-                logger.debug('Added coordinate axes')
-            except Exception as e:
-                logger.warning(f'Could not add axes: {e}')
-
-            # Add graticule (coordinate grid)
-            if iFlag_show_graticule:
-                try:
-                    plotter.add_graticule(show_labels=True)
-                    logger.debug('Added coordinate graticule with labels')
-                except Exception as e:
-                    logger.warning(f'Could not add graticule: {e}')
-
-            # Output or display
-            if sFilename_out is not None:
-                # Save screenshot
-                try:
-                    plotter.screenshot(sFilename_out)
-                    logger.info(f'✓ Visualization saved to: {sFilename_out}')
-
-                    # Verify file was created
-                    if os.path.exists(sFilename_out):
-                        file_size = os.path.getsize(sFilename_out)
-                        logger.info(f'  File size: {file_size / 1024:.1f} KB')
-                    else:
-                        logger.warning(f'Screenshot command executed but file not found: {sFilename_out}')
-
-                    plotter.close()
-                    return True
-
-                except Exception as e:
-                    logger.error(f'Failed to save screenshot: {e}')
-                    logger.error(f'Traceback: {traceback.format_exc()}')
-                    plotter.close()
-                    return False
-            else:
-                # Interactive display
-                try:
-                    logger.info('Opening interactive visualization window...')
-                    plotter.show()
-                    return True
-                except Exception as e:
-                    logger.error(f'Failed to display interactive visualization: {e}')
-                    logger.error(f'Ensure display environment is available (X11, Wayland, etc.)')
-                    logger.error(f'Traceback: {traceback.format_exc()}')
-                    plotter.close()
-                    return False
-
-        except ImportError as e:
-            logger.error(f'Missing required GeoVista dependencies: {e}')
-            return False
-
-        except Exception as e:
-            logger.error(f'Unexpected error during mesh visualization: {e}')
-            logger.error(f'Error type: {type(e).__name__}')
-            logger.error(f'Traceback: {traceback.format_exc()}')
-            return False
+        return _visual.visualize_source_mesh(
+            self, sFilename_out, dLongitude_focus_in, dLatitude_focus_in,
+            dZoom_factor, iFlag_show_coastlines, iFlag_show_graticule, iFlag_verbose
+        )
 
     def visualize_raster(self):
         """
@@ -1548,36 +999,28 @@ class uraster:
         Note:
             Not yet implemented. Placeholder for future raster visualization.
         """
-        #it is possible to visualize the raster using geovista as well
-        #if more than one rasters is used, then we may overlap them one by one
-        for idx, sFilename in enumerate(self.aFilename_source_raster, 1):
-            print(f"\n[{idx}] {sFilename}")
-            try:
-                pRaster = sraster(sFilename)
-                pRaster.create_raster_mesh()
-                sFilename_raster_mesh = pRaster.sFilename_mesh
+        return _visual.visualize_raster(self)
 
-                #use this mesh to visualize, with the raster value as the cell data
-
-
-            except Exception as e:
-                logger.error(f"Error reading raster info: {e}")
-        return
-
-    def visualize_target_mesh(self, sVariable_in,
+    def visualize_target_mesh(self, sVariable_in=None,
                                sUnit_in=None,
                                sFilename_out=None,
                                dLongitude_focus_in=0.0,
                                dLatitude_focus_in=0.0,
-                               dZoom_factor=1.4,
+                               dZoom_factor=0.7,
                                iFlag_show_coastlines=True,
                                iFlag_show_graticule=True,
-                               sColormap='viridis'):
+                               sColormap='viridis',
+                               iFlag_create_animation=False,
+                               iAnimation_frames=360,
+                               dAnimation_speed=1.0,
+                               sAnimation_format='mp4',
+                               iFlag_verbose=False):
         """
         Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
         Creates an interactive or saved 3D visualization of the mesh with cells colored
-        by computed statistics (mean, min, max, std) from raster processing.
+        by computed statistics (mean, min, max, std) from raster processing. Can also
+        create rotating animations by generating multiple frames.
 
         Args:
             sVariable_in (str): Variable field name to visualize.
@@ -1586,18 +1029,29 @@ class uraster:
                 Default is empty string.
             sFilename_out (str, optional): Output screenshot file path.
                 If None, displays interactive viewer. Supports: .png, .jpg, .svg
+                For animations, this becomes the base filename (e.g., 'animation.mp4')
             dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
-                Valid range: -180 to 180. Default is 0.0.
+                Valid range: -180 to 180. Default is 0.0. For animations, this is the starting longitude.
             dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
                 Valid range: -90 to 90. Default is 0.0.
             dZoom_factor (float, optional): Camera zoom level.
-                Higher values zoom in. Default is 1.4.
+                Higher values zoom in. Default is 0.75.
             iFlag_show_coastlines (bool, optional): Show coastline overlay.
                 Default is True.
             iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
                 Default is True.
             sColormap (str, optional): Matplotlib colormap name.
                 Default is 'viridis'. Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
+            iFlag_create_animation (bool, optional): Create rotating animation.
+                Default is False. When True, generates frames for 360° rotation.
+            iAnimation_frames (int, optional): Number of frames for 360° rotation.
+                Default is 36 (10° per frame). More frames = smoother animation.
+            dAnimation_speed (float, optional): Animation speed in degrees per frame.
+                Default is 10.0. Calculated as 360 / iAnimation_frames if not specified.
+            sAnimation_format (str, optional): Animation output format.
+                Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
+            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+                If False, only print error messages. Default is False.
 
         Returns:
             bool: True if visualization successful, False otherwise
@@ -1611,512 +1065,33 @@ class uraster:
             - Target mesh file must exist (created by run_remap method)
             - Specified variable must exist as a field in the target mesh
             - Interactive mode requires display environment
+            - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
         """
-        # Validate target mesh file
-        if not self.sFilename_target_mesh:
-            logger.error('No target mesh filename configured')
-            return False
+        return _visual.visualize_target_mesh(
+            self, sVariable_in, sUnit_in, sFilename_out, dLongitude_focus_in, dLatitude_focus_in,
+            dZoom_factor, iFlag_show_coastlines, iFlag_show_graticule, sColormap,
+            iFlag_create_animation, iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose
+        )
 
-        if not os.path.exists(self.sFilename_target_mesh):
-            logger.error(f'Target mesh file does not exist: {self.sFilename_target_mesh}')
-            return False
+    def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
+                                    iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose=False):
+        """
+        Create a rotating animation of the 3D globe visualization.
 
-        # Validate mesh topology data
-        if self.aVertex_longititude is None or self.aVertex_latitude is None:
-            logger.error('Mesh vertices not available. Build mesh topology first.')
-            return False
+        This method delegates to the _visual module for implementation.
+        """
+        return _visual._create_rotation_animation(
+            self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
+            iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose
+        )
 
-        if self.aConnectivity is None:
-            logger.error('Mesh connectivity not available. Build mesh topology first.')
-            return False
-
-        if len(self.aVertex_longititude) == 0 or len(self.aVertex_latitude) == 0:
-            logger.error('Mesh vertices are empty.')
-            return False
-
-        # Validate variable name
-        if not sVariable_in:
-            logger.warning('No variable specified, defaulting to "mean"')
-            sVariable = 'mean'
-        else:
-            sVariable = sVariable_in
-
-        if not isinstance(sVariable, str):
-            logger.error(f'Variable name must be a string, got {type(sVariable).__name__}')
-            return False
-
-        # Validate focus coordinates
-        dLongitude_focus = dLongitude_focus_in if dLongitude_focus_in is not None else 0.0
-        dLatitude_focus = dLatitude_focus_in if dLatitude_focus_in is not None else 0.0
-
-        if not (-180 <= dLongitude_focus <= 180):
-            logger.warning(f'Longitude focus {dLongitude_focus} out of range [-180, 180], clamping')
-            dLongitude_focus = np.clip(dLongitude_focus, -180, 180)
-
-        if not (-90 <= dLatitude_focus <= 90):
-            logger.warning(f'Latitude focus {dLatitude_focus} out of range [-90, 90], clamping')
-            dLatitude_focus = np.clip(dLatitude_focus, -90, 90)
-
-        # Validate zoom factor
-        if dZoom_factor <= 0:
-            logger.warning(f'Invalid zoom factor {dZoom_factor}, using default 1.4')
-            dZoom_factor = 1.4
-
-        # Validate output file path if provided
-        if sFilename_out is not None:
-            if not isinstance(sFilename_out, str) or not sFilename_out.strip():
-                logger.error('Output filename must be a non-empty string')
-                return False
-
-            # Check output directory exists
-            output_dir = os.path.dirname(sFilename_out)
-            if output_dir and not os.path.exists(output_dir):
-                try:
-                    os.makedirs(output_dir, exist_ok=True)
-                    logger.info(f'Created output directory: {output_dir}')
-                except Exception as e:
-                    logger.error(f'Cannot create output directory {output_dir}: {e}')
-                    return False
-
-            # Check supported file extensions
-            valid_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff']
-            file_ext = os.path.splitext(sFilename_out)[1].lower()
-            if file_ext not in valid_extensions:
-                logger.warning(f'File extension {file_ext} may not be supported. Recommended: .png, .jpg, .svg')
-
-        # Import geovista with error handling
+    def cleanup(self):
+        """
+        Cleanup method to release spatial reference objects and other resources.
+        """
         try:
-            import geovista as gv
-            logger.info('GeoVista library imported successfully')
-        except ImportError as e:
-            logger.error('GeoVista library not available. Install with: pip install geovista')
-            logger.error(f'Import error: {e}')
-            return False
-
-        try:
-            logger.info(f'Loading target mesh data from: {self.sFilename_target_mesh}')
-
-            # Open target mesh file
-            pDataset = ogr.Open(self.sFilename_target_mesh, 0)  # Read-only
-            if pDataset is None:
-                logger.error(f'Failed to open target mesh file: {self.sFilename_target_mesh}')
-                return False
-
-            # Get first layer
-            pLayer = pDataset.GetLayer(0)
-            if pLayer is None:
-                logger.error('Failed to get layer from target mesh dataset')
-                pDataset = None
-                return False
-
-            # Get layer definition
-            pLayerDefn = pLayer.GetLayerDefn()
-            if pLayerDefn is None:
-                logger.error('Failed to get layer definition from target mesh')
-                pDataset = None
-                return False
-
-            # Get field information
-            iFieldCount = pLayerDefn.GetFieldCount()
-            nFeatures = pLayer.GetFeatureCount()
-            self.nCell_target = nFeatures
-
-            logger.info(f'Target mesh contains {nFeatures} features with {iFieldCount} fields')
-
-            # Check if variable field exists
-            field_names = [pLayerDefn.GetFieldDefn(i).GetName() for i in range(iFieldCount)]
-            if sVariable not in field_names:
-                logger.error(f'Variable "{sVariable}" not found in target mesh')
-                logger.error(f'Available fields: {", ".join(field_names)}')
-                pDataset = None
-                return False
-
-            logger.info(f'Extracting variable: {sVariable}')
-
-            # Validate feature count matches source
-            if self.nCell_source > 0 and self.nCell_target != self.nCell_source:
-                logger.warning(f'Feature count mismatch: target={self.nCell_target}, source={self.nCell_source}')
-
-            # Extract variable data from features
-            data_list = []
-            pLayer.ResetReading()
-            pFeature = pLayer.GetNextFeature()
-            feature_count = 0
-
-            while pFeature is not None:
-                pGeometry = pFeature.GetGeometryRef()
-                if pGeometry is not None:
-                    sGeometry_type = pGeometry.GetGeometryName()
-                    if sGeometry_type == 'POLYGON':
-                        try:
-                            field_value = pFeature.GetField(sVariable)
-                            if field_value is not None:
-                                data_list.append(field_value)
-                            else:
-                                # Handle None values as NaN
-                                data_list.append(np.nan)
-                                logger.warning(f'Feature {feature_count} has None value for {sVariable}')
-                        except Exception as e:
-                            logger.warning(f'Error reading field {sVariable} from feature {feature_count}: {e}')
-                            data_list.append(np.nan)
-                    else:
-                        logger.warning(f'Feature {feature_count} has unsupported geometry type: {sGeometry_type}')
-                        data_list.append(np.nan)
-                else:
-                    logger.warning(f'Feature {feature_count} has no geometry')
-                    data_list.append(np.nan)
-
-                feature_count += 1
-                pFeature = pLayer.GetNextFeature()
-
-            # Close dataset
-            pDataset = None
-
-            if not data_list:
-                logger.error('No data extracted from target mesh')
-                return False
-
-            # Convert to numpy array
-            data = np.array(data_list, dtype=np.float64)
-
-            # Validate data
-            valid_data_mask = np.isfinite(data)
-            valid_data_count = np.sum(valid_data_mask)
-
-            if valid_data_count == 0:
-                logger.error(f'All values for variable "{sVariable}" are invalid (NaN/Inf)')
-                return False
-
-            if valid_data_count < len(data):
-                logger.warning(f'{len(data) - valid_data_count} of {len(data)} values are invalid')
-
-            # Log data statistics
-            valid_values = data[valid_data_mask]
-            logger.info(f'Data statistics for "{sVariable}":')
-            logger.info(f'  - Valid values: {valid_data_count}/{len(data)}')
-            logger.info(f'  - Min: {np.min(valid_values):.4f}')
-            logger.info(f'  - Max: {np.max(valid_values):.4f}')
-            logger.info(f'  - Mean: {np.mean(valid_values):.4f}')
-            logger.info(f'  - Std: {np.std(valid_values):.4f}')
-
-            # Create masked connectivity array
-            connectivity_masked = np.ma.masked_where(
-                self.aConnectivity == -1,
-                self.aConnectivity
-            )
-
-            # Validate connectivity indices
-            valid_connectivity = self.aConnectivity[self.aConnectivity >= 0]
-            if len(valid_connectivity) > 0:
-                max_vertex_idx = len(self.aVertex_longititude) - 1
-                if np.max(valid_connectivity) > max_vertex_idx:
-                    logger.error(f'Connectivity contains invalid vertex index: max={np.max(valid_connectivity)}, vertices={len(self.aVertex_longititude)}')
-                    return False
-
-            # Transform to GeoVista unstructured mesh
-            logger.info('Creating GeoVista mesh...')
-            mesh = gv.Transform.from_unstructured(
-                self.aVertex_longititude,
-                self.aVertex_latitude,
-                connectivity=connectivity_masked,
-                crs=crs
-            )
-
-            logger.info(f'Created mesh with {mesh.n_cells} cells and {mesh.n_points} points')
-
-            # Attach data to mesh
-            name = sVariable.capitalize()
-            sUnit = sUnit_in if sUnit_in is not None else ""
-            mesh.cell_data[name] = data
-
-            # Create 3D plotter
-            plotter = gv.GeoPlotter()
-
-            # Configure scalar bar (colorbar) appearance
-            sargs = {
-                "title": f"{name} / {sUnit}" if sUnit else name,
-                "shadow": True,
-                "title_font_size": 10,
-                "label_font_size": 10,
-                "fmt": "%.2f",  # Floating point formatting for statistics
-                "n_labels": 5,
-            }
-
-            # Add mesh to plotter with colormap
-            plotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs, cmap=sColormap)
-
-            # Configure camera position and focus
-            try:
-                focal_point = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus]
-                )[0]
-
-                camera_position = gv.geodesic.to_cartesian(
-                    [dLongitude_focus],
-                    [dLatitude_focus],
-                    radius=gv.common.RADIUS * 6
-                )[0]
-
-                plotter.camera.focal_point = focal_point
-                plotter.camera.position = camera_position
-                plotter.camera.zoom(dZoom_factor)
-
-                logger.debug(f'Camera configured: focal={focal_point}, position={camera_position}')
-            except Exception as e:
-                logger.warning(f'Error setting camera position: {e}. Using default view.')
-
-            # Add geographic context
-            if iFlag_show_coastlines:
-                try:
-                    plotter.add_coastlines()
-                    logger.debug('Added coastlines overlay')
-                except Exception as e:
-                    logger.warning(f'Could not add coastlines: {e}')
-
-            # Add coordinate axes
-            try:
-                plotter.add_axes()
-                logger.debug('Added coordinate axes')
-            except Exception as e:
-                logger.warning(f'Could not add axes: {e}')
-
-            # Add graticule (coordinate grid)
-            if iFlag_show_graticule:
-                try:
-                    plotter.add_graticule(show_labels=True)
-                    logger.debug('Added coordinate graticule with labels')
-                except Exception as e:
-                    logger.warning(f'Could not add graticule: {e}')
-
-            # Output or display
-            if sFilename_out is not None:
-                # Save screenshot
-                try:
-                    plotter.screenshot(sFilename_out)
-                    logger.info(f'✓ Visualization saved to: {sFilename_out}')
-
-                    # Verify file was created
-                    if os.path.exists(sFilename_out):
-                        file_size = os.path.getsize(sFilename_out)
-                        logger.info(f'  File size: {file_size / 1024:.1f} KB')
-                    else:
-                        logger.warning(f'Screenshot command executed but file not found: {sFilename_out}')
-
-                    plotter.close()
-                    return True
-
-                except Exception as e:
-                    logger.error(f'Failed to save screenshot: {e}')
-                    logger.error(f'Traceback: {traceback.format_exc()}')
-                    plotter.close()
-                    return False
-            else:
-                # Interactive display
-                try:
-                    logger.info('Opening interactive visualization window...')
-                    plotter.show()
-                    return True
-                except Exception as e:
-                    logger.error(f'Failed to display interactive visualization: {e}')
-                    logger.error(f'Ensure display environment is available (X11, Wayland, etc.)')
-                    logger.error(f'Traceback: {traceback.format_exc()}')
-                    plotter.close()
-                    return False
-
-        except ImportError as e:
-            logger.error(f'Missing required GeoVista dependencies: {e}')
-            return False
-
+            if hasattr(self, 'pSpatialRef') and self.pSpatialRef is not None:
+                self.pSpatialRef = None
+                logger.debug('Spatial reference object cleaned up successfully')
         except Exception as e:
-            logger.error(f'Unexpected error during target mesh visualization: {e}')
-            logger.error(f'Error type: {type(e).__name__}')
-            logger.error(f'Traceback: {traceback.format_exc()}')
-            return False
-
-    def _process_single_polygon(self, polygon, aFilename_source_raster, gdal_warp_options_base, feature_id):
-        """
-        Process a single polygon with GDAL Warp operation.
-
-        Args:
-            polygon: OGR Polygon geometry to clip raster
-            aFilename_source_raster: List of source raster filenames
-            gdal_warp_options_base: Base GDAL warp options dictionary
-            feature_id: Feature identifier for logging
-
-        Returns:
-            tuple: (dataset, data_array, geotransform) or (None, None, None) on failure
-
-        Raises:
-            TimeoutError: If operation exceeds WARP_TIMEOUT_SECONDS
-        """
-        try:
-            # Use WKT for faster performance
-            pPolygonWKT = polygon.ExportToWkt()
-            warp_options = gdal_warp_options_base.copy()
-            warp_options['cutlineWKT'] = pPolygonWKT
-            pWrapOption = gdal.WarpOptions(**warp_options)
-
-            # Capture GDAL errors during Warp operation
-            gdal.PushErrorHandler('CPLQuietErrorHandler')
-
-            # Set a timeout for the operation (using alarm signal on Unix)
-            def timeout_handler(signum, frame):
-                raise TimeoutError(f"GDAL Warp operation timed out after {WARP_TIMEOUT_SECONDS} seconds for feature {feature_id}")
-
-            if hasattr(signal, 'SIGALRM'):  # Unix systems only
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(WARP_TIMEOUT_SECONDS)
-
-            logger.debug(f"Starting GDAL Warp for single polygon feature {feature_id}")
-            pDataset_clip_warped = gdal.Warp('', aFilename_source_raster, options=pWrapOption)
-
-            if hasattr(signal, 'SIGALRM'):
-                signal.alarm(0)  # Cancel the alarm
-
-            gdal.PopErrorHandler()
-
-            # Check if the operation succeeded
-            if pDataset_clip_warped is None:
-                gdal_error = gdal.GetLastErrorMsg()
-                logger.error(f"GDAL Warp failed for single polygon feature {feature_id}: {gdal_error}")
-                return None, None, None
-
-            newGeoTransform = pDataset_clip_warped.GetGeoTransform()
-            aData_clip = pDataset_clip_warped.ReadAsArray()
-
-            # Check if data was successfully read
-            if aData_clip is None:
-                logger.error(f"Failed to read array data for single polygon feature {feature_id}")
-                pDataset_clip_warped = None
-                return None, None, None
-
-            # Check for reasonable data dimensions
-            if aData_clip.size == 0:
-                logger.warning(f"Empty data array for single polygon feature {feature_id}")
-                pDataset_clip_warped = None
-                return None, None, None
-
-            return pDataset_clip_warped, aData_clip, newGeoTransform
-
-        except TimeoutError as e:
-            logger.error(str(e))
-            return None, None, None
-        except Exception as e:
-            logger.error(f"Unexpected exception during single polygon processing for feature {feature_id}: {str(e)}")
-            return None, None, None
-
-    def _process_multipolygon_idl(self, multipolygon, aFilename_source_raster, gdal_warp_options_base, feature_id, dMissing_value):
-        """
-        Process a multipolygon that crosses the International Date Line (IDL).
-
-        Handles IDL-crossing features by processing each polygon part separately
-        and merging the results into a single data array.
-
-        Args:
-            multipolygon: OGR MultiPolygon geometry that crosses IDL
-            aFilename_source_raster: List of source raster filenames
-            gdal_warp_options_base: Base GDAL warp options dictionary
-            feature_id: Feature identifier for logging
-            dMissing_value: Missing/NoData value for the raster
-
-        Returns:
-            tuple: (merged_data_array, merged_geotransform) or (None, None) on failure
-            - merged_data_array: 1D array containing all valid data values
-            - merged_geotransform: Geotransform from first polygon part
-        """
-        try:
-            nGeometries = multipolygon.GetGeometryCount()
-            logger.info(f"Processing {nGeometries} polygon parts for IDL-crossing feature {feature_id}")
-
-            merged_datasets = []
-            merged_data_arrays = []
-            merged_transforms = []
-
-            # Process each polygon part separately
-            for iPart in range(nGeometries):
-                polygon_part = multipolygon.GetGeometryRef(iPart)
-
-                # Process this polygon part
-                pDataset_part, aData_part, transform_part = self._process_single_polygon(
-                    polygon_part, aFilename_source_raster, gdal_warp_options_base,
-                    f"{feature_id}_part{iPart}")
-
-                if pDataset_part is None:
-                    logger.warning(f"Failed to process polygon part {iPart} of feature {feature_id}")
-                    continue
-
-                merged_datasets.append(pDataset_part)
-                merged_data_arrays.append(aData_part)
-                merged_transforms.append(transform_part)
-
-            if not merged_data_arrays:
-                logger.error(f"No polygon parts could be processed for IDL feature {feature_id}")
-                return None, None
-
-            # Merge the data arrays and transforms
-            merged_data, merged_transform = self._merge_raster_parts(merged_data_arrays, merged_transforms, feature_id, dMissing_value)
-
-            # Clean up datasets
-            for dataset in merged_datasets:
-                dataset = None
-
-            return merged_data, merged_transform
-
-        except Exception as e:
-            logger.error(f"Error processing multipolygon IDL feature {feature_id}: {str(e)}")
-            return None, None
-
-    def _merge_raster_parts(self, data_arrays, transforms, feature_id, dMissing_value):
-        """
-        Merge multiple raster arrays from IDL-split polygons into a single data array.
-
-        Extracts all valid (non-missing) data values from multiple raster arrays
-        and concatenates them into a single 1D array for statistics calculation.
-
-        Args:
-            data_arrays: List of numpy arrays from different polygon parts
-            transforms: List of geotransforms (one per data array)
-            feature_id: Feature identifier for logging
-            dMissing_value: Missing/NoData value to exclude from results
-
-        Returns:
-            tuple: (merged_1D_array, first_transform)
-            - merged_1D_array: 1D array containing all valid data values
-            - first_transform: Geotransform from first polygon part (dummy value)
-        """
-        try:
-            if len(data_arrays) == 1:
-                # Single array: extract valid data as 1D
-                data_array = data_arrays[0]
-                valid_mask = data_array != dMissing_value
-                valid_data = data_array[valid_mask]
-                return valid_data.flatten() if valid_data.size > 0 else np.array([dMissing_value]), transforms[0]
-
-            # Multiple arrays: concatenate all valid data values
-            all_valid_data = []
-
-            for data_array in data_arrays:
-                # Extract all valid (non-nodata) values
-                valid_mask = data_array != dMissing_value
-                valid_data = data_array[valid_mask]
-
-                if valid_data.size > 0:
-                    all_valid_data.append(valid_data.flatten())
-
-            if not all_valid_data:
-                logger.warning(f"No valid data found in any part for IDL feature {feature_id}")
-                return np.array([dMissing_value]), transforms[0]
-
-            # Concatenate all valid data into a single 1D array
-            merged_data = np.concatenate(all_valid_data)
-
-            logger.info(f"Successfully merged {len(data_arrays)} raster parts for feature {feature_id}: "
-                       f"{merged_data.size} valid pixels")
-
-            # Return 1D array of valid data only (no transform needed for statistics)
-            return merged_data, transforms[0]
-
-        except Exception as e:
-            logger.error(f"Error merging raster parts for feature {feature_id}: {str(e)}")
-            return None, None
+            logger.warning(f'Error during cleanup of spatial reference: {e}')
