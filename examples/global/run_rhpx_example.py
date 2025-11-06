@@ -6,7 +6,7 @@ if sPlatform_os == 'Windows':
     sys.path.append(os.path.dirname(sPath))
     sFilename_source_mesh = 'C:\\workspace\\python\\uraster\\data\\input\\mesh\\gdf_rhpx_res3.geojson' #use the L10-100 test mesh
     sFilename_raster = 'C:\\workspace\\python\\uraster\\data\\input\\raster\\edgar_MNM_2015.tiff'
-    sFilename_target_vector = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\rhpx_res3_uraster.geojson'
+    sFilename_target_mesh = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\rhpx_res3_uraster.geojson'
     sFilename_mesh_png = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\mesh.jpg'
     sFilename_variable_png = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\uraster.png'
     sFilename_variable_animation = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\global_uraster.mp4'
@@ -14,7 +14,7 @@ else:
     if sPlatform_os == 'Darwin':
         sFilename_source_mesh = '/Users/liao313/workspace/python/uraster/data/input/mesh/gdf_rhpx_res3.geojson' #use the L10-100 test mesh
         sFilename_raster = '/Users/liao313/workspace/python/uraster/data/input/raster/edgar_MNM_2015.tiff'
-        sFilename_target_vector = '/Users/liao313/workspace/python/uraster/data/output/rhpx/rhpx_res3_uraster.geojson'
+        sFilename_target_mesh = '/Users/liao313/workspace/python/uraster/data/output/rhpx/rhpx_res3_uraster.geojson'
 
 
 from uraster.classes.uraster import uraster
@@ -26,7 +26,7 @@ def main():
 
     aFilename_source_raster.append(sFilename_raster)  # dem from hydros
     aConfig['aFilename_source_raster'] = aFilename_source_raster
-    aConfig['sFilename_target_mesh'] = sFilename_target_vector
+    aConfig['sFilename_target_mesh'] = sFilename_target_mesh
     pRaster = uraster(aConfig)
 
     pRaster.setup()
