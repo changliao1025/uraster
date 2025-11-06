@@ -2,18 +2,11 @@
 # Extract module for uraster - contains remap workflow functions
 import os
 import logging
-import traceback
-import signal
-import sys
 import time
-import threading
-import gc
 import numpy as np
 from osgeo import gdal, ogr, osr
+gdal.UseExceptions()
 from multiprocessing import Pool, cpu_count
-import multiprocessing
-import tempfile
-import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area

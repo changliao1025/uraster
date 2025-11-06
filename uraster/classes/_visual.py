@@ -8,12 +8,11 @@ to reduce the size of the main uraster.py file and improve code organization.
 import os
 import logging
 import traceback
-import time
 import math
 import numpy as np
-from osgeo import gdal, ogr, osr
+from osgeo import gdal, ogr
 from uraster.classes.sraster import sraster
-
+gdal.UseExceptions()
 # Set up logging
 logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
@@ -503,7 +502,7 @@ def visualize_target_mesh(self, sVariable_in=None,
                 return False
 
         # Check supported file extensions
-        valid_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff']
+        valid_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff', '.mp4', '.gif', '.avi']
         file_ext = os.path.splitext(sFilename_out)[1].lower()
         if file_ext not in valid_extensions:
             logger.warning(f'File extension {file_ext} may not be supported. Recommended: .png, .jpg, .svg')
@@ -968,15 +967,6 @@ def _create_rotation_animation(plotter, sFilename_out, dLongitude_start, dLatitu
         bool: True if animation created successfully, False otherwise
     """
     try:
-        # Import imageio for video creation
-        try:
-            import imageio
-            if iFlag_verbose:
-                logger.info('ImageIO library imported for animation creation')
-        except ImportError:
-            logger.error('ImageIO library required for animations. Install with: conda install imageio[ffmpeg]')
-            return False
-
         if iFlag_verbose:
             logger.info(f'Creating {iAnimation_frames}-frame rotation animation')
             logger.info(f'  - Starting longitude: {dLongitude_start:.1f}°')
@@ -987,7 +977,6 @@ def _create_rotation_animation(plotter, sFilename_out, dLongitude_start, dLatitu
 
         earth_radius = 1.0
         camera_distance = earth_radius * 3.0
-
         # Generate frames
         amplitude_deg = 20.0
         cycles = 1.0
@@ -1042,8 +1031,6 @@ def _create_rotation_animation(plotter, sFilename_out, dLongitude_start, dLatitu
             except Exception as e:
                 logger.error(f'Failed to render frame {iFrame + 1}: {e}')
                 return False
-
-
 
         # Determine output format and settings
         if sAnimation_format.lower() == 'gif':

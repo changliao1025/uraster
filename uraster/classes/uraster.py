@@ -2,24 +2,12 @@
 import os
 import logging
 import traceback
-import signal
-import sys
-import time
-import threading
-import gc
 import numpy as np
 from osgeo import gdal, ogr, osr
-from multiprocessing import Pool, cpu_count
-import multiprocessing
-import tempfile
-import shutil
-
+gdal.UseExceptions()
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
 from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-
 from uraster.classes.sraster import sraster
 from uraster.classes import _visual
 from uraster.operation import extract
