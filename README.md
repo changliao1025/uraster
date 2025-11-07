@@ -19,24 +19,94 @@
 
 uraster requires GDAL for vector handling and GeoVista (which relies on PyVista/VTK) for 3D visualization.
 
-> ⚠️ **GDAL Note**: Installing GDAL's Python bindings can be complex via pip due to platform dependencies. We strongly recommend using Conda for a stable installation of GDAL.
+> ⚠️ **GDAL Note**: Installing GDAL's Python bindings can be complex via pip due to platform dependencies. We strongly recommend using Conda for a stable installation of GDAL and all dependencies.
 
-### Install uraster via Conda (Recommended)
+### Install via Conda (Recommended)
 ```bash
-# Recommended: Install uraster via Conda
-conda install uraster
+# Create a new conda environment (recommended)
+conda create -n uraster-env python=3.9
+conda activate uraster-env
+
+# Install uraster and all dependencies via conda
+conda install -c conda-forge uraster
+```
+
+### Development Installation
+```bash
+git clone https://github.com/changliao1025/uraster.git
+cd uraster
+conda install -c conda-forge gdal geovista vtk=9.3.0 pyearth
+conda develop .
 ```
 
 ## 🚀 Quick Start
 
-### Example 1: Analytical Output (Zonal Statistics)
-This example executes the zonal statistics and outputs a standard Python list containing the calculated statistics for each input polygon.
+### Example 1: Basic Zonal Statistics
+This example demonstrates how to perform zonal statistics on unstructured mesh data:
 
 ```python
 import uraster
+from uraster.classes.uraster import uraster
 
-# TODO: Add example code here
+# Configuration
+config = {
+    'sFilename_source_mesh': 'path/to/your/mesh.geojson',
+    'aFilename_source_raster': ['path/to/your/raster.tif'],
+    'sFilename_target_mesh': 'path/to/output/mesh_with_stats.geojson'
+}
+
+# Create uraster instance
+processor = uraster(config)
+
+# Setup and validate inputs
+processor.setup(iFlag_verbose=True)
+
+# Print input information
+processor.report_inputs()
+
+# Run zonal statistics
+processor.run_remap(iFlag_verbose=True)
+
+# Visualize results
+processor.visualize_target_mesh(
+    sVariable_in='mean',
+    sFilename_out='output_visualization.png',
+    sColormap='viridis'
+)
 ```
+
+### Example 2: Global Analysis with Animation
+```python
+import uraster
+from uraster.classes.uraster import uraster
+
+# Configuration for global analysis
+config = {
+    'sFilename_source_mesh': 'global_mesh.geojson',
+    'aFilename_source_raster': ['global_dem.tif'],
+    'sFilename_target_mesh': 'global_mesh_with_elevation.geojson'
+}
+
+processor = uraster(config)
+processor.setup(iFlag_verbose=True)
+processor.run_remap()
+
+# Create rotating animation
+processor.visualize_target_mesh(
+    sVariable_in='mean',
+    sFilename_out='global_elevation.mp4',
+    sColormap='terrain',
+    iFlag_create_animation=True,
+    iAnimation_frames=360,
+    sAnimation_format='mp4'
+)
+```
+
+## 📊 Supported Formats
+
+- **Mesh formats**: GeoJSON, Shapefile, any OGR-supported vector format
+- **Raster formats**: GeoTIFF, NetCDF, HDF5, any GDAL-supported raster format
+- **Output formats**: GeoJSON (with computed statistics), PNG/JPG (visualizations), MP4/GIF (animations)
 
 ## 🤝 Contributing & License
 
