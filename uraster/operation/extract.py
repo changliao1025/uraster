@@ -146,7 +146,7 @@ def _log_memory_usage(stage: str, iFlag_verbose: bool = False) -> None:
 
 
 def _determine_optimal_resampling(
-    dArea_mean: float,
+    dArea_min: float,
     dPixelWidth: float,
     dPixelHeight: float,
     iFlag_verbose: bool = False,
@@ -178,9 +178,9 @@ def _determine_optimal_resampling(
         ZeroDivisionError: If raster resolution is zero
     """
     # Input validation
-    if not isinstance(dArea_mean, (int, float)) or dArea_mean <= 0:
+    if not isinstance(dArea_min, (int, float)) or dArea_min <= 0:
         raise ValueError(
-            f"dArea_mean must be a positive number, got {dArea_mean}")
+            f"dArea_mean must be a positive number, got {dArea_min}")
 
     if not isinstance(dPixelWidth, (int, float)) or dPixelWidth == 0:
         raise ValueError(
@@ -196,7 +196,7 @@ def _determine_optimal_resampling(
 
     try:
         # Estimate characteristic mesh cell dimension (approximate square root of mean area)
-        dMesh_characteristic_size = np.sqrt(dArea_mean)
+        dMesh_characteristic_size = np.sqrt(dArea_min)
 
         # Use the coarser of the two raster dimensions
         dRaster_resolution = max(abs(dPixelWidth), abs(dPixelHeight))
@@ -1186,13 +1186,13 @@ def get_polygon_list(
 def run_remap(sFilename_target_mesh,
               sFilename_source_mesh,
               aFilename_source_raster,
-              dArea_mean,
+              dArea_min,
               iFlag_remap_method_in=1,
               iFlag_stat_in=1,
               iFlag_save_clipped_raster_in=0,
               sFolder_raster_out_in=None,
               iFlag_verbose=False,
-              iFeature_parallel_threshold=4000):
+              iFeature_parallel_threshold=5000):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.
 
@@ -1288,7 +1288,7 @@ def run_remap(sFilename_target_mesh,
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
-        dArea_mean, dPixelWidth, abs(pPixelHeight), iFlag_verbose)
+        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose)
 
     # Use automatically determined method if it's more conservative than user setting
     # Priority: weighted averaging > nearest neighbor

@@ -763,6 +763,8 @@ class uraster:
                     self.dArea_min = float(np.min(valid_areas))
                     self.dArea_max = float(np.max(valid_areas))
                     self.dArea_mean = float(np.mean(valid_areas))
+                    self.dArea_max = float(np.max(valid_areas))
+                    self.dArea_min = float(np.min(valid_areas))
                     if iFlag_verbose:
                         logger.info(f'Mesh area statistics:')
                         logger.info(f'  - Min area: {self.dArea_min:.6f}')
@@ -942,7 +944,7 @@ class uraster:
              sFilename_target_mesh,
                sFilename_source_mesh,
                aFilename_source_raster,
-             self.dArea_mean,
+             self.dArea_min,
              iFlag_remap_method_in = iFlag_remap_method_in,
             iFlag_stat_in = iFlag_stat_in,
               iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
