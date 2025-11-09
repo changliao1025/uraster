@@ -45,6 +45,8 @@ class VisualizationConfig:
                  show_coastlines: bool = True,
                  show_graticule: bool = True,
                  colormap: str = 'viridis',
+                 coastline_color: str = 'black',
+                 coastline_width: float = 1.0,
                  verbose: bool = False):
         self.longitude_focus = self._validate_longitude(longitude_focus)
         self.latitude_focus = self._validate_latitude(latitude_focus)
@@ -52,6 +54,8 @@ class VisualizationConfig:
         self.show_coastlines = show_coastlines
         self.show_graticule = show_graticule
         self.colormap = colormap
+        self.coastline_color = coastline_color
+        self.coastline_width = coastline_width
         self.verbose = verbose
 
     def _validate_longitude(self, lon: float) -> float:
@@ -133,8 +137,22 @@ class AnimationConfig:
                  amplitude_deg: float = 20.0,
                  cycles: float = 1.0,
                  phase: float = 0.0):
-        self.frames = max(1, frames)  # Ensure at least 1 frame
-        self.speed = max(0.1, speed)  # Ensure positive speed
+        # Convert to int if string and validate
+        try:
+            frames_int = int(frames) if isinstance(frames, str) else frames
+            self.frames = max(1, frames_int)  # Ensure at least 1 frame
+        except (ValueError, TypeError):
+            logger.warning(f'Invalid frames value {frames}, using default 36')
+            self.frames = 36
+
+        # Convert to float if string and validate
+        try:
+            speed_float = float(speed) if isinstance(speed, str) else speed
+            self.speed = max(0.1, speed_float)  # Ensure positive speed
+        except (ValueError, TypeError):
+            logger.warning(f'Invalid speed value {speed}, using default 1.0')
+            self.speed = 1.0
+
         self.format = format.lower()
         self.amplitude_deg = amplitude_deg
         self.cycles = cycles
@@ -259,9 +277,12 @@ def _add_geographic_context(pPlotter, pConfig: VisualizationConfig):
     # Add coastlines
     if pConfig.show_coastlines:
         try:
-            pPlotter.add_coastlines()
+            # You can set coastline color using the 'color' parameter
+            # Common options: 'black', 'white', 'red', 'blue', 'gray', etc.
+            # You can also use RGB tuples like (1.0, 0.0, 0.0) for red
+            pPlotter.add_coastlines(color=pConfig.coastline_color, line_width=pConfig.coastline_width)
             if pConfig.verbose:
-                logger.debug('Added coastlines overlay')
+                logger.debug(f'Added coastlines overlay (color: {pConfig.coastline_color}, width: {pConfig.coastline_width})')
         except Exception as e:
             logger.warning(f'Could not add coastlines: {e}')
 
@@ -325,11 +346,13 @@ def _configure_camera(pPlotter, pConfig: VisualizationConfig) -> bool:
 
 def visualize_source_mesh(self,
                           sFilename_out: Optional[str] = None,
-                          dLongitude_focus_in: float = 0.0,
-                          dLatitude_focus_in: float = 0.0,
+                          dLongitude_focus_in: Optional[float] = 0.0,
+                          dLatitude_focus_in: Optional[float] = 0.0,
                           dZoom_factor: float = 0.7,
                           iFlag_show_coastlines: bool = True,
                           iFlag_show_graticule: bool = True,
+                          sCoastline_color: str = 'black',
+                          dCoastline_width: float = 1.0,
                           iFlag_verbose: bool = False) -> bool:
     """
     Visualize the source mesh topology using GeoVista 3D globe rendering.
@@ -347,6 +370,9 @@ def visualize_source_mesh(self,
         dZoom_factor: Camera zoom level. Higher values zoom in. Default is 0.7.
         iFlag_show_coastlines: Show coastline overlay. Default is True.
         iFlag_show_graticule: Show coordinate grid with labels. Default is True.
+        sCoastline_color: Color for coastlines. Default is 'black'.
+            Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
+        dCoastline_width: Line width for coastlines. Default is 1.0.
         iFlag_verbose: If True, print detailed progress messages. Default is False.
 
     Returns:
@@ -371,6 +397,8 @@ def visualize_source_mesh(self,
         zoom_factor=dZoom_factor,
         show_coastlines=iFlag_show_coastlines,
         show_graticule=iFlag_show_graticule,
+        coastline_color=sCoastline_color,
+        coastline_width=dCoastline_width,
         verbose=iFlag_verbose
     )
 
@@ -515,6 +543,8 @@ def visualize_raster(self,
                     iFlag_show_coastlines: bool = True,
                     iFlag_show_graticule: bool = True,
                     sColormap: str = 'viridis',
+                    sCoastline_color: str = 'black',
+                    dCoastline_width: float = 1.0,
                     iFlag_verbose: bool = False) -> bool:
     """
     Visualize source raster data using GeoVista.
@@ -530,6 +560,8 @@ def visualize_raster(self,
         iFlag_show_coastlines: Show coastline overlay.
         iFlag_show_graticule: Show coordinate grid with labels.
         sColormap: Matplotlib colormap name for raster visualization.
+        sCoastline_color: Color for coastlines. Default is 'black'.
+        dCoastline_width: Line width for coastlines. Default is 1.0.
         iFlag_verbose: If True, print detailed progress messages.
 
     Returns:
@@ -555,6 +587,8 @@ def visualize_raster(self,
         show_coastlines=iFlag_show_coastlines,
         show_graticule=iFlag_show_graticule,
         colormap=sColormap,
+        coastline_color=sCoastline_color,
+        coastline_width=dCoastline_width,
         verbose=iFlag_verbose
     )
 
@@ -811,17 +845,19 @@ def visualize_target_mesh(self,
                          sVariable_in: Optional[str] = None,
                          sUnit_in: Optional[str] = None,
                          sFilename_out: Optional[str] = None,
-                         dLongitude_focus_in: float = 0.0,
-                         dLatitude_focus_in: float = 0.0,
-                         dZoom_factor: float = 0.7,
-                         iFlag_show_coastlines: bool = True,
-                         iFlag_show_graticule: bool = True,
-                         sColormap: str = 'viridis',
-                         iFlag_create_animation: bool = False,
-                         iAnimation_frames: int = 36,
-                         dAnimation_speed: float = 1.0,
-                         sAnimation_format: str = 'mp4',
-                         iFlag_verbose: bool = False) -> bool:
+                         dLongitude_focus_in: Optional[float] = 0.0,
+                         dLatitude_focus_in: Optional[float] = 0.0,
+                         dZoom_factor: Optional[float] = 0.7,
+                         iFlag_show_coastlines: Optional[bool] = True,
+                         iFlag_show_graticule: Optional[bool] = True,
+                         sColormap: Optional[str] = 'viridis',
+                         sCoastline_color: Optional[str] = 'black',
+                         dCoastline_width: Optional[float] = 1.0,
+                         iFlag_create_animation: Optional[bool] = False,
+                         iAnimation_frames: Optional[int] = 36,
+                         dAnimation_speed: Optional[float] = 1.0,
+                         sAnimation_format: Optional[str] = 'mp4',
+                         iFlag_verbose: Optional[bool] = False) -> bool:
     """
     Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
@@ -849,6 +885,9 @@ def visualize_target_mesh(self,
             Default is True.
         sColormap (str, optional): Matplotlib colormap name.
             Default is 'viridis'. Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
+        sCoastline_color (str, optional): Color for coastlines. Default is 'black'.
+            Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
+        dCoastline_width (float, optional): Line width for coastlines. Default is 1.0.
         iFlag_create_animation (bool, optional): Create rotating animation.
             Default is False. When True, generates frames for 360° rotation.
         iAnimation_frames (int, optional): Number of frames for 360° rotation.
@@ -903,6 +942,8 @@ def visualize_target_mesh(self,
         show_coastlines=iFlag_show_coastlines,
         show_graticule=iFlag_show_graticule,
         colormap=sColormap,
+        coastline_color=sCoastline_color,
+        coastline_width=dCoastline_width,
         verbose=iFlag_verbose
     )
 
