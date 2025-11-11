@@ -35,7 +35,7 @@ class sraster:
             if os.path.isfile(sFilename_in):
                 #setup the mesh filename using robust path handling
                 base, ext = os.path.splitext(sFilename_in)
-                self.sFilename_mesh = f"{base}_mesh.geojson"
+                self.sFilename_mesh = f"{base}_mesh.geoparquet"
             else:
                 raise FileNotFoundError(f"File does not exist: {sFilename_in}")
         # NoData value
