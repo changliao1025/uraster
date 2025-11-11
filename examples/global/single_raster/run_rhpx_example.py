@@ -40,8 +40,8 @@ def main():
     dLongitude_focus_in = -112.033964
     dLatitude_focus_in = 43.491977
     pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
-    pRaster.visualize_raster(sFilename_out=sFilename_raster_png )
-
+    pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
+    exit()
     pRaster.run_remap()
     #pRaster.report_outputs() #not implemented yet
     sColormap = 'terrain'

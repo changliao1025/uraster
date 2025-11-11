@@ -613,6 +613,7 @@ def visualize_raster(self,
 
             try:
                 pRaster = sraster(sFilename)
+                pRaster.read_metadata()
                 pRaster.create_raster_mesh()
                 sFilename_raster_mesh = pRaster.sFilename_mesh
 
@@ -627,7 +628,33 @@ def visualize_raster(self,
                     logger.info(f'  Created raster mesh: {sFilename_raster_mesh}')
 
                 #we need to use the same apporoach as in visualize_source_mesh to load the mesh
+                raster_mesh_info = rebuild_mesh_topology(sFilename_raster_mesh)
+                if raster_mesh_info is None:
+                    logger.warning(f'Failed to rebuild mesh topology for raster: {sFilename_raster_mesh}')
+                    continue
 
+                # Extract mesh data
+                aVertex_longitude = raster_mesh_info['aVertex_longitude']
+                aVertex_latitude = raster_mesh_info['aVertex_latitude']
+                aConnectivity = raster_mesh_info['aConnectivity']
+                aCellID = raster_mesh_info['aCellID']
+                mesh = gv.Transform.from_unstructured(
+                    aVertex_longitude,
+                    aVertex_latitude,
+                    connectivity=aConnectivity,
+                    crs=CRS
+                )
+                name = f'Raster {idx} Cell ID'
+                mesh.cell_data[name] = aCellID  # Placeholder for actual raster values
+                sargs = {
+                    "title": name,
+                    "shadow": True,
+                    "title_font_size": 10,
+                    "label_font_size": 10,
+                    "fmt": "%.0f",
+                    "n_labels": 5,
+                }
+                pPlotter.add_mesh(mesh, scalar_bar_args=sargs)
 
             except Exception as e:
                 logger.error(f"Error processing raster {sFilename}: {e}")

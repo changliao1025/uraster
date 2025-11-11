@@ -199,7 +199,11 @@ class sraster:
         else:
             # WGS84 geographic coordinate system - use lat/lon mesh
             dLongitude_left_in = self.dLongitude_left
+            if dLongitude_left_in < -180.0:
+                dLongitude_left_in =-180
             dLatitude_bot_in = self.dLatitude_bottom
+            if dLatitude_bot_in < -90.0:
+                dLatitude_bot_in = -90.0
             dResolution_degree_in = self.dResolution_x
             ncolumn_in = self.ncolumn
             nrow_in = self.nrow

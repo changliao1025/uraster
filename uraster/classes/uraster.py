@@ -544,14 +544,14 @@ class uraster:
             iFlag_verbose=iFlag_verbose
         )
 
-    def visualize_raster(self):
+    def visualize_raster(self, sFilename_out=None, iFlag_verbose=False):
         """
         Visualize source raster data using GeoVista.
 
         Note:
             Not yet implemented. Placeholder for future raster visualization.
         """
-        return _visual.visualize_raster(self)
+        return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose=iFlag_verbose)
 
     def visualize_target_mesh(self, sVariable_in=None,
                                sUnit_in=None,
