@@ -6,7 +6,7 @@ import os
 import sys
 
 # Add the project root to the Python path
-sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../..'))
 
 # -- Project information -----------------------------------------------------
 project = 'uraster'
@@ -59,3 +59,18 @@ myst_enable_extensions = [
     "html_admonition",
     "html_image",
 ]
+
+# ReadTheDocs-specific settings
+html_context = {
+    "display_github": True,
+    "github_user": "changliao1025",
+    "github_repo": "uraster",
+    "github_version": "main",
+    "conf_py_path": "/docs/source/",
+}
+
+# Make sure we can import uraster for autodoc
+try:
+    import uraster
+except ImportError:
+    pass

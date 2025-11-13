@@ -65,12 +65,19 @@ Quick Start
    :maxdepth: 2
    :caption: Contents:
 
+   readme
    installation
-   user_guide
+   quickstart
+   algorithm
    api_reference
-   examples
-   contributing
-   changelog
+   visualization
+   authors
+   contribution
+   support
+   faq
+   glossary
+   references
+   history
 
 Indices and tables
 ==================

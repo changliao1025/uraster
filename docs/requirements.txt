@@ -1,0 +1,15 @@
+# Sphinx and documentation dependencies
+sphinx>=5.3.0
+sphinx-rtd-theme>=1.0.0
+myst-parser>=0.18.0
+
+# Additional documentation tools
+breathe
+attrs>=19.2
+sphinx-issues
+sphinx-removed-in
+sphinxcontrib-programoutput
+
+# uraster dependencies needed for autodoc
+numpy>=1.19.0
+psutil>=5.0.0
