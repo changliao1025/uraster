@@ -16,6 +16,7 @@ release = '0.1.0'
 
 # -- General configuration ---------------------------------------------------
 extensions = [
+    'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
@@ -44,7 +45,26 @@ autodoc_default_options = {
     'show-inheritance': True,
 }
 
-autodoc_mock_imports = ["gdal", "osgeo"]
+autodoc_mock_imports = [
+    "gdal",
+    "osgeo",
+    "uraster",
+    "uraster.classes",
+    "uraster.classes.sraster",
+    "uraster.classes.uraster",
+    "uraster.classes._visual",
+    "uraster.mesh",
+    "uraster.mesh.dggs",
+    "uraster.mesh.mpas",
+    "uraster.operation",
+    "uraster.operation.extract",
+    "uraster.operation.intersect",
+    "uraster.utility",
+    "pyearth",
+    "geovista",
+    "vtk",
+    "psutil"
+]
 
 # Intersphinx mapping
 intersphinx_mapping = {
