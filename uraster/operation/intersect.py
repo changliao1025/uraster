@@ -50,7 +50,8 @@ def run_remap(sFilename_target_mesh,
               sFolder_raster_out_in=None,
               iFlag_discrete_in=False,
               iFlag_verbose=False,
-              iFeature_parallel_threshold=5000):
+              iFeature_parallel_threshold=5000,
+              sField_unique_id='cellid'):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.
 
@@ -124,10 +125,9 @@ def run_remap(sFilename_target_mesh,
     # use sraster class to read the raster info
     pRaster = sraster(sFilename_in=sFilename_source_raster)
     pRaster.read_metadata()
-    if dPixelWidth is None or pRaster.dResolution_x < dPixelWidth:
-        dPixelWidth = pRaster.dResolution_x
-    if pPixelHeight is None or abs(pRaster.dResolution_y) < abs(pPixelHeight):
-        pPixelHeight = pRaster.dResolution_y
+    # Initialize pixel resolution variables
+    dPixelWidth = pRaster.dResolution_x
+    pPixelHeight = pRaster.dResolution_y
     dMissing_value = pRaster.dNoData
 
 
@@ -139,7 +139,8 @@ def run_remap(sFilename_target_mesh,
     sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
     #build the rtree index for the polygons for the source mesh
     aPolygon, aArea = get_polygon_list(sFilename_raster_mesh,
-                                     iFlag_verbose_in=iFlag_verbose)
+                                     iFlag_verbose_in=iFlag_verbose,
+                                     sField_unique_id=sField_unique_id)
     index_mesh = RTreeindex()
     for idx, poly in enumerate(aPolygon):
         cellid, wkt = poly
@@ -164,7 +165,17 @@ def run_remap(sFilename_target_mesh,
     pFeature_out = ogr.Feature(pLayer_defn_out)
 
     # add id, area and mean, min, max, std of the raster
-    pLayer_out.CreateField(ogr.FieldDefn('cellid', ogr.OFTInteger))
+    # Determine the field type from source mesh
+    pLayer_source_defn = pLayer_source_mesh.GetLayerDefn()
+    iField_idx = pLayer_source_defn.GetFieldIndex(sField_unique_id)
+    if iField_idx >= 0:
+        pField_defn = pLayer_source_defn.GetFieldDefn(iField_idx)
+        eField_type = pField_defn.GetType()
+    else:
+        # Default to string type if field not found
+        eField_type = ogr.OFTString
+
+    pLayer_out.CreateField(ogr.FieldDefn(sField_unique_id, eField_type))
     # define a field
     pField = ogr.FieldDefn('area', ogr.OFTReal)
     pField.SetWidth(32)
@@ -196,7 +207,13 @@ def run_remap(sFilename_target_mesh,
 
     #now we need to find the intersecting polygons between the raster mesh and the source mesh
     for pFeature in pLayer_source_mesh:
-        cellid = pFeature.GetFieldAsInteger('cellid')
+        # Handle both string and integer field types
+        pField_defn = pLayer_source_mesh.GetLayerDefn().GetFieldDefn(
+            pLayer_source_mesh.GetLayerDefn().GetFieldIndex(sField_unique_id))
+        if pField_defn.GetType() == ogr.OFTString:
+            cellid = pFeature.GetFieldAsString(sField_unique_id)
+        else:
+            cellid = pFeature.GetFieldAsInteger(sField_unique_id)
         pTarget_geometry = pFeature.GetGeometryRef()
         if pTarget_geometry is None:
             logger.warning(

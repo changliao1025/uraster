@@ -951,7 +951,8 @@ def run_remap(sFilename_target_mesh,
               sFolder_raster_out_in=None,
               iFlag_discrete_in=False,
               iFlag_verbose_in=False,
-              iFeature_parallel_threshold=5000):
+              iFeature_parallel_threshold=5000,
+              sField_unique_id='cellid'):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.
 
@@ -1072,7 +1073,7 @@ def run_remap(sFilename_target_mesh,
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
     aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
-        sFilename_source_mesh, iFlag_verbose_in)
+        sFilename_source_mesh, iFlag_verbose_in, sField_unique_id)
     pSpatialRef_target = osr.SpatialReference()
     pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
 
@@ -1084,7 +1085,7 @@ def run_remap(sFilename_target_mesh,
     pFeature_out = ogr.Feature(pLayer_defn_out)
 
     # add id, area and mean, min, max, std of the raster
-    pLayer_out.CreateField(ogr.FieldDefn('cellid', ogr.OFTInteger))
+    pLayer_out.CreateField(ogr.FieldDefn(sField_unique_id, ogr.OFTInteger))
     # define a field
     pField = ogr.FieldDefn('area', ogr.OFTReal)
     pField.SetWidth(32)
@@ -1177,7 +1178,7 @@ def run_remap(sFilename_target_mesh,
                 # set geometry from WKT
                 geom = ogr.CreateGeometryFromWkt(aPolygon[feature_idx][1])
                 pFeature_out.SetGeometry(geom)
-                pFeature_out.SetField('cellid', int(cellid))
+                pFeature_out.SetField(sField_unique_id, int(cellid))
                 pFeature_out.SetField('area', aArea[feature_idx])
                 if iFlag_discrete_in:
                     # Populate the 'mode' field with the mode (most frequent value)
@@ -1229,7 +1230,7 @@ def run_remap(sFilename_target_mesh,
                     # set geometry from WKT
                     geom = ogr.CreateGeometryFromWkt(aPolygon[feature_idx][1])
                     pFeature_out.SetGeometry(geom)
-                    pFeature_out.SetField('cellid', int(cellid))
+                    pFeature_out.SetField(sField_unique_id, int(cellid))
                     pFeature_out.SetField('area', aArea[feature_idx])
                     if iFlag_discrete_in:
                         # Populate the 'mode' field with the mode (most frequent value)
