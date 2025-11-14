@@ -44,6 +44,8 @@ autodoc_default_options = {
     'show-inheritance': True,
 }
 
+autodoc_mock_imports = ["gdal", "osgeo"]
+
 # Intersphinx mapping
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
