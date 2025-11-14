@@ -8,6 +8,7 @@ from uraster.operation import extract, intersect
 from uraster.classes import _visual
 from uraster.classes.sraster import sraster
 from uraster import utility
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 # Set up logging for crash detection
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -492,8 +493,8 @@ class uraster:
             pSpatialRef = pLayer_source.GetSpatialRef()
             geometry_type = pLayer_source.GetGeomType()
 
-            # Create target dataset
-            pDriver = ogr.GetDriverByName('GeoJSON')
+            # Create target dataset using the same driver as source
+            pDriver = get_vector_driver_from_filename(sFilename_target)
             if os.path.exists(sFilename_target):
                 pDriver.DeleteDataSource(sFilename_target)
 
@@ -604,7 +605,7 @@ class uraster:
             self.sFilename_source_mesh,
             iFlag_verbose=iFlag_verbose,
             sField_unique_id=self.sField_unique_id)
-        
+
 
         if mesh_info is None:
             return None
