@@ -138,10 +138,9 @@ def run_remap(sFilename_target_mesh,
     pLayer_source_mesh = pDateset_source_mesh.GetLayer()
     sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
     #build the rtree index for the polygons for the source mesh
-    aPolygon, aArea = get_polygon_list(sFilename_source_mesh,
-                                     dArea_min=dArea_min,
+    aPolygon, aArea = get_polygon_list(sFilename_raster_mesh,
                                      iFlag_verbose=iFlag_verbose)
-    index_base = RTreeindex()
+    index_mesh = RTreeindex()
     for idx, poly in enumerate(aPolygon):
         cellid, wkt = poly
         if wkt is None or wkt == '':
@@ -150,11 +149,9 @@ def run_remap(sFilename_target_mesh,
             continue
         envelope = ogr.CreateGeometryFromWkt(wkt).GetEnvelope()
         left, right, bottom, top = envelope
-
         # Insert bounding box into spatial index
-        # rtree use coordinate order
         pBound = (left, bottom, right, top)
-        index_base.insert(cellid, pBound) #can use idx or cellid as the id
+        index_mesh.insert(idx, pBound) #can use idx or cellid as the id
 
     pSpatialRef_target = osr.SpatialReference()
     pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
@@ -178,137 +175,60 @@ def run_remap(sFilename_target_mesh,
 
 
     pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
-    pLayer_out.CreateField(ogr.FieldDefn('min', ogr.OFTReal))
-    pLayer_out.CreateField(ogr.FieldDefn('max', ogr.OFTReal))
-    pLayer_out.CreateField(ogr.FieldDefn('std', ogr.OFTReal))
+
 
 
     options = ['COMPRESS=DEFLATE', 'PREDICTOR=2']  # reseverd for future use
 
     # Pre-compute GDAL options to avoid repeated object creation
-    sRemap_method = 'near'
-    gdal_warp_options_base = {
-        'cropToCutline': True,
-        'xRes': dPixelWidth,
-        'yRes': abs(pPixelHeight),
-        'dstSRS': pSpatialRef_target,
-        'format': 'MEM',
-        'resampleAlg': sRemap_method,
-        'srcSRS': 'EPSG:4326',  # Explicitly set source CRS
-    }
+
 
     logger.info("run_remap: Starting main feature processing loop...")
 
-    # use multiprocessing to speed up the processing
-    start_time = time.time()
-    successful_features = 0
-    failed_features = []
 
-    # Prepare a serializable copy of warp options (convert dstSRS to WKT if needed)
-    gdal_warp_options_serial = gdal_warp_options_base.copy()
-    if 'dstSRS' in gdal_warp_options_serial and hasattr(gdal_warp_options_serial['dstSRS'], 'ExportToWkt'):
-        try:
-            gdal_warp_options_serial['dstSRS'] = gdal_warp_options_serial['dstSRS'].ExportToWkt(
-            )
-        except Exception:
-            gdal_warp_options_serial['dstSRS'] = str(
-                gdal_warp_options_serial['dstSRS'])
 
     n_features = len(aPolygon)
     max_workers = min(cpu_count(), max(1, n_features))
     logger.info(
         f"Preparing to process {n_features} features (parallel threshold={iFeature_parallel_threshold})")
 
-    # Build ordered task list (keeps original order)
-    tasks = []
-    for idx, (cellid, wkt) in enumerate(aPolygon):
-        tasks.append((idx, cellid, wkt, sFilename_source_raster,
-                     gdal_warp_options_serial, dMissing_value, iFlag_verbose))
+    start_time = time.time()
 
-    # Choose serial or parallel processing based on threshold
-    if n_features <= iFeature_parallel_threshold:
-        logger.info(
-            f"Feature count ({n_features}) <= threshold ({iFeature_parallel_threshold}); using serial processing")
-        for task in tasks:
-            feature_idx, cellid, success, payload = _process_task(task)
+    #now we need to find the intersecting polygons between the raster mesh and the source mesh
+    for pFeature in pLayer_source_mesh:
+        cellid = pFeature.GetFieldAsInteger('cellid')
+        pTarget_geometry = pFeature.GetGeometryRef()
+        if pTarget_geometry is None:
+            logger.warning(
+                f"run_remap: Warning - Empty geometry for feature ID {cellid}, skipping...")
+            continue
+        envelope = pTarget_geometry.GetEnvelope()
+        left, right, bottom, top = envelope
+        # Query spatial index for candidate intersecting polygons
+        candidate_idxs = list(index_mesh.intersection((left, bottom, right, top)))
+        # Further process candidates to find actual intersections
+        for idx in candidate_idxs:
+            raster_cellid, raster_wkt = aPolygon[idx]
+            raster_geometry = ogr.CreateGeometryFromWkt(raster_wkt)
+            #first check whether the mesh is inside the target polygon
+            if pTarget_geometry.Contains(raster_geometry):
+                # keep the raster geometry for further processing
+                pass
+            else:
+                if pTarget_geometry.Intersects(raster_geometry): #both intersect and touching
+                    # get the intersected geometry
+                    pIntersected_geometry = pTarget_geometry.Intersection(
+                        raster_geometry)
+                    #should be a polygon geometry?
+                    sGeometryName = pIntersected_geometry.GetGeometryName()
+                    if sGeometryName == 'POLYGON':
+                        pass
+                else:
+                    continue  # no intersection, skip
 
-            if not success:
-                failed_features.append(
-                    {"feature_id": cellid, "error": payload, "envelope": None})
-                if iFlag_verbose:
-                    logger.warning(f"Feature {cellid} failed: {payload}")
-                continue
 
-            # payload is stats dict
-            stats = payload
-            try:
-                # write feature geometry and attributes to output layer
-                pFeature_out = ogr.Feature(pLayer_defn_out)
-                # set geometry from WKT
-                geom = ogr.CreateGeometryFromWkt(aPolygon[feature_idx][1])
-                pFeature_out.SetGeometry(geom)
-                pFeature_out.SetField('cellid', int(cellid))
-                pFeature_out.SetField('area', aArea[feature_idx])
-                if iFlag_stat_in:
-                    pFeature_out.SetField(
-                        'mean', float(stats.get('mean', np.nan)))
-                    pFeature_out.SetField(
-                        'min', float(stats.get('min', np.nan)))
-                    pFeature_out.SetField(
-                        'max', float(stats.get('max', np.nan)))
-                    pFeature_out.SetField(
-                        'std', float(stats.get('std', np.nan)))
-                pLayer_out.CreateFeature(pFeature_out)
-                pFeature_out = None
-                successful_features += 1
-            except Exception as e:
-                failed_features.append(
-                    {"feature_id": cellid, "error": str(e), "envelope": None})
-                logger.error(f"Failed writing feature {cellid}: {e}")
-    else:
-        logger.info(
-            f"Feature count ({n_features}) > threshold ({iFeature_parallel_threshold}); using multiprocessing with {max_workers} workers")
-        # Use ProcessPoolExecutor.map to preserve task order in results
-        with ProcessPoolExecutor(max_workers=max_workers) as exe:
-            # exe.map will yield results in same order as tasks
-            for result in exe.map(_process_task, tasks):
-                feature_idx, cellid, success, payload = result
 
-                if not success:
-                    failed_features.append(
-                        {"feature_id": cellid, "error": payload, "envelope": None})
-                    if iFlag_verbose:
-                        logger.warning(f"Feature {cellid} failed: {payload}")
-                    continue
-
-                # payload is stats dict
-                stats = payload
-                try:
-                    # write feature geometry and attributes to output layer
-                    pFeature_out = ogr.Feature(pLayer_defn_out)
-                    # set geometry from WKT
-                    geom = ogr.CreateGeometryFromWkt(aPolygon[feature_idx][1])
-                    pFeature_out.SetGeometry(geom)
-                    pFeature_out.SetField('cellid', int(cellid))
-                    pFeature_out.SetField('area', aArea[feature_idx])
-                    if iFlag_stat_in:
-                        pFeature_out.SetField(
-                            'mean', float(stats.get('mean', np.nan)))
-                        pFeature_out.SetField(
-                            'min', float(stats.get('min', np.nan)))
-                        pFeature_out.SetField(
-                            'max', float(stats.get('max', np.nan)))
-                        pFeature_out.SetField(
-                            'std', float(stats.get('std', np.nan)))
-                    pLayer_out.CreateFeature(pFeature_out)
-                    pFeature_out = None
-                    successful_features += 1
-                except Exception as e:
-                    failed_features.append(
-                        {"feature_id": cellid, "error": str(e), "envelope": None})
-                    logger.error(f"Failed writing feature {cellid}: {e}")
-
-    # end multiprocessing block
+    
 
     # flush and close output
     pDataset_out.FlushCache()
@@ -321,36 +241,8 @@ def run_remap(sFilename_target_mesh,
     total_time = time.time() - start_time
     if iFlag_verbose:
         logger.info(f"Processing completed in {total_time:.2f} seconds")
-        logger.info(f"Successfully processed: {successful_features} features")
-        logger.info(f"Failed features: {len(failed_features)}")
 
-    if failed_features:
-        if iFlag_verbose:
-            logger.warning("Failed features summary:")
-            for failed in failed_features[:10]:  # Show first 10 failures
-                logger.warning(
-                    f"  Feature {failed['feature_id']}: {failed['error']}")
-            if len(failed_features) > 10:
-                logger.warning(
-                    f"  ... and {len(failed_features) - 10} more failures")
 
-        # Save failure report to file
-        # Generate failure report filename by replacing extension with '_failures.log'
-        base_name = os.path.splitext(sFilename_target_mesh)[0]
-        failure_report_file = f"{base_name}_failures.log"
-        try:
-            with open(failure_report_file, 'w') as f:
-                f.write(f"Processing failure report - {time.ctime()}\n")
-                f.write(f"Total features processed: {len(aPolygon)}\n")
-                f.write(f"Successful: {successful_features}\n")
-                f.write(f"Failed: {len(failed_features)}\n\n")
-                for failed in failed_features:
-                    f.write(
-                        f"Feature {failed['feature_id']}: {failed['error']}\n")
-                    f.write(f"  Envelope: {failed['envelope']}\n\n")
-            if iFlag_verbose:
-                logger.info(f"Failure report saved to: {failure_report_file}")
-        except Exception as e:
-            logger.error(f"Could not save failure report: {e}")
+
 
     return
