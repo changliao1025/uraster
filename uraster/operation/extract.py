@@ -981,15 +981,18 @@ def run_remap(sFilename_target_mesh,
     pLayer_out.CreateField(pField)
 
     # in the future, we will also copy other attributes from the input geojson file
-
-    if iFlag_stat_in:
-        pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
-        pLayer_out.CreateField(ogr.FieldDefn('min', ogr.OFTReal))
-        pLayer_out.CreateField(ogr.FieldDefn('max', ogr.OFTReal))
-        pLayer_out.CreateField(ogr.FieldDefn('std', ogr.OFTReal))
+    if iFlag_discrete_in:
+        pLayer_out.CreateField(ogr.FieldDefn('class', ogr.OFTInteger))
+        #how about also adding percentage fields for each unique value?
     else:
-        # treat the raster as categorical?
-        pass
+        if iFlag_stat_in:
+            pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
+            pLayer_out.CreateField(ogr.FieldDefn('min', ogr.OFTReal))
+            pLayer_out.CreateField(ogr.FieldDefn('max', ogr.OFTReal))
+            pLayer_out.CreateField(ogr.FieldDefn('std', ogr.OFTReal))
+        else:
+            pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
+            pass
 
     options = ['COMPRESS=DEFLATE', 'PREDICTOR=2']  # reseverd for future use
 

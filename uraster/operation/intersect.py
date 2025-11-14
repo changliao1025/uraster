@@ -12,6 +12,7 @@ from rtree.index import Index as RTreeindex
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 gdal.UseExceptions()
 from uraster.classes.sraster import sraster
+from uraster.utility import get_polygon_list
 # Try to import psutil for memory monitoring (optional)
 try:
     import psutil
@@ -130,12 +131,30 @@ def run_remap(sFilename_target_mesh,
     dMissing_value = pRaster.dNoData
 
 
-
     if iFlag_verbose:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
-    aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
-        sFilename_source_mesh, iFlag_verbose)
+    pDateset_source_mesh = pDriver_vector.Open(sFilename_source_mesh, ogr.GA_ReadOnly)
+    pLayer_source_mesh = pDateset_source_mesh.GetLayer()
+    sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
+    #build the rtree index for the polygons for the source mesh
+    aPolygon, aArea = get_polygon_list(sFilename_source_mesh,
+                                     dArea_min=dArea_min,
+                                     iFlag_verbose=iFlag_verbose)
+    index_base = RTreeindex()
+    for idx, poly in enumerate(aPolygon):
+        cellid, wkt = poly
+        if wkt is None or wkt == '':
+            logger.warning(
+                f"run_remap: Warning - Empty geometry for feature ID {cellid}, skipping...")
+            continue
+        envelope = ogr.CreateGeometryFromWkt(wkt).GetEnvelope()
+        left, right, bottom, top = envelope
+
+        # Insert bounding box into spatial index
+        # rtree use coordinate order
+        pBound = (left, bottom, right, top)
+        index_base.insert(cellid, pBound) #can use idx or cellid as the id
 
     pSpatialRef_target = osr.SpatialReference()
     pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
