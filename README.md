@@ -112,5 +112,5 @@ processor.visualize_target_mesh(
 
 We welcome contributions! Please open an issue or submit a pull request on the GitHub repository.
 
-**uraster** is distributed under the MIT License.
+**uraster** is distributed under the BSD 3-Clause License.
 

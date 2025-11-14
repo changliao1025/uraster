@@ -46,6 +46,19 @@ Processing Operations
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: uraster.operation.intersect
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Utilities
+~~~~~~~~~
+
+.. automodule:: uraster.utility
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Visualization
 ~~~~~~~~~~~~~
 
