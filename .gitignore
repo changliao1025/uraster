@@ -289,3 +289,4 @@ python_crash_*.txt
 # Retired code/files
 **/retired/
 **/retired/**
+*.geoparquet
