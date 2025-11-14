@@ -1,4 +1,7 @@
 # Extract module for uraster - contains remap workflow functions
+from uraster.utility import get_polygon_list, get_unique_values_from_rasters
+from uraster.classes.sraster import sraster
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
 import os
@@ -9,9 +12,6 @@ from typing import Optional, Tuple, List, Dict, Any, Union
 import numpy as np
 from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from uraster.classes.sraster import sraster
-from uraster.utility import get_polygon_list, get_unique_values_from_rasters
 
 # Try to import psutil for memory monitoring (optional)
 try:
@@ -43,13 +43,11 @@ MAX_CONSECUTIVE_FAILURES = 10   # Maximum consecutive failures before stopping
 HEARTBEAT_INTERVAL = 5          # Seconds between heartbeat logs during long operations
 
 
-
-
 def _determine_optimal_resampling(
     dArea_min: float,
     dPixelWidth: float,
     dPixelHeight: float,
-    iFlag_verbose: bool = False,
+    iFlag_verbose_in: bool = False,
     dResolution_ratio_threshold: float = 3.0
 ) -> Tuple[str, int]:
     """
@@ -63,7 +61,7 @@ def _determine_optimal_resampling(
         dArea_mean (float): Mean area of mesh cells in square degrees
         dPixelWidth (float): Raster pixel width in degrees
         dPixelHeight (float): Raster pixel height in degrees (absolute value)
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
         dResolution_ratio_threshold (float, optional): Threshold ratio for switching
             to weighted averaging. Default is 3.0.
@@ -104,7 +102,7 @@ def _determine_optimal_resampling(
         # Calculate resolution ratio (mesh size / raster size)
         dResolution_ratio = dMesh_characteristic_size / dRaster_resolution
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info("="*60)
             logger.info("Resolution Comparison Analysis:")
             logger.info(
@@ -122,7 +120,7 @@ def _determine_optimal_resampling(
             # Use weighted averaging to properly capture sub-pixel variations
             recommended_method = 'average'
             recommended_code = 3
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.warning(
                     f"Mesh resolution is close to raster resolution (ratio: {dResolution_ratio:.2f})")
                 logger.warning(
@@ -133,13 +131,13 @@ def _determine_optimal_resampling(
             # Raster is much finer than mesh - nearest neighbor is appropriate
             recommended_method = 'near'
             recommended_code = 1
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(
                     f"Raster is significantly finer than mesh (ratio: {dResolution_ratio:.2f})")
                 logger.info(
                     "Using NEAREST NEIGHBOR resampling (sufficient for this resolution ratio)")
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info("="*60)
 
         return recommended_method, recommended_code
@@ -159,7 +157,8 @@ def _process_single_polygon(
     gdal_warp_options_base: Dict[str, Any],
     dMissing_value: float,
     iFlag_discrete_in: bool = False,
-    iFlag_verbose_in: bool = False
+    iFlag_verbose_in: bool = False,
+    aUnique_value: Optional[List[float]] = None
 ) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
     """
     Process a single polygon with GDAL Warp operation and calculate statistics.
@@ -171,8 +170,11 @@ def _process_single_polygon(
         aFilename_source_raster (List[str]): List of source raster filenames
         gdal_warp_options_base (Dict[str, Any]): Base GDAL warp options dictionary
         dMissing_value (float): NoData/missing value to exclude from statistics
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_discrete_in (bool, optional): Flag for discrete data processing. Default is False.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
+        aUnique_value (Optional[List[float]], optional): List of all unique values found across
+            the entire raster dataset. Required for consistent percentage calculations in discrete mode.
 
     Returns:
         Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
@@ -299,25 +301,40 @@ def _process_single_polygon(
                     logger.info(f"No valid data found for feature {iCellid}")
             else:
                 # Compute statistics on valid data with error handling
-                if iFlag_discrete_in :
+                if iFlag_discrete_in:
                     # Combine mode calculation and percentage calculation for discrete data
-                    values, counts = np.unique(valid_data, return_counts=True)
-                    mode_index = np.argmax(counts)
+                    local_values, local_counts = np.unique(valid_data, return_counts=True)
+                    mode_index = np.argmax(local_counts)
+
                     stats = {
-                        'mode': values[mode_index],
-                        'count': int(len(valid_data)),
-                        **{f'percentage_{val}': float(cnt) / len(valid_data) * 100.0 for val, cnt in zip(values, counts)}
+                        'mode': local_values[mode_index],
+                        'count': int(len(valid_data))
                     }
-                    #also calculate the percentage of each unique value
-                    for val, cnt in zip(values, counts):
-                        stats[f'percentage_{val}'] = float(cnt) / len(valid_data) * 100.0
+
+                    # Calculate percentages for ALL unique values (consistent across polygons)
+                    if aUnique_value is not None:
+                        total_valid_pixels = len(valid_data)
+                        for val in aUnique_value:
+                            # Check if this unique value exists in the current polygon
+                            val_idx = np.where(local_values == val)[0]
+                            if len(val_idx) > 0:
+                                # Value found in this polygon
+                                percentage = float(local_counts[val_idx[0]]) / total_valid_pixels * 100.0
+                            else:
+                                # Value not found in this polygon - 0%
+                                percentage = 0.0
+                            stats[f'percentage_{val}'] = percentage
+                    else:
+                        # Fallback: only calculate percentages for locally found values
+                        for val, cnt in zip(local_values, local_counts):
+                            stats[f'percentage_{val}'] = float(cnt) / len(valid_data) * 100.0
                 else:
                     stats = {
-                    'mean': float(np.mean(valid_data)),
-                    'min': float(np.min(valid_data)),
-                    'max': float(np.max(valid_data)),
-                    'std': float(np.std(valid_data)),
-                    'count': int(len(valid_data))
+                        'mean': float(np.mean(valid_data)),
+                        'min': float(np.min(valid_data)),
+                        'max': float(np.max(valid_data)),
+                        'std': float(np.std(valid_data)),
+                        'count': int(len(valid_data))
                     }
 
                 if iFlag_verbose_in:
@@ -395,7 +412,7 @@ def _merge_raster_parts(
     transforms: List[Any],
     feature_id: Union[int, str],
     dMissing_value: float,
-    iFlag_verbose: bool = False
+    iFlag_verbose_in: bool = False
 ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
     """
     Merge multiple raster arrays from IDL-split polygons into a single data array.
@@ -408,7 +425,7 @@ def _merge_raster_parts(
         transforms (List[Any]): List of geotransforms (one per data array)
         feature_id (Union[int, str]): Feature identifier for logging
         dMissing_value (float): Missing/NoData value to exclude from results
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
 
     Returns:
@@ -456,7 +473,7 @@ def _merge_raster_parts(
             else:
                 result_data = np.array([])
 
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(
                     f"Single array processed for feature {feature_id}: {result_data.size} valid pixels")
 
@@ -490,7 +507,7 @@ def _merge_raster_parts(
                     all_valid_data.append(valid_data.flatten())
                     total_pixels += valid_data.size
 
-                    if iFlag_verbose:
+                    if iFlag_verbose_in:
                         logger.debug(
                             f"Array {i} for feature {feature_id}: {valid_data.size} valid pixels")
 
@@ -508,7 +525,7 @@ def _merge_raster_parts(
         try:
             merged_data = np.concatenate(all_valid_data)
 
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(f"Successfully merged {len(data_arrays)} raster parts for feature {feature_id}: "
                             f"{merged_data.size} valid pixels from {total_pixels} total pixels")
 
@@ -534,7 +551,8 @@ def _process_multipolygon_idl(
     gdal_warp_options_base: Dict[str, Any],
     dMissing_value: float,
     iFlag_discrete_in: bool = False,
-    iFlag_verbose_in: bool = False
+    iFlag_verbose_in: bool = False,
+    aUnique_value: Optional[List[float]] = None
 ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
     """
     Process a multipolygon that crosses the International Date Line (IDL).
@@ -549,8 +567,11 @@ def _process_multipolygon_idl(
         aFilename_source_raster (List[str]): List of source raster filenames
         gdal_warp_options_base (Dict[str, Any]): Base GDAL warp options dictionary
         dMissing_value (float): Missing/NoData value for the raster
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_discrete_in (bool, optional): Flag for discrete data processing. Default is False.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
+        aUnique_value (Optional[List[float]], optional): List of all unique values found across
+            the entire raster dataset. Required for consistent percentage calculations in discrete mode.
 
     Returns:
         Tuple[Optional[np.ndarray], Optional[Any]]: (merged_data_array, merged_geotransform)
@@ -630,9 +651,10 @@ def _process_multipolygon_idl(
 
                 part_result = _process_single_polygon(
                     iFeature_idx, f"{iCellid}_part{iPart}", polygon_part_wkt, aFilename_source_raster,
-                      gdal_warp_options_base,
-                    dMissing_value, iFlag_discrete_in=iFlag_discrete_in, iFlag_verbose_in=iFlag_verbose_in)
-
+                    gdal_warp_options_base,
+                    dMissing_value, iFlag_discrete_in=iFlag_discrete_in,
+                      iFlag_verbose_in=iFlag_verbose_in,
+                      aUnique_value=aUnique_value)
 
                 if len(part_result) != 4 or not part_result[2]:
                     logger.warning(
@@ -641,28 +663,69 @@ def _process_multipolygon_idl(
 
                 # Extract the stats from the result and convert to data array for merging
                 part_stats = part_result[3]
-                if isinstance(part_stats, dict) and 'count' in part_stats and 'mean' in part_stats:
-                    if part_stats['count'] > 0 and not np.isnan(part_stats['mean']):
-                        # Create a dummy array with the mean value repeated 'count' times
-                        # This preserves the statistical properties for merging
-                        part_data = np.full(
-                            part_stats['count'], part_stats['mean'])
-                        merged_data_arrays.append(part_data)
-                        # Transform not needed for statistics
-                        merged_transforms.append(None)
-                        successful_parts += 1
+                if iFlag_discrete_in:
+                    # For discrete data, we need to reconstruct the data array based on percentage information
+                    if isinstance(part_stats, dict) and 'count' in part_stats and part_stats['count'] > 0:
+                        if aUnique_value is not None:
+                            part_data_list = []
+                            total_count = part_stats['count']
+                            # Reconstruct data based on percentages for each unique value
+                            for val in aUnique_value:
+                                percentage_key = f'percentage_{val}'
+                                if percentage_key in part_stats:
+                                    percentage = part_stats[percentage_key]
+                                    # Calculate count for this value based on percentage
+                                    val_count = int(np.round(percentage * total_count / 100.0))
+                                    if val_count > 0:
+                                        # Add this many instances of the value
+                                        part_data_list.extend([val] * val_count)
 
-                        if iFlag_verbose_in:
-                            logger.debug(
-                                f"Successfully processed part {iPart} of feature {iCellid}: {part_stats['count']} pixels")
+                            if part_data_list:
+                                part_data = np.array(part_data_list)
+                                merged_data_arrays.append(part_data)
+                                merged_transforms.append(None)
+                                successful_parts += 1
+
+                                if iFlag_verbose_in:
+                                    logger.debug(
+                                        f"Successfully processed discrete part {iPart} of feature {iCellid}: {len(part_data_list)} reconstructed pixels")
+                            else:
+                                if iFlag_verbose_in:
+                                    logger.debug(
+                                        f"Part {iPart} of feature {iCellid} has no reconstructable discrete data")
+                        else:
+                            # Fallback: use mode value repeated 'count' times
+                            mode_val = part_stats.get('mode', 0)
+                            part_data = np.full(part_stats['count'], mode_val)
+                            merged_data_arrays.append(part_data)
+                            merged_transforms.append(None)
+                            successful_parts += 1
                     else:
                         if iFlag_verbose_in:
-                            logger.debug(
-                                f"Part {iPart} of feature {iCellid} has no valid data")
+                            logger.debug(f"Part {iPart} of feature {iCellid} has no valid discrete data")
                 else:
-                    logger.warning(
-                        f"Invalid stats returned for polygon part {iPart} of feature {iCellid}: {type(part_stats)}")
-                    continue
+                    if isinstance(part_stats, dict) and 'count' in part_stats and 'mean' in part_stats:
+                        if part_stats['count'] > 0 and not np.isnan(part_stats['mean']):
+                            # Create a dummy array with the mean value repeated 'count' times
+                            # This preserves the statistical properties for merging
+                            part_data = np.full(
+                                part_stats['count'], part_stats['mean'])
+                            merged_data_arrays.append(part_data)
+                            # Transform not needed for statistics
+                            merged_transforms.append(None)
+                            successful_parts += 1
+
+                            if iFlag_verbose_in:
+                                logger.debug(
+                                    f"Successfully processed part {iPart} of feature {iCellid}: {part_stats['count']} pixels")
+                        else:
+                            if iFlag_verbose_in:
+                                logger.debug(
+                                    f"Part {iPart} of feature {iCellid} has no valid data")
+                    else:
+                        logger.warning(
+                            f"Invalid stats returned for polygon part {iPart} of feature {iCellid}: {type(part_stats)}")
+                        continue
 
             except Exception as part_error:
                 logger.warning(
@@ -674,13 +737,13 @@ def _process_multipolygon_idl(
                 f"No polygon parts could be processed for IDL feature {iCellid}")
             return np.array([]), None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(
                 f"Successfully processed {successful_parts}/{nGeometries} parts for IDL feature {iCellid}")
 
         # Merge the data arrays and transforms
         merged_data, merged_transform = _merge_raster_parts(
-            merged_data_arrays, merged_transforms, iCellid, dMissing_value, iFlag_verbose)
+            merged_data_arrays, merged_transforms, iCellid, dMissing_value, iFlag_verbose_in)
 
         return merged_data, merged_transform
 
@@ -700,7 +763,7 @@ def _process_multipolygon_idl(
                 f"Error cleaning up multipolygon geometry for feature {iCellid}: {e}")
 
 
-def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, Any], float, bool, bool]) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
+def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, Any], float, bool, bool, Optional[List[float]]]) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
     """
     Module-level worker function for multiprocessing polygon processing.
 
@@ -716,7 +779,9 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
             - aFilename_source_raster (List[str]): List of source raster files
             - gdal_warp_options_base (Dict[str, Any]): GDAL warp options dictionary
             - dMissing_value (float): Missing/NoData value for the raster
-            - iFlag_verbose (bool): Verbose logging flag
+            - iFlag_discrete_in (bool): Discrete data processing flag
+            - iFlag_verbose_in (bool): Verbose logging flag
+            - aUnique_value (Optional[List[float]]): List of all unique values in the raster dataset
 
     Returns:
         Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
@@ -732,7 +797,7 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
     """
     # Unpack arguments with validation
     try:
-        feature_idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose = args
+        feature_idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose_in, aUnique_value = args
     except (ValueError, TypeError) as e:
         logger.error(f"Invalid arguments passed to _process_task: {e}")
         return -1, "unknown", False, f"Invalid arguments: {str(e)}"
@@ -760,17 +825,17 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
 
         sGeometry_type = pPolygon.GetGeometryName()
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.debug(
                 f"Processing {sGeometry_type} geometry for feature {cellid}")
 
         if sGeometry_type == "POLYGON":
             return _process_single_polygon(feature_idx, cellid,
-                                           wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose)
+                                           wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose_in, aUnique_value)
 
         elif sGeometry_type == "MULTIPOLYGON":
             merged_data, merged_transform = _process_multipolygon_idl(feature_idx, cellid,
-                                                                      wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose)
+                                                                      wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose_in, aUnique_value)
 
             if merged_data is None:
                 return feature_idx, cellid, False, "Failed to process multipolygon"
@@ -786,17 +851,64 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
                 valid_data = merged_data[valid_mask]
 
                 if len(valid_data) == 0:
-                    return feature_idx, cellid, False, "No valid data found in multipolygon"
+                    if iFlag_discrete_in:
+                        # Handle case for discrete data with no valid pixels
+                        stats = {
+                            'mode': float(np.nan),
+                            'count': 0
+                        }
+                        # Add zero percentages for all unique values
+                        if aUnique_value is not None:
+                            for val in aUnique_value:
+                                stats[f'percentage_{val}'] = 0.0
+                    else:
+                        stats = {
+                            'mean': float(np.nan),
+                            'min': float(np.nan),
+                            'max': float(np.nan),
+                            'std': float(np.nan),
+                            'count': 0
+                        }
+                    return feature_idx, cellid, True, stats
 
-                stats = {
-                    'mean': float(np.mean(valid_data)),
-                    'min': float(np.min(valid_data)),
-                    'max': float(np.max(valid_data)),
-                    'std': float(np.std(valid_data)),
-                    'count': int(len(valid_data))
-                }
+                if iFlag_discrete_in:
+                    # Handle discrete data statistics
+                    local_values, local_counts = np.unique(valid_data, return_counts=True)
+                    mode_index = np.argmax(local_counts)
 
-                if iFlag_verbose:
+                    stats = {
+                        'mode': local_values[mode_index],
+                        'count': int(len(valid_data))
+                    }
+
+                    # Calculate percentages for ALL unique values (consistent across polygons)
+                    if aUnique_value is not None:
+                        total_valid_pixels = len(valid_data)
+                        for val in aUnique_value:
+                            # Check if this unique value exists in the current multipolygon
+                            val_idx = np.where(local_values == val)[0]
+                            if len(val_idx) > 0:
+                                # Value found in this multipolygon
+                                percentage = float(local_counts[val_idx[0]]) / total_valid_pixels * 100.0
+                            else:
+                                # Value not found in this multipolygon - 0%
+                                percentage = 0.0
+                            stats[f'percentage_{val}'] = percentage
+                    else:
+                        # Fallback: only calculate percentages for locally found values
+                        for val, cnt in zip(local_values, local_counts):
+                            stats[f'percentage_{val}'] = float(cnt) / len(valid_data) * 100.0
+                else:
+                    # Handle continuous data statistics
+                    stats = {
+                        'mean': float(np.mean(valid_data)),
+                        'min': float(np.min(valid_data)),
+                        'max': float(np.max(valid_data)),
+                        'std': float(np.std(valid_data)),
+                        'count': int(len(valid_data))
+                    }
+
+                if iFlag_verbose_in:
                     logger.debug(
                         f"Computed multipolygon stats for feature {cellid}: {stats['count']} valid pixels")
 
@@ -829,18 +941,18 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
                 f"Error cleaning up geometry for feature {cellid}: {e}")
 
 
-
 def run_remap(sFilename_target_mesh,
               sFilename_source_mesh,
               aFilename_source_raster,
               dArea_min,
-              iFlag_remap_method_in = 1,
-              iFlag_stat_in = True,
-              iFlag_save_clipped_raster_in = 0,
-              sFolder_raster_out_in = None,
-              iFlag_discrete_in = False,
-              iFlag_verbose_in = False,
-              iFeature_parallel_threshold = 5000):
+              iFlag_remap_method_in=1,
+              iFlag_stat_in=True,
+              iFlag_save_clipped_raster_in=0,
+              sFolder_raster_out_in=None,
+              iFlag_discrete_in=False,
+              iFlag_verbose_in=False,
+              iFeature_parallel_threshold=5000,
+              sField_unique_id='cellid'):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.
 
@@ -861,7 +973,7 @@ def run_remap(sFilename_target_mesh,
         sFolder_raster_out_in (str, optional): Output folder for clipped rasters.
             Required if iFlag_save_clipped_raster_in=1.
         sFormat_in (str, optional): GDAL raster format. Default is 'GTiff'.
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
 
     Returns:
@@ -878,11 +990,11 @@ def run_remap(sFilename_target_mesh,
         return
     iFlag_remap_method = iFlag_remap_method_in
 
-    if iFlag_verbose_in  :
+    if iFlag_verbose_in:
         logger.info("run_remap: Starting input file validation...")
     # check input files
     for idx, sFilename_raster in enumerate(aFilename_source_raster):
-        if iFlag_verbose_in  :
+        if iFlag_verbose_in:
             logger.info(
                 f"Checking raster file {idx+1}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster)}")
         if os.path.exists(sFilename_raster):
@@ -891,7 +1003,7 @@ def run_remap(sFilename_target_mesh,
             logger.error('The raster file does not exist!')
             return
 
-    if iFlag_verbose_in  :
+    if iFlag_verbose_in:
         logger.info(
             f"Checking source mesh file: {os.path.basename(sFilename_source_mesh)}")
     if os.path.exists(sFilename_source_mesh):
@@ -899,7 +1011,7 @@ def run_remap(sFilename_target_mesh,
     else:
         logger.error('The vector mesh file does not exist!')
         return
-    if iFlag_verbose_in  :
+    if iFlag_verbose_in:
         logger.info("Input file validation completed successfully")
 
     # Determine output vector format from filename extension
@@ -916,7 +1028,7 @@ def run_remap(sFilename_target_mesh,
     sName = os.path.basename(sFilename_raster)
     sRasterName_no_extension = os.path.splitext(sName)[0]
 
-    if iFlag_verbose_in  :
+    if iFlag_verbose_in:
         logger.info(
             "run_remap: Reading raster metadata and determining processing bounds...")
 
@@ -936,7 +1048,7 @@ def run_remap(sFilename_target_mesh,
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
-        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose_in  )
+        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose_in)
 
     # Use automatically determined method if it's more conservative than user setting
     # Priority: weighted averaging > nearest neighbor
@@ -954,14 +1066,14 @@ def run_remap(sFilename_target_mesh,
             sRemap_method = 'near'
         elif iFlag_remap_method == 3:
             sRemap_method = 'average'
-        if iFlag_verbose_in  :
+        if iFlag_verbose_in:
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
-    if iFlag_verbose_in  :
+    if iFlag_verbose_in:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
     aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
-        sFilename_source_mesh, iFlag_verbose_in  )
+        sFilename_source_mesh, iFlag_verbose_in, sField_unique_id)
     pSpatialRef_target = osr.SpatialReference()
     pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
 
@@ -973,7 +1085,7 @@ def run_remap(sFilename_target_mesh,
     pFeature_out = ogr.Feature(pLayer_defn_out)
 
     # add id, area and mean, min, max, std of the raster
-    pLayer_out.CreateField(ogr.FieldDefn('cellid', ogr.OFTInteger))
+    pLayer_out.CreateField(ogr.FieldDefn(sField_unique_id, ogr.OFTInteger))
     # define a field
     pField = ogr.FieldDefn('area', ogr.OFTReal)
     pField.SetWidth(32)
@@ -982,23 +1094,23 @@ def run_remap(sFilename_target_mesh,
 
     # in the future, we will also copy other attributes from the input geojson file
     if iFlag_discrete_in:
-        #we might need to get the unique values first to create the fields
-        unique_values = get_unique_values_from_rasters(aFilename_source_raster, dMissing_value, iFlag_verbose_in )
-        nValues = len(unique_values)
+        # we might need to get the unique values first to create the fields
+        aUnique_value = get_unique_values_from_rasters(
+            aFilename_source_raster, dMissing_value, iFlag_verbose_in)
+        nValues = len(aUnique_value)
         logger.info(f"Found {nValues} unique values in raster")
-        pLayer_out.CreateField(ogr.FieldDefn('class', ogr.OFTInteger))
-        #how about also adding percentage fields for each unique value?
-        for val in unique_values:
-            field_name = f'frac_{int(val)}'
+        pLayer_out.CreateField(ogr.FieldDefn('mode', ogr.OFTInteger))
+        pLayer_out.CreateField(ogr.FieldDefn('count', ogr.OFTInteger))
+        for val in aUnique_value:
+            field_name = f'percentage_{int(val)}'
             pLayer_out.CreateField(ogr.FieldDefn(field_name, ogr.OFTReal))
     else:
+        pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
         if iFlag_stat_in:
-            pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
             pLayer_out.CreateField(ogr.FieldDefn('min', ogr.OFTReal))
             pLayer_out.CreateField(ogr.FieldDefn('max', ogr.OFTReal))
             pLayer_out.CreateField(ogr.FieldDefn('std', ogr.OFTReal))
         else:
-            pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
             pass
 
     options = ['COMPRESS=DEFLATE', 'PREDICTOR=2']  # reseverd for future use
@@ -1039,8 +1151,11 @@ def run_remap(sFilename_target_mesh,
 
     # Build ordered task list (keeps original order)
     tasks = []
+    # Pass aUnique_value only if discrete mode is enabled
+    unique_values_param = aUnique_value if iFlag_discrete_in else None
     for idx, (cellid, wkt) in enumerate(aPolygon):
-        tasks.append((idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_serial, dMissing_value, iFlag_discrete_in, iFlag_verbose_in))
+        tasks.append((idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_serial,
+                     dMissing_value, iFlag_discrete_in, iFlag_verbose_in, unique_values_param))
 
     # Choose serial or parallel processing based on threshold
     if n_features <= iFeature_parallel_threshold:
@@ -1063,15 +1178,21 @@ def run_remap(sFilename_target_mesh,
                 # set geometry from WKT
                 geom = ogr.CreateGeometryFromWkt(aPolygon[feature_idx][1])
                 pFeature_out.SetGeometry(geom)
-                pFeature_out.SetField('cellid', int(cellid))
+                pFeature_out.SetField(sField_unique_id, int(cellid))
                 pFeature_out.SetField('area', aArea[feature_idx])
                 if iFlag_discrete_in:
-                    # populate class and fraction fields
-                    pass
+                    # Populate the 'mode' field with the mode (most frequent value)
+                    pFeature_out.SetField('mode', int(stats.get('mode', -1)))
+                    pFeature_out.SetField('count', int(stats.get('count', 0)))
+                    # Populate the percentage fields for each unique value
+                    for val in aUnique_value:
+                        field_name = f'percentage_{int(val)}'
+                        percentage = stats.get(f'percentage_{val}', 0.0)
+                        pFeature_out.SetField(field_name, float(percentage))
                 else:
-                    if iFlag_stat_in:
-                        pFeature_out.SetField(
+                    pFeature_out.SetField(
                             'mean', float(stats.get('mean', np.nan)))
+                    if iFlag_stat_in:
                         pFeature_out.SetField(
                             'min', float(stats.get('min', np.nan)))
                         pFeature_out.SetField(
@@ -1097,7 +1218,7 @@ def run_remap(sFilename_target_mesh,
                 if not success:
                     failed_features.append(
                         {"feature_id": cellid, "error": payload, "envelope": None})
-                    if iFlag_verbose_in  :
+                    if iFlag_verbose_in:
                         logger.warning(f"Feature {cellid} failed: {payload}")
                     continue
 
@@ -1109,17 +1230,27 @@ def run_remap(sFilename_target_mesh,
                     # set geometry from WKT
                     geom = ogr.CreateGeometryFromWkt(aPolygon[feature_idx][1])
                     pFeature_out.SetGeometry(geom)
-                    pFeature_out.SetField('cellid', int(cellid))
+                    pFeature_out.SetField(sField_unique_id, int(cellid))
                     pFeature_out.SetField('area', aArea[feature_idx])
-                    if iFlag_stat_in:
+                    if iFlag_discrete_in:
+                        # Populate the 'mode' field with the mode (most frequent value)
+                        pFeature_out.SetField('mode', int(stats.get('mode', -1)))
+                        pFeature_out.SetField('count', int(stats.get('count', 0)))
+                        # Populate the percentage fields for each unique value
+                        for val in aUnique_value:
+                            field_name = f'percentage_{int(val)}'
+                            percentage = stats.get(f'percentage_{val}', 0.0)
+                            pFeature_out.SetField(field_name, float(percentage))
+                    else:
                         pFeature_out.SetField(
                             'mean', float(stats.get('mean', np.nan)))
-                        pFeature_out.SetField(
-                            'min', float(stats.get('min', np.nan)))
-                        pFeature_out.SetField(
-                            'max', float(stats.get('max', np.nan)))
-                        pFeature_out.SetField(
-                            'std', float(stats.get('std', np.nan)))
+                        if iFlag_stat_in:
+                            pFeature_out.SetField(
+                                'min', float(stats.get('min', np.nan)))
+                            pFeature_out.SetField(
+                                'max', float(stats.get('max', np.nan)))
+                            pFeature_out.SetField(
+                                'std', float(stats.get('std', np.nan)))
                     pLayer_out.CreateFeature(pFeature_out)
                     pFeature_out = None
                     successful_features += 1
@@ -1139,13 +1270,13 @@ def run_remap(sFilename_target_mesh,
 
     # Report processing summary
     total_time = time.time() - start_time
-    if iFlag_verbose_in  :
+    if iFlag_verbose_in:
         logger.info(f"Processing completed in {total_time:.2f} seconds")
         logger.info(f"Successfully processed: {successful_features} features")
         logger.info(f"Failed features: {len(failed_features)}")
 
     if failed_features:
-        if iFlag_verbose_in  :
+        if iFlag_verbose_in:
             logger.warning("Failed features summary:")
             for failed in failed_features[:10]:  # Show first 10 failures
                 logger.warning(
@@ -1168,7 +1299,7 @@ def run_remap(sFilename_target_mesh,
                     f.write(
                         f"Feature {failed['feature_id']}: {failed['error']}\n")
                     f.write(f"  Envelope: {failed['envelope']}\n\n")
-            if iFlag_verbose_in  :
+            if iFlag_verbose_in:
                 logger.info(f"Failure report saved to: {failure_report_file}")
         except Exception as e:
             logger.error(f"Could not save failure report: {e}")

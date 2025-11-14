@@ -7,6 +7,8 @@ gdal.UseExceptions()
 from uraster.operation import extract, intersect
 from uraster.classes import _visual
 from uraster.classes.sraster import sraster
+from uraster import utility
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 # Set up logging for crash detection
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,7 +52,8 @@ class uraster:
 
         # File paths
         self.sFilename_source_mesh = aConfig.get('sFilename_source_mesh', None)
-        self.sField_unique_id = aConfig.get('sField_unique_id', None)
+        self.sField_unique_id = aConfig.get('sField_unique_id', 'cellid')  # Default to 'cellid'
+        self.iField_unique_type = None  # Will be set during setup_mesh_cellid
         self.sFilename_target_mesh = aConfig.get('sFilename_target_mesh', None)
         self.aFilename_source_raster = aConfig.get(
             'aFilename_source_raster', [])
@@ -323,6 +326,16 @@ class uraster:
                 f"Source mesh file does not exist: {self.sFilename_source_mesh}")
             return None
 
+        #need to add a function to check whether cellid field exists in the mesh file, if not, add it
+        if self.sField_unique_id is None:
+            logger.error(
+                "No unique ID field specified for mesh cells (sField_unique_id)")
+            return None
+
+        # Setup and validate the mesh cell ID field
+        if not self.setup_mesh_cellid():
+            return None
+
         return self.rebuild_mesh_topology(iFlag_verbose=iFlag_verbose)
 
     def _get_geometry_type_name(self, geometry_type):
@@ -360,6 +373,218 @@ class uraster:
 
         return f"Unknown geometry type: {geometry_type}"
 
+    def setup_mesh_cellid(self):
+        """
+        Setup and validate integer mesh cell ID field for GeoVista compatibility.
+
+        Always ensures integer cell IDs by generating globally unique sequential integers.
+        If field doesn't exist or is string type, creates intermediate file with new integer field.
+        Original string field values are preserved when creating new integer IDs.
+
+        Returns:
+            bool: True if setup successful, False otherwise
+
+        Note:
+            - Always generates globally unique integer cell IDs (1, 2, 3, ...)
+            - Preserves original field values when converting from string
+            - Required for GeoVista visualization compatibility
+        """
+        if not self.sFilename_source_mesh or not self.sField_unique_id:
+            logger.error("Missing mesh filename or unique ID field name")
+            return False
+
+        try:
+            # Open mesh file to check field existence
+            pDataset_mesh = ogr.Open(self.sFilename_source_mesh, 0)  # Read-only
+            if pDataset_mesh is None:
+                logger.error(f"Cannot open mesh file: {self.sFilename_source_mesh}")
+                return False
+
+            pLayer_mesh = pDataset_mesh.GetLayer()
+            if pLayer_mesh is None:
+                logger.error("Cannot access layer in mesh file")
+                pDataset_mesh = None
+                return False
+
+            # Check if specified field exists
+            pLayer_defn = pLayer_mesh.GetLayerDefn()
+            iFlag_field_exists = False
+
+            for i in range(pLayer_defn.GetFieldCount()):
+                pField_defn = pLayer_defn.GetFieldDefn(i)
+                if pField_defn.GetName().lower() == self.sField_unique_id.lower():
+                    iFlag_field_exists = True
+                    iField_type = pField_defn.GetType()
+
+                    # Always require integer type for GeoVista compatibility
+                    if iField_type == ogr.OFTInteger:
+                        self.iField_unique_type = ogr.OFTInteger
+                        logger.info(f"Found integer field '{self.sField_unique_id}' - ready for use")
+                        pDataset_mesh = None
+                        return True
+                    else:
+                        # Field exists but wrong type - regenerate with integer IDs
+                        logger.info(f"Found field '{self.sField_unique_id}' but not integer type - will regenerate with sequential integer IDs")
+                        iFlag_field_exists = False  # Treat as needing regeneration
+                    break
+
+            if not iFlag_field_exists:
+                # Field doesn't exist or needs integer regeneration
+                logger.info(f"Creating intermediate file with sequential integer field '{self.sField_unique_id}'...")
+
+                # Create intermediate filename
+                base_name = os.path.splitext(self.sFilename_source_mesh)[0]
+                extension = os.path.splitext(self.sFilename_source_mesh)[1]
+                sFilename_intermediate = f"{base_name}_with_{self.sField_unique_id}{extension}"
+
+                # Copy original file and add the field
+                success = self._create_intermediate_mesh_file(
+                    self.sFilename_source_mesh,
+                    sFilename_intermediate,
+                    self.sField_unique_id,
+                    pDataset_mesh
+                )
+
+                pDataset_mesh = None
+
+                if success:
+                    # Update the source mesh filename to use intermediate file
+                    self.sFilename_source_mesh = sFilename_intermediate
+                    logger.info(f"Successfully created intermediate file: {sFilename_intermediate}")
+                    logger.info(f"Updated source mesh path to: {self.sFilename_source_mesh}")
+                    return True
+                else:
+                    logger.error("Failed to create intermediate mesh file")
+                    return False
+
+        except Exception as e:
+            logger.error(f"Error setting up mesh cell ID field: {e}")
+            return False
+
+    def _create_intermediate_mesh_file(self, sFilename_source, sFilename_target, sField_name, pDataset_source):
+        """
+        Create intermediate mesh file with the specified ID field added.
+
+        Args:
+            sFilename_source (str): Path to source mesh file
+            sFilename_target (str): Path to target intermediate file
+            sField_name (str): Name of the ID field to add
+            pDataset_source: Open source dataset (will be closed and reopened)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Close source dataset if open
+            if pDataset_source is not None:
+                pDataset_source = None
+
+            # Reopen source dataset
+            pDataset_source = ogr.Open(sFilename_source, 0)  # Read-only
+            if pDataset_source is None:
+                return False
+
+            pLayer_source = pDataset_source.GetLayer()
+            if pLayer_source is None:
+                pDataset_source = None
+                return False
+
+            # Get source layer info
+            pSpatialRef = pLayer_source.GetSpatialRef()
+            geometry_type = pLayer_source.GetGeomType()
+
+            # Create target dataset using the same driver as source
+            pDriver = get_vector_driver_from_filename(sFilename_target)
+            if os.path.exists(sFilename_target):
+                pDriver.DeleteDataSource(sFilename_target)
+
+            pDataset_target = pDriver.CreateDataSource(sFilename_target)
+            if pDataset_target is None:
+                pDataset_source = None
+                return False
+
+            # Create target layer with same properties
+            pLayer_target = pDataset_target.CreateLayer(
+                'mesh',
+                pSpatialRef,
+                geometry_type
+            )
+            if pLayer_target is None:
+                pDataset_source = None
+                pDataset_target = None
+                return False
+
+            # Copy all existing fields
+            pLayerDefn_source = pLayer_source.GetLayerDefn()
+            for i in range(pLayerDefn_source.GetFieldCount()):
+                pFieldDefn = pLayerDefn_source.GetFieldDefn(i)
+                pLayer_target.CreateField(pFieldDefn)
+
+            # Check if we need to preserve existing field values
+            pLayerDefn_source = pLayer_source.GetLayerDefn()
+            iSource_field_index = pLayerDefn_source.GetFieldIndex(sField_name)
+            bHas_existing_field = iSource_field_index >= 0
+
+            # If field exists, add "oldid" field to preserve original values
+            if bHas_existing_field:
+                pField_defn_source = pLayerDefn_source.GetFieldDefn(iSource_field_index)
+                iOriginal_field_type = pField_defn_source.GetType()
+                pField_oldid = ogr.FieldDefn("oldid", iOriginal_field_type)
+                pLayer_target.CreateField(pField_oldid)
+
+            # Add the new integer ID field (will be stored globally)
+            pField_id = ogr.FieldDefn(sField_name, ogr.OFTInteger)
+            pLayer_target.CreateField(pField_id)
+            # Set field type globally for newly created field
+            self.iField_unique_type = ogr.OFTInteger
+
+            # Copy features and add sequential IDs
+            pLayer_source.ResetReading()
+            feature_id = 1
+
+            for pFeature_source in pLayer_source:
+                # Create new feature
+                pFeature_target = ogr.Feature(pLayer_target.GetLayerDefn())
+
+                # Copy geometry
+                pGeometry = pFeature_source.GetGeometryRef()
+                if pGeometry is not None:
+                    pFeature_target.SetGeometry(pGeometry.Clone())
+
+                # Copy all existing field values and preserve original ID if exists
+                for i in range(pLayerDefn_source.GetFieldCount()):
+                    pFieldDefn = pLayerDefn_source.GetFieldDefn(i)
+                    sField_name_existing = pFieldDefn.GetName()
+                    field_value = pFeature_source.GetField(sField_name_existing)
+
+                    # If this is the field being replaced, save to "oldid"
+                    if sField_name_existing.lower() == sField_name.lower() and bHas_existing_field:
+                        pFeature_target.SetField("oldid", field_value)
+                    elif sField_name_existing.lower() != sField_name.lower():
+                        # Copy other fields normally (skip field being replaced)
+                        pFeature_target.SetField(sField_name_existing, field_value)
+
+                # Set the new globally unique integer ID field
+                pFeature_target.SetField(sField_name, feature_id)
+
+                # Add feature to target layer
+                pLayer_target.CreateFeature(pFeature_target)
+
+                pFeature_target = None
+                feature_id += 1
+
+            # Cleanup
+            pDataset_source = None
+            pDataset_target = None
+
+            logger.info(f"Added field '{sField_name}' to {feature_id} features")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error creating intermediate file: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
+
     def rebuild_mesh_topology(self, iFlag_verbose=False):
         """
         Rebuild mesh topology from source mesh file by extracting vertices,
@@ -376,11 +601,11 @@ class uraster:
             tuple: (vertices_longitude, vertices_latitude, connectivity) or None on failure
         """
         # Use the enhanced standalone function from _visual module
-        mesh_info = _visual.rebuild_mesh_topology(
+        mesh_info = utility.rebuild_mesh_topology(
             self.sFilename_source_mesh,
             iFlag_verbose=iFlag_verbose,
-            sField_unique_id=self.sField_unique_id
-        )
+            sField_unique_id=self.sField_unique_id)
+
 
         if mesh_info is None:
             return None
@@ -391,7 +616,7 @@ class uraster:
         self.aConnectivity = mesh_info['connectivity']
         self.aCenter_longititude = mesh_info['cell_centroids_longitude']
         self.aCenter_latitude = mesh_info['cell_centroids_latitude']
-        self.aCellID = mesh_info['cell_ids']
+        self.aCellID = mesh_info['cell_ids'] #can be both int or str depending on the field type
         self.dArea_min = mesh_info['area_min']
         self.dArea_max = mesh_info['area_max']
         self.dArea_mean = mesh_info['area_mean']
@@ -562,7 +787,8 @@ class uraster:
                 iFlag_stat_in=iFlag_stat_in,
                 iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
                 sFolder_raster_out_in=sFolder_raster_out_in,
-                iFlag_verbose_in=iFlag_verbose)
+                iFlag_verbose_in=iFlag_verbose,
+                sField_unique_id=self.sField_unique_id)
 
     def visualize_source_mesh(self,
                               sFilename_out=None,
