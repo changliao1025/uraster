@@ -4,6 +4,8 @@ import logging
 import traceback
 from typing import Optional, Tuple, List, Dict, Any, Union
 from osgeo import gdal, ogr
+
+from uraster.classes.sraster import sraster
 gdal.UseExceptions()
 from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
@@ -87,7 +89,7 @@ def _log_memory_usage(stage: str, iFlag_verbose: bool = False) -> None:
 
 def get_polygon_list(
     sFilename_source_mesh: str,
-    iFlag_verbose: bool = False
+    iFlag_verbose_in: bool = False
 ) -> Optional[Tuple[List[Tuple[Union[int, str], str]], List[float], Optional[str]]]:
     """
     Extract polygon geometries and areas from mesh vector file.
@@ -119,7 +121,7 @@ def get_polygon_list(
         logger.error(f"Mesh file does not exist: {sFilename_source_mesh}")
         return None
 
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info(
             "get_polygon_list: Pre-fetching features and analyzing geometries...")
 
@@ -147,7 +149,7 @@ def get_polygon_list(
             logger.warning("No features found in mesh dataset")
             return [], [], None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f"Found {nFeature} features in mesh dataset")
 
         pSpatialRef_source = pLayer_mesh.GetSpatialRef()
@@ -212,7 +214,7 @@ def get_polygon_list(
                         # Check whether geometry crosses the International Date Line
                         if check_cross_international_date_line_polygon(aCoord):
                             dArea = 0.0
-                            if iFlag_verbose:
+                            if iFlag_verbose_in:
                                 logger.info(
                                     f'Feature {i} crosses the international date line, splitting into multiple parts.')
 
@@ -321,12 +323,12 @@ def get_polygon_list(
             i += 1
 
             # Progress reporting during feature pre-processing
-            if i % 1000 == 0 and iFlag_verbose:
+            if i % 1000 == 0 and iFlag_verbose_in:
                 logger.info(
                     f"Pre-processed {i} features... ({processed_count} successful, {error_count} errors)")
 
         # Final summary
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f"get_polygon_list: Pre-processing completed.")
             logger.info(f"  Total features processed: {i}")
             logger.info(f"  Successfully processed: {processed_count}")
@@ -360,3 +362,25 @@ def get_polygon_list(
                 pDataset_mesh = None
         except Exception as e:
             logger.warning(f"Error cleaning up dataset: {e}")
+
+def get_unique_values_from_rasters(aFilename_raster: str,
+                                    dMissing_value: float,
+                                    band_index: int = 1,
+                                    iFlag_verbose_in: bool = False) -> Optional[List[float]]:
+    """
+    Extract unique values from a raster band.
+
+    Args:
+        sFilename_raster (str): Path to the raster file
+        band_index (int, optional): Band index to read (1-based). Default is
+
+    """
+    aUnique_values = set()
+    for sFilename in aFilename_raster:
+        pRaster = sraster(sFilename)
+        if pRaster is not None:
+            unique_values = pRaster.get_unique_values(band_index, dMissing_value, iFlag_verbose_in)
+            if unique_values is not None:
+                aUnique_values.update(unique_values)
+
+    return list(aUnique_values) if aUnique_values else None

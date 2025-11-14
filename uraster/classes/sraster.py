@@ -1,4 +1,5 @@
 import os
+import numpy as np
 from osgeo import osr
 from osgeo import gdal
 gdal.UseExceptions()
@@ -251,7 +252,42 @@ class sraster:
         pRaster_wgs84.read_metadata()
         return pRaster_wgs84
 
+    def get_unique_values(self, band_index=1, dMissing_value=None, iFlag_verbose_in=0):
+        """
+        Get unique values from the specified band of the raster.
+        """
+        # Check if file exists
+        if not os.path.isfile(self.sFilename):
+            raise FileNotFoundError(f"File does not exist: {self.sFilename}")
 
+        pDataset = None
+        unique_values = set()
+        try:
+            pDataset = gdal.Open(self.sFilename)
+            if pDataset is None:
+                raise RuntimeError(f"Unable to open file: {self.sFilename}")
+
+            if band_index < 1 or band_index > pDataset.RasterCount:
+                raise ValueError(f"Invalid band index: {band_index}")
+
+            pBand = pDataset.GetRasterBand(band_index)
+            array = pBand.ReadAsArray()
+
+            # Get unique values using numpy
+            unique_array = np.unique(array)
+
+            # Filter out missing value if specified
+            for value in unique_array:
+                if dMissing_value is not None and value == dMissing_value:
+                    continue
+                unique_values.add(value)
+
+        finally:
+            # Ensure dataset is properly closed
+            if pDataset is not None:
+                pDataset = None
+
+        return list(unique_values)
 
 
 

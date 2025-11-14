@@ -11,7 +11,7 @@ from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from uraster.classes.sraster import sraster
-from uraster.utility import get_polygon_list
+from uraster.utility import get_polygon_list, get_unique_values_from_rasters
 
 # Try to import psutil for memory monitoring (optional)
 try:
@@ -982,8 +982,15 @@ def run_remap(sFilename_target_mesh,
 
     # in the future, we will also copy other attributes from the input geojson file
     if iFlag_discrete_in:
+        #we might need to get the unique values first to create the fields
+        unique_values = get_unique_values_from_rasters(aFilename_source_raster, dMissing_value, iFlag_verbose_in )
+        nValues = len(unique_values)
+        logger.info(f"Found {nValues} unique values in raster")
         pLayer_out.CreateField(ogr.FieldDefn('class', ogr.OFTInteger))
         #how about also adding percentage fields for each unique value?
+        for val in unique_values:
+            field_name = f'frac_{int(val)}'
+            pLayer_out.CreateField(ogr.FieldDefn(field_name, ogr.OFTReal))
     else:
         if iFlag_stat_in:
             pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
@@ -1041,11 +1048,10 @@ def run_remap(sFilename_target_mesh,
             f"Feature count ({n_features}) <= threshold ({iFeature_parallel_threshold}); using serial processing")
         for task in tasks:
             feature_idx, cellid, success, payload = _process_task(task)
-
             if not success:
                 failed_features.append(
                     {"feature_id": cellid, "error": payload, "envelope": None})
-                if iFlag_verbose_in  :
+                if iFlag_verbose_in:
                     logger.warning(f"Feature {cellid} failed: {payload}")
                 continue
 
@@ -1059,15 +1065,19 @@ def run_remap(sFilename_target_mesh,
                 pFeature_out.SetGeometry(geom)
                 pFeature_out.SetField('cellid', int(cellid))
                 pFeature_out.SetField('area', aArea[feature_idx])
-                if iFlag_stat_in:
-                    pFeature_out.SetField(
-                        'mean', float(stats.get('mean', np.nan)))
-                    pFeature_out.SetField(
-                        'min', float(stats.get('min', np.nan)))
-                    pFeature_out.SetField(
-                        'max', float(stats.get('max', np.nan)))
-                    pFeature_out.SetField(
-                        'std', float(stats.get('std', np.nan)))
+                if iFlag_discrete_in:
+                    # populate class and fraction fields
+                    pass
+                else:
+                    if iFlag_stat_in:
+                        pFeature_out.SetField(
+                            'mean', float(stats.get('mean', np.nan)))
+                        pFeature_out.SetField(
+                            'min', float(stats.get('min', np.nan)))
+                        pFeature_out.SetField(
+                            'max', float(stats.get('max', np.nan)))
+                        pFeature_out.SetField(
+                            'std', float(stats.get('std', np.nan)))
                 pLayer_out.CreateFeature(pFeature_out)
                 pFeature_out = None
                 successful_features += 1

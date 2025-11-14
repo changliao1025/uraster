@@ -139,7 +139,7 @@ def run_remap(sFilename_target_mesh,
     sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
     #build the rtree index for the polygons for the source mesh
     aPolygon, aArea = get_polygon_list(sFilename_raster_mesh,
-                                     iFlag_verbose=iFlag_verbose)
+                                     iFlag_verbose_in=iFlag_verbose)
     index_mesh = RTreeindex()
     for idx, poly in enumerate(aPolygon):
         cellid, wkt = poly
@@ -228,7 +228,7 @@ def run_remap(sFilename_target_mesh,
 
 
 
-    
+
 
     # flush and close output
     pDataset_out.FlushCache()
