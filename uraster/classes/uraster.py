@@ -1,19 +1,15 @@
-# Define a class named 'uraster'
 import os
 import logging
 import traceback
 import numpy as np
 from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
-from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
-from uraster.classes.sraster import sraster
+from uraster.operation import extract, intersect
 from uraster.classes import _visual
-from uraster.operation import extract
-
+from uraster.classes.sraster import sraster
 # Set up logging for crash detection
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
 pDriver_geojson = ogr.GetDriverByName('GeoJSON')
@@ -47,7 +43,8 @@ class uraster:
 
         # Processing flags and resolutions
         self.iFlag_global = None
-        self.iFlag_remap_method = aConfig.get('iFlag_remap_method', 1)  # Default to nearest neighbor
+        self.iFlag_remap_method = aConfig.get(
+            'iFlag_remap_method', 1)  # Default to nearest neighbor
         self.dResolution_raster = None
         self.dResolution_uraster = None
 
@@ -55,7 +52,8 @@ class uraster:
         self.sFilename_source_mesh = aConfig.get('sFilename_source_mesh', None)
         self.sField_unique_id = aConfig.get('sField_unique_id', None)
         self.sFilename_target_mesh = aConfig.get('sFilename_target_mesh', None)
-        self.aFilename_source_raster = aConfig.get('aFilename_source_raster', [])
+        self.aFilename_source_raster = aConfig.get(
+            'aFilename_source_raster', [])
 
         # Cell counts
         self.nCell = -1
@@ -78,11 +76,13 @@ class uraster:
 
         # Resolution comparison threshold (ratio of mesh to raster resolution)
         # If mesh cells are within this factor of raster resolution, use weighted averaging
-        self.dResolution_ratio_threshold = 3.0  # mesh resolution < 3x raster resolution triggers weighted avg
+        # mesh resolution < 3x raster resolution triggers weighted avg
+        self.dResolution_ratio_threshold = 3.0
 
         # Validate configuration
         if self.iFlag_remap_method not in [1, 2, 3]:
-            logger.warning(f"Invalid remap method {self.iFlag_remap_method}, defaulting to 1 (nearest neighbor)")
+            logger.warning(
+                f"Invalid remap method {self.iFlag_remap_method}, defaulting to 1 (nearest neighbor)")
             self.iFlag_remap_method = 1
 
     def setup(self, iFlag_verbose=False):
@@ -137,16 +137,19 @@ class uraster:
             return None
 
         if not isinstance(aFilename_source_raster, (list, tuple)):
-            logger.error(f'Raster files must be provided as a list, got {type(aFilename_source_raster).__name__}')
+            logger.error(
+                f'Raster files must be provided as a list, got {type(aFilename_source_raster).__name__}')
             return None
 
         if iFlag_verbose:
-            logger.info(f'Validating {len(aFilename_source_raster)} raster file(s)...')
+            logger.info(
+                f'Validating {len(aFilename_source_raster)} raster file(s)...')
 
         # Phase 1: Check file existence and readability
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
             if not isinstance(sFilename_raster_in, str):
-                logger.error(f'Raster file path must be a string, got {type(sFilename_raster_in).__name__} at index {idx}')
+                logger.error(
+                    f'Raster file path must be a string, got {type(sFilename_raster_in).__name__} at index {idx}')
                 return None
 
             if not sFilename_raster_in.strip():
@@ -154,7 +157,8 @@ class uraster:
                 return None
 
             if not os.path.exists(sFilename_raster_in):
-                logger.error(f'Raster file does not exist: {sFilename_raster_in}')
+                logger.error(
+                    f'Raster file does not exist: {sFilename_raster_in}')
                 return None
 
             if not os.path.isfile(sFilename_raster_in):
@@ -163,18 +167,22 @@ class uraster:
 
             # Check file permissions
             if not os.access(sFilename_raster_in, os.R_OK):
-                logger.error(f'Raster file is not readable: {sFilename_raster_in}')
+                logger.error(
+                    f'Raster file is not readable: {sFilename_raster_in}')
                 return None
 
             # Quick GDAL format validation
             try:
-                pDataset_test = gdal.Open(sFilename_raster_in, gdal.GA_ReadOnly)
+                pDataset_test = gdal.Open(
+                    sFilename_raster_in, gdal.GA_ReadOnly)
                 if pDataset_test is None:
-                    logger.error(f'GDAL cannot open raster file: {sFilename_raster_in}')
+                    logger.error(
+                        f'GDAL cannot open raster file: {sFilename_raster_in}')
                     return None
                 pDataset_test = None  # Close dataset
             except Exception as e:
-                logger.error(f'Error opening raster with GDAL: {sFilename_raster_in}: {e}')
+                logger.error(
+                    f'Error opening raster with GDAL: {sFilename_raster_in}: {e}')
                 return None
 
         if iFlag_verbose:
@@ -200,7 +208,8 @@ class uraster:
         # Process each raster file
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
             if iFlag_verbose:
-                logger.info(f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
+                logger.info(
+                    f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
 
             try:
                 # Create sraster instance and read metadata
@@ -209,15 +218,18 @@ class uraster:
 
                 # Validate critical metadata
                 if pRaster.pSpatialRef_wkt is None:
-                    logger.error(f'Raster has no spatial reference: {sFilename_raster_in}')
+                    logger.error(
+                        f'Raster has no spatial reference: {sFilename_raster_in}')
                     return None
 
                 if pRaster.nrow is None or pRaster.ncolumn is None:
-                    logger.error(f'Invalid raster dimensions: {sFilename_raster_in}')
+                    logger.error(
+                        f'Invalid raster dimensions: {sFilename_raster_in}')
                     return None
 
                 if pRaster.nrow <= 0 or pRaster.ncolumn <= 0:
-                    logger.error(f'Raster has invalid dimensions ({pRaster.nrow}x{pRaster.ncolumn}): {sFilename_raster_in}')
+                    logger.error(
+                        f'Raster has invalid dimensions ({pRaster.nrow}x{pRaster.ncolumn}): {sFilename_raster_in}')
                     return None
 
                 # Check if coordinate system matches WGS84
@@ -228,30 +240,37 @@ class uraster:
                 else:
                     # Convert to WGS84
                     if iFlag_verbose:
-                        logger.info(f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}')
+                        logger.info(
+                            f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}')
                     try:
                         pRaster_wgs84 = pRaster.convert_to_wgs84()
 
                         if pRaster_wgs84 is None or not hasattr(pRaster_wgs84, 'sFilename'):
-                            logger.error(f'Conversion to WGS84 failed: {sFilename_raster_in}')
+                            logger.error(
+                                f'Conversion to WGS84 failed: {sFilename_raster_in}')
                             return None
 
                         if not os.path.exists(pRaster_wgs84.sFilename):
-                            logger.error(f'Converted WGS84 file not found: {pRaster_wgs84.sFilename}')
+                            logger.error(
+                                f'Converted WGS84 file not found: {pRaster_wgs84.sFilename}')
                             return None
 
                         if iFlag_verbose:
-                            logger.info(f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
-                        aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
+                            logger.info(
+                                f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
+                        aFilename_source_raster_out.append(
+                            pRaster_wgs84.sFilename)
 
                     except Exception as e:
-                        logger.error(f'Error during WGS84 conversion: {sFilename_raster_in}: {e}')
+                        logger.error(
+                            f'Error during WGS84 conversion: {sFilename_raster_in}: {e}')
                         logger.error(f'Traceback: {traceback.format_exc()}')
                         return None
 
                 # Log raster summary
                 if iFlag_verbose:
-                    logger.debug(f'  - Dimensions: {pRaster.nrow} x {pRaster.ncolumn} pixels')
+                    logger.debug(
+                        f'  - Dimensions: {pRaster.nrow} x {pRaster.ncolumn} pixels')
                     logger.debug(f'  - Data type: {pRaster.eType}')
                     if hasattr(pRaster, 'dNoData'):
                         logger.debug(f'  - NoData value: {pRaster.dNoData}')
@@ -259,23 +278,28 @@ class uraster:
                 pRaster.pSpatialRef = None  # Clean up spatial reference
 
             except AttributeError as e:
-                logger.error(f'Missing expected attribute in sraster: {sFilename_raster_in}: {e}')
-                logger.error(f'Ensure sraster class has all required methods and attributes')
+                logger.error(
+                    f'Missing expected attribute in sraster: {sFilename_raster_in}: {e}')
+                logger.error(
+                    f'Ensure sraster class has all required methods and attributes')
                 return None
 
             except Exception as e:
-                logger.error(f'Unexpected error processing raster {sFilename_raster_in}: {e}')
+                logger.error(
+                    f'Unexpected error processing raster {sFilename_raster_in}: {e}')
                 logger.error(f'Error type: {type(e).__name__}')
                 logger.error(f'Traceback: {traceback.format_exc()}')
                 return None
 
         # Final validation
         if len(aFilename_source_raster_out) != len(aFilename_source_raster):
-            logger.error(f'Output count mismatch: expected {len(aFilename_source_raster)}, got {len(aFilename_source_raster_out)}')
+            logger.error(
+                f'Output count mismatch: expected {len(aFilename_source_raster)}, got {len(aFilename_source_raster_out)}')
             return None
 
         if iFlag_verbose:
-            logger.info(f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
+            logger.info(
+                f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
 
         return aFilename_source_raster_out
 
@@ -295,7 +319,8 @@ class uraster:
             return None
 
         if not os.path.exists(self.sFilename_source_mesh):
-            logger.error(f"Source mesh file does not exist: {self.sFilename_source_mesh}")
+            logger.error(
+                f"Source mesh file does not exist: {self.sFilename_source_mesh}")
             return None
 
         return self.rebuild_mesh_topology(iFlag_verbose=iFlag_verbose)
@@ -407,7 +432,8 @@ class uraster:
         """
         if sFilename_output and os.path.exists(sFilename_output):
             logger.info(f"Output file created: {sFilename_output}")
-            logger.info(f"Output file size: {os.path.getsize(sFilename_output) / (1024*1024):.2f} MB")
+            logger.info(
+                f"Output file size: {os.path.getsize(sFilename_output) / (1024*1024):.2f} MB")
         else:
             logger.warning("No output file information available")
 
@@ -416,7 +442,8 @@ class uraster:
         Print detailed information about all input raster files.
         """
         print("\n" + "="*60)
-        print(f"Input Raster Information ({len(self.aFilename_source_raster)} file(s)):")
+        print(
+            f"Input Raster Information ({len(self.aFilename_source_raster)} file(s)):")
         print("="*60)
 
         for idx, sFilename in enumerate(self.aFilename_source_raster, 1):
@@ -440,8 +467,10 @@ class uraster:
         print("Mesh Topology Information:")
         print("="*60)
         print(f"Number of mesh cells: {len(self.aCenter_longititude)}")
-        print(f"Cell longitude range: {self.aCenter_longititude.min():.3f} to {self.aCenter_longititude.max():.3f}")
-        print(f"Cell latitude range: {self.aCenter_latitude.min():.3f} to {self.aCenter_latitude.max():.3f}")
+        print(
+            f"Cell longitude range: {self.aCenter_longititude.min():.3f} to {self.aCenter_longititude.max():.3f}")
+        print(
+            f"Cell latitude range: {self.aCenter_latitude.min():.3f} to {self.aCenter_latitude.max():.3f}")
         print(f"Maximum vertices per cell: {self.nVertex_max}")
 
         if self.aVertex_longititude is not None:
@@ -455,17 +484,20 @@ class uraster:
             print(f"  Min area: {self.dArea_min:.6f}")
             print(f"  Max area: {self.dArea_max:.6f}")
             print(f"  Mean area: {self.dArea_mean:.6f}")
-            print(f"  Area range ratio: {self.dArea_max/self.dArea_min:.2f}x" if self.dArea_min > 0 else "  Area range ratio: N/A")
+            print(
+                f"  Area range ratio: {self.dArea_max/self.dArea_min:.2f}x" if self.dArea_min > 0 else "  Area range ratio: N/A")
 
         print("="*60)
 
-    def run_remap(self, sFilename_target_mesh_out = None,
-                    sFilename_source_mesh_in = None,
-                    aFilename_source_raster_in = None,
-                  iFlag_stat_in = 1,
-                  iFlag_remap_method_in = 1,
+    def run_remap(self, sFilename_target_mesh_out=None,
+                  sFilename_source_mesh_in=None,
+                  aFilename_source_raster_in=None,
+                  iFlag_stat_in=True,
+                  iFlag_weighted_average_in=False,
+                  iFlag_remap_method_in=1,
                   iFlag_save_clipped_raster_in=0,
-                  sFolder_raster_out_in = None,
+                  sFolder_raster_out_in=None,
+                  iFlag_discrete_in=False,
                   iFlag_verbose=False):
         """
         Perform zonal statistics by clipping raster data to mesh polygons.
@@ -487,16 +519,50 @@ class uraster:
         else:
             sFilename_target_mesh = sFilename_target_mesh_out
             self.sFilename_target_mesh = sFilename_target_mesh_out
-        return extract.run_remap(
-             sFilename_target_mesh,
-               sFilename_source_mesh,
-               aFilename_source_raster,
-             self.dArea_min,
-             iFlag_remap_method_in = iFlag_remap_method_in,
-            iFlag_stat_in = iFlag_stat_in,
-              iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
-              sFolder_raster_out_in=sFolder_raster_out_in,
-              iFlag_verbose=iFlag_verbose  )
+
+
+        #check stat and discrete compatibility
+        if iFlag_discrete_in:
+            #for discrete, only remap method 1 (nearest neighbor) is allowed
+            #can we apply statistics for discrete?
+            iFlag_stat_in = False
+            if iFlag_remap_method_in != 1:
+                logger.error("For discrete remap, only remap method 1 (nearest neighbor) is allowed.")
+                return None
+        else:
+            #for continuous, all remap methods are allowed
+            pass
+
+        # the model should suport weighted average and discrete remap
+        if iFlag_weighted_average_in:
+            # call the polygon calculation with weighted average
+            sFilename_raster = aFilename_source_raster[0]
+            pRaster = sraster(sFilename_raster)
+            pRaster.read_metadata()
+            sFilename_raster_mesh = pRaster.create_raster_mesh()
+            return intersect.run_remap(
+                sFilename_target_mesh,
+                sFilename_source_mesh,
+                sFilename_raster,
+                sFilename_raster_mesh,
+                self.dArea_min,
+                iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
+                sFolder_raster_out_in=sFolder_raster_out_in,
+                iFlag_discrete_in=iFlag_discrete_in,
+                iFlag_verbose=iFlag_verbose)
+
+        else:
+            return extract.run_remap(
+                sFilename_target_mesh,
+                sFilename_source_mesh,
+                aFilename_source_raster,
+                self.dArea_min,
+                iFlag_remap_method_in=iFlag_remap_method_in,
+                iFlag_discrete_in=iFlag_discrete_in,
+                iFlag_stat_in=iFlag_stat_in,
+                iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
+                sFolder_raster_out_in=sFolder_raster_out_in,
+                iFlag_verbose_in=iFlag_verbose)
 
     def visualize_source_mesh(self,
                               sFilename_out=None,
@@ -537,10 +603,10 @@ class uraster:
             - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         """
         return _visual.visualize_source_mesh(
-            self, sFilename_out, dLongitude_focus_in = dLongitude_focus_in, dLatitude_focus_in = dLatitude_focus_in,
-            dZoom_factor = dZoom_factor,
-            iFlag_show_coastlines = iFlag_show_coastlines,
-            iFlag_show_graticule = iFlag_show_graticule,
+            self, sFilename_out, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in,
+            dZoom_factor=dZoom_factor,
+            iFlag_show_coastlines=iFlag_show_coastlines,
+            iFlag_show_graticule=iFlag_show_graticule,
             iFlag_verbose=iFlag_verbose
         )
 
@@ -554,19 +620,19 @@ class uraster:
         return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose=iFlag_verbose)
 
     def visualize_target_mesh(self, sVariable_in=None,
-                               sUnit_in=None,
-                               sFilename_out=None,
-                               dLongitude_focus_in=0.0,
-                               dLatitude_focus_in=0.0,
-                               dZoom_factor=0.7,
-                               iFlag_show_coastlines=True,
-                               iFlag_show_graticule=True,
-                               sColormap='viridis',
-                               iFlag_create_animation=False,
-                               iAnimation_frames=360,
-                               dAnimation_speed=1.0,
-                               sAnimation_format='mp4',
-                               iFlag_verbose=False):
+                              sUnit_in=None,
+                              sFilename_out=None,
+                              dLongitude_focus_in=0.0,
+                              dLatitude_focus_in=0.0,
+                              dZoom_factor=0.7,
+                              iFlag_show_coastlines=True,
+                              iFlag_show_graticule=True,
+                              sColormap='viridis',
+                              iFlag_create_animation=False,
+                              iAnimation_frames=360,
+                              dAnimation_speed=1.0,
+                              sAnimation_format='mp4',
+                              iFlag_verbose=False):
         """
         Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
@@ -626,16 +692,16 @@ class uraster:
             dZoom_factor=dZoom_factor,
             iFlag_show_coastlines=iFlag_show_coastlines,
             iFlag_show_graticule=iFlag_show_graticule,
-              sColormap=sColormap,
+            sColormap=sColormap,
             iFlag_create_animation=iFlag_create_animation,
             iAnimation_frames=iAnimation_frames,
-              dAnimation_speed=dAnimation_speed,
-              sAnimation_format=sAnimation_format,
-                iFlag_verbose=iFlag_verbose
+            dAnimation_speed=dAnimation_speed,
+            sAnimation_format=sAnimation_format,
+            iFlag_verbose=iFlag_verbose
         )
 
     def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
-                                    iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose=False):
+                                   iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose=False):
         """
         Create a rotating animation of the 3D globe visualization.
 
@@ -653,6 +719,7 @@ class uraster:
         try:
             if hasattr(self, 'pSpatialRef') and self.pSpatialRef is not None:
                 self.pSpatialRef = None
-                logger.debug('Spatial reference object cleaned up successfully')
+                logger.debug(
+                    'Spatial reference object cleaned up successfully')
         except Exception as e:
             logger.warning(f'Error during cleanup of spatial reference: {e}')

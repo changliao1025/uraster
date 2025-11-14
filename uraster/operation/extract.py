@@ -1,12 +1,6 @@
-
 # Extract module for uraster - contains remap workflow functions
-from uraster.classes.sraster import sraster
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
-from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Pool, cpu_count
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import cpu_count
 import os
 import logging
 import time
@@ -15,6 +9,9 @@ from typing import Optional, Tuple, List, Dict, Any, Union
 import numpy as np
 from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
+from uraster.classes.sraster import sraster
+from uraster.utility import get_polygon_list
 
 # Try to import psutil for memory monitoring (optional)
 try:
@@ -45,104 +42,7 @@ PROGRESS_REPORT_INTERVAL = 5   # Report progress every N features
 MAX_CONSECUTIVE_FAILURES = 10   # Maximum consecutive failures before stopping
 HEARTBEAT_INTERVAL = 5          # Seconds between heartbeat logs during long operations
 
-# Utility functions for common operations
 
-
-def _validate_geometry(geometry: Any, feature_id: Union[int, str], attempt_fix: bool = True) -> bool:
-    """
-    Validate and optionally fix OGR geometry objects.
-
-    Args:
-        geometry: OGR geometry object to validate
-        feature_id: Feature identifier for logging
-        attempt_fix: Whether to attempt fixing invalid geometries
-
-    Returns:
-        bool: True if geometry is valid (or was successfully fixed), False otherwise
-    """
-    if geometry is None:
-        logger.warning(f"Geometry is None for feature {feature_id}")
-        return False
-
-    if geometry.IsValid():
-        return True
-
-    if not attempt_fix:
-        logger.warning(f"Invalid geometry for feature {feature_id}")
-        return False
-
-    try:
-        # Attempt to fix invalid geometry using buffer(0) technique
-        logger.warning(
-            f"Invalid geometry for feature {feature_id}, attempting to fix")
-        fixed_geometry = geometry.Buffer(0)
-
-        if fixed_geometry and fixed_geometry.IsValid():
-            # Copy the fixed geometry back to the original
-            geometry.ImportFromWkt(fixed_geometry.ExportToWkt())
-            logger.debug(
-                f"Successfully fixed geometry for feature {feature_id}")
-            return True
-        else:
-            logger.warning(
-                f"Cannot fix invalid geometry for feature {feature_id}")
-            return False
-
-    except Exception as e:
-        logger.warning(
-            f"Error attempting to fix geometry for feature {feature_id}: {e}")
-        return False
-
-
-def _safe_calculate_area(coordinates: np.ndarray, feature_id: Union[int, str]) -> float:
-    """
-    Safely calculate polygon area with error handling.
-
-    Args:
-        coordinates: Numpy array of polygon coordinates
-        feature_id: Feature identifier for logging
-
-    Returns:
-        float: Calculated area in square degrees, 0.0 on error
-    """
-    try:
-        if coordinates is None or len(coordinates) < 3:
-            logger.warning(
-                f"Invalid coordinates for area calculation, feature {feature_id}")
-            return 0.0
-
-        area = calculate_polygon_area(coordinates[:, 0], coordinates[:, 1])
-
-        if not np.isfinite(area) or area < 0:
-            logger.warning(
-                f"Invalid area calculated for feature {feature_id}: {area}")
-            return 0.0
-
-        return float(area)
-
-    except Exception as e:
-        logger.warning(f"Error calculating area for feature {feature_id}: {e}")
-        return 0.0
-
-
-def _log_memory_usage(stage: str, iFlag_verbose: bool = False) -> None:
-    """
-    Log current memory usage if psutil is available.
-
-    Args:
-        stage: Description of the current processing stage
-        iFlag_verbose: Whether to log memory information
-    """
-    if not PSUTIL_AVAILABLE or not iFlag_verbose:
-        return
-
-    try:
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        memory_mb = memory_info.rss / (1024 * 1024)
-        logger.info(f"Memory usage at {stage}: {memory_mb:.1f} MB")
-    except Exception as e:
-        logger.debug(f"Could not get memory usage: {e}")
 
 
 def _determine_optimal_resampling(
@@ -258,7 +158,8 @@ def _process_single_polygon(
     aFilename_source_raster: List[str],
     gdal_warp_options_base: Dict[str, Any],
     dMissing_value: float,
-    iFlag_verbose: bool = False
+    iFlag_discrete_in: bool = False,
+    iFlag_verbose_in: bool = False
 ) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
     """
     Process a single polygon with GDAL Warp operation and calculate statistics.
@@ -353,7 +254,7 @@ def _process_single_polygon(
         aData_clip = pDataset_warp.ReadAsArray()
         warp_duration = time.time() - warp_start_time
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(
                 f"GDAL Warp completed for feature {iCellid} in {warp_duration:.2f} seconds")
 
@@ -379,27 +280,47 @@ def _process_single_polygon(
             valid_data = aData_clip_copy[valid_mask]
 
             if len(valid_data) == 0:
-                # No valid pixels for this feature: not treated as an error
-                stats = {
-                    'mean': float(np.nan),
-                    'min': float(np.nan),
-                    'max': float(np.nan),
-                    'std': float(np.nan),
-                    'count': 0
-                }
-                if iFlag_verbose:
+                if iFlag_discrete_in == 1:
+                    # Handle case for discrete data with no valid pixels
+                    stats = {
+                        'mode': float(np.nan),
+                        'count': 0
+                    }
+                else:
+                    # No valid pixels for this feature: not treated as an error
+                    stats = {
+                        'mean': float(np.nan),
+                        'min': float(np.nan),
+                        'max': float(np.nan),
+                        'std': float(np.nan),
+                        'count': 0
+                    }
+                if iFlag_verbose_in:
                     logger.info(f"No valid data found for feature {iCellid}")
             else:
                 # Compute statistics on valid data with error handling
-                stats = {
+                if iFlag_discrete_in :
+                    # Combine mode calculation and percentage calculation for discrete data
+                    values, counts = np.unique(valid_data, return_counts=True)
+                    mode_index = np.argmax(counts)
+                    stats = {
+                        'mode': values[mode_index],
+                        'count': int(len(valid_data)),
+                        **{f'percentage_{val}': float(cnt) / len(valid_data) * 100.0 for val, cnt in zip(values, counts)}
+                    }
+                    #also calculate the percentage of each unique value
+                    for val, cnt in zip(values, counts):
+                        stats[f'percentage_{val}'] = float(cnt) / len(valid_data) * 100.0
+                else:
+                    stats = {
                     'mean': float(np.mean(valid_data)),
                     'min': float(np.min(valid_data)),
                     'max': float(np.max(valid_data)),
                     'std': float(np.std(valid_data)),
                     'count': int(len(valid_data))
-                }
+                    }
 
-                if iFlag_verbose:
+                if iFlag_verbose_in:
                     logger.info(
                         f"Computed stats for feature {iCellid}: {stats['count']} valid pixels")
 
@@ -612,7 +533,8 @@ def _process_multipolygon_idl(
     aFilename_source_raster: List[str],
     gdal_warp_options_base: Dict[str, Any],
     dMissing_value: float,
-    iFlag_verbose: bool = False
+    iFlag_discrete_in: bool = False,
+    iFlag_verbose_in: bool = False
 ) -> Tuple[Optional[np.ndarray], Optional[Any]]:
     """
     Process a multipolygon that crosses the International Date Line (IDL).
@@ -673,7 +595,7 @@ def _process_multipolygon_idl(
                 f"Multipolygon has no geometry parts for feature {iCellid}")
             return None, None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(
                 f"Processing {nGeometries} polygon parts for IDL-crossing feature {iCellid}")
 
@@ -707,10 +629,11 @@ def _process_multipolygon_idl(
                     continue
 
                 part_result = _process_single_polygon(
-                    iFeature_idx, f"{iCellid}_part{iPart}", polygon_part_wkt, aFilename_source_raster, gdal_warp_options_base,
-                    dMissing_value, iFlag_verbose)
+                    iFeature_idx, f"{iCellid}_part{iPart}", polygon_part_wkt, aFilename_source_raster,
+                      gdal_warp_options_base,
+                    dMissing_value, iFlag_discrete_in=iFlag_discrete_in, iFlag_verbose_in=iFlag_verbose_in)
 
-                # _process_single_polygon returns (feature_idx, cellid, success, stats_or_error)
+
                 if len(part_result) != 4 or not part_result[2]:
                     logger.warning(
                         f"Failed to process polygon part {iPart} of feature {iCellid}: {part_result[3] if len(part_result) > 3 else 'Unknown error'}")
@@ -729,11 +652,11 @@ def _process_multipolygon_idl(
                         merged_transforms.append(None)
                         successful_parts += 1
 
-                        if iFlag_verbose:
+                        if iFlag_verbose_in:
                             logger.debug(
                                 f"Successfully processed part {iPart} of feature {iCellid}: {part_stats['count']} pixels")
                     else:
-                        if iFlag_verbose:
+                        if iFlag_verbose_in:
                             logger.debug(
                                 f"Part {iPart} of feature {iCellid} has no valid data")
                 else:
@@ -777,7 +700,7 @@ def _process_multipolygon_idl(
                 f"Error cleaning up multipolygon geometry for feature {iCellid}: {e}")
 
 
-def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, Any], float, bool]) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
+def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, Any], float, bool, bool]) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
     """
     Module-level worker function for multiprocessing polygon processing.
 
@@ -790,7 +713,7 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
             - feature_idx (int): Index of the feature being processed
             - cellid (Union[int, str]): Cell identifier for the feature
             - wkt (str): Well-Known Text representation of the geometry
-            - aFilename_source_raster (List[str]): List of source raster filenames
+            - aFilename_source_raster (List[str]): List of source raster files
             - gdal_warp_options_base (Dict[str, Any]): GDAL warp options dictionary
             - dMissing_value (float): Missing/NoData value for the raster
             - iFlag_verbose (bool): Verbose logging flag
@@ -809,7 +732,7 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
     """
     # Unpack arguments with validation
     try:
-        feature_idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_verbose = args
+        feature_idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose = args
     except (ValueError, TypeError) as e:
         logger.error(f"Invalid arguments passed to _process_task: {e}")
         return -1, "unknown", False, f"Invalid arguments: {str(e)}"
@@ -843,11 +766,11 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
 
         if sGeometry_type == "POLYGON":
             return _process_single_polygon(feature_idx, cellid,
-                                           wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_verbose)
+                                           wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose)
 
         elif sGeometry_type == "MULTIPOLYGON":
             merged_data, merged_transform = _process_multipolygon_idl(feature_idx, cellid,
-                                                                      wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_verbose)
+                                                                      wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose)
 
             if merged_data is None:
                 return feature_idx, cellid, False, "Failed to process multipolygon"
@@ -906,293 +829,18 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
                 f"Error cleaning up geometry for feature {cellid}: {e}")
 
 
-def get_polygon_list(
-    sFilename_source_mesh: str,
-    iFlag_verbose: bool = False
-) -> Optional[Tuple[List[Tuple[Union[int, str], str]], List[float], Optional[str]]]:
-    """
-    Extract polygon geometries and areas from mesh vector file.
-
-    Processes mesh features, handles International Date Line (IDL) crossing polygons,
-    and returns polygon WKT strings with associated areas and projection information.
-
-    Args:
-        sFilename_source_mesh (str): Path to the source mesh vector file
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
-            Default is False.
-
-    Returns:
-        Optional[Tuple[List[Tuple[Union[int, str], str]], List[float], Optional[str]]]:
-            - List of (cellid, wkt_string) tuples for each polygon
-            - List of polygon areas in square degrees
-            - Source projection WKT string
-            Returns None on failure.
-
-    Raises:
-        ValueError: If input parameters are invalid
-    """
-    # Input validation
-    if not isinstance(sFilename_source_mesh, str) or not sFilename_source_mesh.strip():
-        logger.error("Invalid mesh filename provided")
-        return None
-
-    if not os.path.exists(sFilename_source_mesh):
-        logger.error(f"Mesh file does not exist: {sFilename_source_mesh}")
-        return None
-
-    if iFlag_verbose:
-        logger.info(
-            "get_polygon_list: Pre-fetching features and analyzing geometries...")
-
-    aPolygon = []
-    aArea = []
-    pDataset_mesh = None
-    pLayer_mesh = None
-    pSpatialRef_source = None
-
-    try:
-        # Open the mesh vector file
-        pDataset_mesh = ogr.Open(sFilename_source_mesh, 0)  # 0 means read-only
-        if pDataset_mesh is None:
-            logger.error(
-                f"Failed to open mesh dataset: {sFilename_source_mesh}")
-            return None
-
-        pLayer_mesh = pDataset_mesh.GetLayer(0)
-        if pLayer_mesh is None:
-            logger.error("Failed to get layer from mesh dataset")
-            return None
-
-        nFeature = pLayer_mesh.GetFeatureCount()
-        if nFeature <= 0:
-            logger.warning("No features found in mesh dataset")
-            return [], [], None
-
-        if iFlag_verbose:
-            logger.info(f"Found {nFeature} features in mesh dataset")
-
-        pSpatialRef_source = pLayer_mesh.GetSpatialRef()
-        sProjection_source_wkt = pSpatialRef_source.ExportToWkt() if pSpatialRef_source else None
-
-        if sProjection_source_wkt is None:
-            logger.warning("No spatial reference found in mesh dataset")
-
-        # Process features
-        pLayer_mesh.ResetReading()
-        i = 0
-        processed_count = 0
-        error_count = 0
-
-        for pFeature_mesh in pLayer_mesh:
-            if pFeature_mesh is None:
-                error_count += 1
-                continue
-
-            try:
-                # Get geometry and validate
-                pPolygon = pFeature_mesh.GetGeometryRef()
-                if pPolygon is None:
-                    logger.warning(f"Feature {i} has no geometry, skipping")
-                    error_count += 1
-                    i += 1
-                    continue
-
-                if not pPolygon.IsValid():
-                    logger.warning(
-                        f"Feature {i} has invalid geometry, attempting to fix")
-                    pPolygon = pPolygon.Buffer(0)  # Attempt to fix
-                    if not pPolygon.IsValid():
-                        logger.warning(
-                            f"Cannot fix invalid geometry for feature {i}, skipping")
-                        error_count += 1
-                        i += 1
-                        continue
-
-                sGeometry_type = pPolygon.GetGeometryName()
-
-                # Read cellid from current feature with error handling
-                try:
-                    current_cellid = pFeature_mesh.GetField('cellid')
-                    if current_cellid is None:
-                        current_cellid = i  # Use feature index as fallback
-                except Exception as field_error:
-                    logger.warning(
-                        f"Error reading cellid for feature {i}: {field_error}")
-                    current_cellid = i
-
-                if sGeometry_type == "POLYGON":
-                    try:
-                        aCoord = get_geometry_coordinates(pPolygon)
-                        if aCoord is None or len(aCoord) < 3:
-                            logger.warning(
-                                f"Invalid coordinates for polygon feature {i}, skipping")
-                            error_count += 1
-                            i += 1
-                            continue
-
-                        # Check whether geometry crosses the International Date Line
-                        if check_cross_international_date_line_polygon(aCoord):
-                            dArea = 0.0
-                            if iFlag_verbose:
-                                logger.info(
-                                    f'Feature {i} crosses the international date line, splitting into multiple parts.')
-
-                            # Create multipolygon to handle IDL crossing
-                            pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
-                            aCoord_gcs_split = split_international_date_line_polygon_coordinates(
-                                aCoord)
-
-                            for aCoord_gcs in aCoord_gcs_split:
-                                try:
-                                    dArea += calculate_polygon_area(
-                                        aCoord_gcs[:, 0], aCoord_gcs[:, 1])
-
-                                    # Create polygon from coordinates
-                                    ring = ogr.Geometry(ogr.wkbLinearRing)
-                                    for iCoord in range(aCoord_gcs.shape[0]):
-                                        ring.AddPoint(
-                                            aCoord_gcs[iCoord, 0], aCoord_gcs[iCoord, 1])
-
-                                    ring.CloseRings()
-                                    polygon_part = ogr.Geometry(ogr.wkbPolygon)
-                                    polygon_part.AddGeometry(ring)
-
-                                    # Validate polygon part
-                                    if not polygon_part.IsValid():
-                                        polygon_part = polygon_part.Buffer(
-                                            0)  # Attempt to fix
-                                        if not polygon_part.IsValid():
-                                            logger.warning(
-                                                f'Polygon part of feature {i} is invalid after IDL splitting')
-                                            continue
-
-                                    pMultipolygon.AddGeometry(polygon_part)
-
-                                except Exception as part_error:
-                                    logger.warning(
-                                        f"Error processing IDL part for feature {i}: {part_error}")
-                                    continue
-
-                            if pMultipolygon.GetGeometryCount() > 0:
-                                wkt = pMultipolygon.ExportToWkt()
-                                aPolygon.append((current_cellid, wkt))
-                                aArea.append(dArea)
-                                processed_count += 1
-                            else:
-                                logger.warning(
-                                    f"No valid parts created for IDL feature {i}")
-                                error_count += 1
-                        else:
-                            # Regular polygon (no IDL crossing)
-                            try:
-                                dArea = calculate_polygon_area(
-                                    aCoord[:, 0], aCoord[:, 1])
-                                wkt = pPolygon.ExportToWkt()
-                                aPolygon.append((current_cellid, wkt))
-                                aArea.append(dArea)
-                                processed_count += 1
-                            except Exception as area_error:
-                                logger.warning(
-                                    f"Error calculating area for feature {i}: {area_error}")
-                                error_count += 1
-
-                    except Exception as polygon_error:
-                        logger.warning(
-                            f"Error processing polygon feature {i}: {polygon_error}")
-                        error_count += 1
-
-                elif sGeometry_type == "MULTIPOLYGON":
-                    try:
-                        dArea = 0.0
-                        for iPart in range(pPolygon.GetGeometryCount()):
-                            pPolygon_part = pPolygon.GetGeometryRef(iPart)
-                            if pPolygon_part is None:
-                                continue
-
-                            try:
-                                aCoords_part = get_geometry_coordinates(
-                                    pPolygon_part)
-                                if aCoords_part is not None and len(aCoords_part) >= 3:
-                                    dArea += calculate_polygon_area(
-                                        aCoords_part[:, 0], aCoords_part[:, 1])
-                            except Exception as part_error:
-                                logger.warning(
-                                    f"Error processing multipolygon part {iPart} of feature {i}: {part_error}")
-                                continue
-
-                        wkt = pPolygon.ExportToWkt()
-                        aPolygon.append((current_cellid, wkt))
-                        aArea.append(dArea)
-                        processed_count += 1
-
-                    except Exception as multipolygon_error:
-                        logger.warning(
-                            f"Error processing multipolygon feature {i}: {multipolygon_error}")
-                        error_count += 1
-                else:
-                    logger.warning(
-                        f"Unsupported geometry type '{sGeometry_type}' for feature {i}")
-                    error_count += 1
-
-            except Exception as feature_error:
-                logger.warning(
-                    f"Error processing feature {i}: {feature_error}")
-                error_count += 1
-
-            i += 1
-
-            # Progress reporting during feature pre-processing
-            if i % 1000 == 0 and iFlag_verbose:
-                logger.info(
-                    f"Pre-processed {i} features... ({processed_count} successful, {error_count} errors)")
-
-        # Final summary
-        if iFlag_verbose:
-            logger.info(f"get_polygon_list: Pre-processing completed.")
-            logger.info(f"  Total features processed: {i}")
-            logger.info(f"  Successfully processed: {processed_count}")
-            logger.info(f"  Errors/skipped: {error_count}")
-            logger.info(
-                f"  Success rate: {(processed_count/i*100):.1f}%" if i > 0 else "  Success rate: 0%")
-
-        return aPolygon, aArea, sProjection_source_wkt
-
-    except Exception as e:
-        logger.error(f"Error in get_polygon_list: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return None
-
-    finally:
-        # Cleanup resources
-        try:
-            if pSpatialRef_source is not None:
-                pSpatialRef_source = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up spatial reference: {e}")
-
-        try:
-            if pLayer_mesh is not None:
-                pLayer_mesh = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up layer: {e}")
-
-        try:
-            if pDataset_mesh is not None:
-                pDataset_mesh = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up dataset: {e}")
-
 
 def run_remap(sFilename_target_mesh,
               sFilename_source_mesh,
               aFilename_source_raster,
               dArea_min,
-              iFlag_remap_method_in=1,
-              iFlag_stat_in=1,
-              iFlag_save_clipped_raster_in=0,
-              sFolder_raster_out_in=None,
-              iFlag_verbose=False,
-              iFeature_parallel_threshold=5000):
+              iFlag_remap_method_in = 1,
+              iFlag_stat_in = True,
+              iFlag_save_clipped_raster_in = 0,
+              sFolder_raster_out_in = None,
+              iFlag_discrete_in = False,
+              iFlag_verbose_in = False,
+              iFeature_parallel_threshold = 5000):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.
 
@@ -1206,8 +854,8 @@ def run_remap(sFilename_target_mesh,
             Defaults to configured target mesh.
         aFilename_source_raster_in (list, optional): List of source raster files.
             Defaults to configured source rasters.
-        iFlag_stat_in (int, optional): Flag to compute statistics (1=yes, 0=no).
-            Default is 1.
+        iFlag_stat_in (bool, optional): Flag to compute statistics (True=yes, False=no).
+            Default is True.
         iFlag_save_clipped_raster_in (int, optional): Flag to save clipped rasters (1=yes, 0=no).
             Default is 0.
         sFolder_raster_out_in (str, optional): Output folder for clipped rasters.
@@ -1230,11 +878,11 @@ def run_remap(sFilename_target_mesh,
         return
     iFlag_remap_method = iFlag_remap_method_in
 
-    if iFlag_verbose:
+    if iFlag_verbose_in  :
         logger.info("run_remap: Starting input file validation...")
     # check input files
     for idx, sFilename_raster in enumerate(aFilename_source_raster):
-        if iFlag_verbose:
+        if iFlag_verbose_in  :
             logger.info(
                 f"Checking raster file {idx+1}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster)}")
         if os.path.exists(sFilename_raster):
@@ -1243,7 +891,7 @@ def run_remap(sFilename_target_mesh,
             logger.error('The raster file does not exist!')
             return
 
-    if iFlag_verbose:
+    if iFlag_verbose_in  :
         logger.info(
             f"Checking source mesh file: {os.path.basename(sFilename_source_mesh)}")
     if os.path.exists(sFilename_source_mesh):
@@ -1251,7 +899,7 @@ def run_remap(sFilename_target_mesh,
     else:
         logger.error('The vector mesh file does not exist!')
         return
-    if iFlag_verbose:
+    if iFlag_verbose_in  :
         logger.info("Input file validation completed successfully")
 
     # Determine output vector format from filename extension
@@ -1268,7 +916,7 @@ def run_remap(sFilename_target_mesh,
     sName = os.path.basename(sFilename_raster)
     sRasterName_no_extension = os.path.splitext(sName)[0]
 
-    if iFlag_verbose:
+    if iFlag_verbose_in  :
         logger.info(
             "run_remap: Reading raster metadata and determining processing bounds...")
 
@@ -1288,7 +936,7 @@ def run_remap(sFilename_target_mesh,
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
-        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose)
+        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose_in  )
 
     # Use automatically determined method if it's more conservative than user setting
     # Priority: weighted averaging > nearest neighbor
@@ -1306,14 +954,14 @@ def run_remap(sFilename_target_mesh,
             sRemap_method = 'near'
         elif iFlag_remap_method == 3:
             sRemap_method = 'average'
-        if iFlag_verbose:
+        if iFlag_verbose_in  :
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
-    if iFlag_verbose:
+    if iFlag_verbose_in  :
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
     aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
-        sFilename_source_mesh, iFlag_verbose)
+        sFilename_source_mesh, iFlag_verbose_in  )
     pSpatialRef_target = osr.SpatialReference()
     pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
 
@@ -1334,7 +982,7 @@ def run_remap(sFilename_target_mesh,
 
     # in the future, we will also copy other attributes from the input geojson file
 
-    if iFlag_stat_in == 1:
+    if iFlag_stat_in:
         pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
         pLayer_out.CreateField(ogr.FieldDefn('min', ogr.OFTReal))
         pLayer_out.CreateField(ogr.FieldDefn('max', ogr.OFTReal))
@@ -1382,8 +1030,7 @@ def run_remap(sFilename_target_mesh,
     # Build ordered task list (keeps original order)
     tasks = []
     for idx, (cellid, wkt) in enumerate(aPolygon):
-        tasks.append((idx, cellid, wkt, aFilename_source_raster,
-                     gdal_warp_options_serial, dMissing_value, iFlag_verbose))
+        tasks.append((idx, cellid, wkt, aFilename_source_raster, gdal_warp_options_serial, dMissing_value, iFlag_discrete_in, iFlag_verbose_in))
 
     # Choose serial or parallel processing based on threshold
     if n_features <= iFeature_parallel_threshold:
@@ -1395,7 +1042,7 @@ def run_remap(sFilename_target_mesh,
             if not success:
                 failed_features.append(
                     {"feature_id": cellid, "error": payload, "envelope": None})
-                if iFlag_verbose:
+                if iFlag_verbose_in  :
                     logger.warning(f"Feature {cellid} failed: {payload}")
                 continue
 
@@ -1409,7 +1056,7 @@ def run_remap(sFilename_target_mesh,
                 pFeature_out.SetGeometry(geom)
                 pFeature_out.SetField('cellid', int(cellid))
                 pFeature_out.SetField('area', aArea[feature_idx])
-                if iFlag_stat_in == 1:
+                if iFlag_stat_in:
                     pFeature_out.SetField(
                         'mean', float(stats.get('mean', np.nan)))
                     pFeature_out.SetField(
@@ -1437,7 +1084,7 @@ def run_remap(sFilename_target_mesh,
                 if not success:
                     failed_features.append(
                         {"feature_id": cellid, "error": payload, "envelope": None})
-                    if iFlag_verbose:
+                    if iFlag_verbose_in  :
                         logger.warning(f"Feature {cellid} failed: {payload}")
                     continue
 
@@ -1451,7 +1098,7 @@ def run_remap(sFilename_target_mesh,
                     pFeature_out.SetGeometry(geom)
                     pFeature_out.SetField('cellid', int(cellid))
                     pFeature_out.SetField('area', aArea[feature_idx])
-                    if iFlag_stat_in == 1:
+                    if iFlag_stat_in:
                         pFeature_out.SetField(
                             'mean', float(stats.get('mean', np.nan)))
                         pFeature_out.SetField(
@@ -1479,13 +1126,13 @@ def run_remap(sFilename_target_mesh,
 
     # Report processing summary
     total_time = time.time() - start_time
-    if iFlag_verbose:
+    if iFlag_verbose_in  :
         logger.info(f"Processing completed in {total_time:.2f} seconds")
         logger.info(f"Successfully processed: {successful_features} features")
         logger.info(f"Failed features: {len(failed_features)}")
 
     if failed_features:
-        if iFlag_verbose:
+        if iFlag_verbose_in  :
             logger.warning("Failed features summary:")
             for failed in failed_features[:10]:  # Show first 10 failures
                 logger.warning(
@@ -1508,7 +1155,7 @@ def run_remap(sFilename_target_mesh,
                     f.write(
                         f"Feature {failed['feature_id']}: {failed['error']}\n")
                     f.write(f"  Envelope: {failed['envelope']}\n\n")
-            if iFlag_verbose:
+            if iFlag_verbose_in  :
                 logger.info(f"Failure report saved to: {failure_report_file}")
         except Exception as e:
             logger.error(f"Could not save failure report: {e}")

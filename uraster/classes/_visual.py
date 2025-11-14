@@ -494,7 +494,7 @@ def visualize_source_mesh(self,
         logger.error(f'Traceback: {traceback.format_exc()}')
         return False
 
-def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbose: bool) -> bool:
+def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbose: bool = False) -> bool:
     """
     Handle visualization output (save file or show interactive).
 
