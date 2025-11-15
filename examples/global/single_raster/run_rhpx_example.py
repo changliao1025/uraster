@@ -18,7 +18,7 @@ else:
         sFilename_mesh_png = '/Users/liao313/workspace/python/uraster/data/output/rhpx/mesh.jpg'
         sFilename_raster_png = '/Users/liao313/workspace/python/uraster/data/output/rhpx/raster.png'
         sFilename_variable_png = '/Users/liao313/workspace/python/uraster/data/output/rhpx/uraster.png'
-        sFilename_variable_animation = '/Users/liao313/workspace/python/uraster/data/output/rhpx/global_uraster.mp4'
+        sFilename_variable_animation = '/Users/liao313/workspace/python/uraster/data/output/rhpx/global_uraster.gif'
 
 
 from uraster.classes.uraster import uraster

@@ -1,15 +1,16 @@
-# uraster: Structured Raster to Unstructured Mesh
+[![DOI](https://zenodo.org/badge/1060295281.svg)](https://doi.org/10.5281/zenodo.17613497)
+[![PyPI version](https://badge.fury.io/py/uraster.svg)](https://badge.fury.io/py/uraster)
+[![License](https://img.shields.io/badge/license-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+
+# URaster: A Python Package for Converting Structured Raster Data into Unstructured Meshes
 
 ## Overview
 
-**uraster** is a Python package to convert or transfer structured raster dataset into unstructured mesh formats, designed to bridge the gap between structured raster data and unstructured mesh-based numerical models. It leverages GDAL/OGR for robust data handling.
-
-
-[quickstart documentation](https://uraster.readthedocs.io/en/latest/quickstart.html)
+**URaster** is a Python package to convert existing structured raster datasets into unstructured mesh structure, designed to bridge the gap between structured raster datasets and unstructured mesh-based hydrologic and land surface models. It leverages GDAL/OGR for robust data handling.
 
 ## ✨ Core Features
 
-- **GDAL-Native Vector Handling**: Uses the standard GDAL/OGR engine for defining unstructured mesh cells, and performing projection-aware geospatial operations.
+- **GDAL-Native Vector Handling**: Uses the standard GDAL/OGR engine for defining unstructured mesh cells, and performing projection-aware geospatial operations. It also support mesh cells that cross the International Date Line (IDL).
 
 - **Standard Vector I/O**: Instead of directly operating on various mesh standards, it utilizes standard geographic information system vector formats (e.g., GeoJSON) for mesh operations, ensuring broad compatibility. It supports transformation APIs between existing meshes and standard vector formats.
 
@@ -17,9 +18,15 @@
 
 - **Interactive GeoVista API**: Offers simple functions to visualize the input and the output vector layers on a 3D sphere.
 
+Static visualization of the unstructured mesh on a sphere using GeoVista:
+![Unstructured Mesh Visualization](docs/figures/mesh.jpg)
+
+Animated visualization of the unstructured raster on a sphere using GeoVista:
+![Unstructured Raster Visualization](docs/figures/global_uraster.gif)
+
 ## 💻 Installation
 
-uraster requires GDAL for vector handling and GeoVista (which relies on PyVista/VTK) for 3D visualization.
+URaster requires GDAL for vector handling and GeoVista (which relies on PyVista/VTK) for 3D visualization.
 
 > ⚠️ **GDAL Note**: Installing GDAL's Python bindings can be complex via pip due to platform dependencies. We strongly recommend using Conda for a stable installation of GDAL and all dependencies.
 
@@ -33,82 +40,33 @@ conda activate uraster-env
 conda install -c conda-forge uraster
 ```
 
-### Development Installation
-```bash
-git clone https://github.com/changliao1025/uraster.git
-cd uraster
-conda install -c conda-forge gdal geovista vtk=9.3.0 pyearth
-conda develop .
-```
-
 ## 🚀 Quick Start
 
-### Example 1: Basic Zonal Statistics
-This example demonstrates how to perform zonal statistics on unstructured mesh data:
+[Quickstart documentation](https://uraster.readthedocs.io/en/latest/quickstart.html)
 
-```python
-import uraster
-from uraster.classes.uraster import uraster
+## 📚 Documentation
 
-# Configuration
-config = {
-    'sFilename_source_mesh': 'path/to/your/mesh.geojson',
-    'aFilename_source_raster': ['path/to/your/raster.tif'],
-    'sFilename_target_mesh': 'path/to/output/mesh_with_stats.geojson'
-}
-
-# Create uraster instance
-processor = uraster(config)
-
-# Setup and validate inputs
-processor.setup(iFlag_verbose=True)
-
-# Print input information
-processor.report_inputs()
-
-# Run zonal statistics
-processor.run_remap(iFlag_verbose=True)
-
-# Visualize results
-processor.visualize_target_mesh(
-    sVariable_in='mean',
-    sFilename_out='output_visualization.png',
-    sColormap='viridis'
-)
-```
-
-### Example 2: Global Analysis with Animation
-```python
-import uraster
-from uraster.classes.uraster import uraster
-
-# Configuration for global analysis
-config = {
-    'sFilename_source_mesh': 'global_mesh.geojson',
-    'aFilename_source_raster': ['global_dem.tif'],
-    'sFilename_target_mesh': 'global_mesh_with_elevation.geojson'
-}
-
-processor = uraster(config)
-processor.setup(iFlag_verbose=True)
-processor.run_remap()
-
-# Create rotating animation
-processor.visualize_target_mesh(
-    sVariable_in='mean',
-    sFilename_out='global_elevation.mp4',
-    sColormap='terrain',
-    iFlag_create_animation=True,
-    iAnimation_frames=360,
-    sAnimation_format='mp4'
-)
-```
+- [API Reference](https://uraster.readthedocs.io/en/latest/api.html)
 
 ## 📊 Supported Formats
 
 - **Mesh formats**: GeoJSON, Shapefile, any OGR-supported vector format
 - **Raster formats**: GeoTIFF, NetCDF, HDF5, any GDAL-supported raster format
-- **Output formats**: GeoJSON (with computed statistics), PNG/JPG (visualizations), MP4/GIF (animations)
+- **Output formats**: Vectors (with computed statistics), PNG/JPG (visualizations), MP4/GIF (animations)
+
+## 🙏 Acknowledgments
+
+The model described in this repository was supported by the following:
+
+* the U.S. Department of Energy Office of Science Biological and Environmental Research through the Earth System Development program as part of the Energy Exascale Earth System Model (E3SM) project.
+
+* the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Integrated Coastal Modeling (ICoM) project.
+
+* the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project.
+
+A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
+
+PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
 
 ## 🤝 Contributing & License
 
