@@ -6,7 +6,7 @@
 
 ## Overview
 
-**URaster** is a Python package to convert existing structured raster datasets into unstructured mesh structure, designed to bridge the gap between structured raster datasets and unstructured mesh-based hydrologic and land surface models. It leverages GDAL/OGR for robust data handling.
+**URaster** is a Python package to convert structured raster datasets into unstructured mesh structure, designed to bridge the gap between structured raster datasets and unstructured mesh-based hydrologic and land surface models. It leverages GDAL/OGR for robust data handling.
 
 ## ✨ Core Features
 
