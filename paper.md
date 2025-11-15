@@ -53,7 +53,7 @@ There are several existing tools that provide similar functionality, such as `ra
 
 * `raster2dggs` is designed for converting raster data into discrete global grid systems (DGGs), which does not support other types of unstructured meshes, such as the MPAS and TIN meshes.
 * `xESMF` is primarily focused on regridding and interpolation of climate data that are quadrilateral and does not support non-quadrilateral meshes, such as MPAS and TIN meshes.
-* `pyresample` and `rasterio` are powerful tools for resampling and reprojecting raster data, but they do not support unstructured meshes.
+* `pyresample` and `rasterio` are powerful tools for resampling and reprojecting raster data, but they do not support unstructured meshes. `pyresample` itself depends on `rasterio` for raster data handling, and `rasterio` is primarily designed for working with raster data and does not have built-in support for unstructured meshes.
 
 # Acknowledgment
 
@@ -70,4 +70,8 @@ A portion of this research was performed using PNNL Research Computing at Pacifi
 PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
 
 # References
+
+Liao, C. (2025). uraster: A Python package to transform raster data to unstructured mesh using GDAL. (v0.1.1). Zenodo. https://doi.org/10.5281/zenodo.17613497
+
+
 
