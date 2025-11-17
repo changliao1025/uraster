@@ -12,10 +12,18 @@ authors:
     orcid: 0000-0002-7348-8858
     affiliation: 1
 
+  - name: Mingke Li
+    orcid: 0000-0001-6310-4964
+    affiliation: 2
+
 
 affiliations:
- - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
-   index: 1
+  - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
+    index: 1
+
+  - name: University of Calgary, Calgary, Canada
+    index: 2
+    
 date: 13 Nov 2025
 
 bibliography: paper.bib

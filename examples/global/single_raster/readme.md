@@ -1,1 +1,0 @@
-These examples demonstrate case studies that accept only one raster input.

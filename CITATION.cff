@@ -5,6 +5,10 @@ authors:
     given-names: Chang
     orcid: https://orcid.org/0000-0002-7348-8858
 
+  - family-names: Li
+    given-names: Mingke
+    orcid: https://orcid.org/0000-0001-6310-4964
+
 title: "uraster: A Python package to transform raster data to unstructured mesh using GDAL."
 version: 0.1.0
 doi:
