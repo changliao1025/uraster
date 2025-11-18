@@ -10,6 +10,8 @@ from osgeo import gdal, ogr, osr
 #use rtree for spatial indexing
 from rtree.index import Index as RTreeindex
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
+from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
+from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 gdal.UseExceptions()
 from uraster.classes.sraster import sraster
 from uraster.utility import get_polygon_list
@@ -45,7 +47,6 @@ def run_remap(sFilename_target_mesh,
               sFilename_source_mesh,
               sFilename_source_raster,
               sFilename_raster_mesh,
-              dArea_min,
               iFlag_save_clipped_raster_in=0,
               sFolder_raster_out_in=None,
               iFlag_discrete_in=False,
@@ -125,23 +126,23 @@ def run_remap(sFilename_target_mesh,
     # use sraster class to read the raster info
     pRaster = sraster(sFilename_in=sFilename_source_raster)
     pRaster.read_metadata()
+    pRaster_data = pRaster.read_data(iBand=1)
     # Initialize pixel resolution variables
     dPixelWidth = pRaster.dResolution_x
     pPixelHeight = pRaster.dResolution_y
     dMissing_value = pRaster.dNoData
 
-
     if iFlag_verbose:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
-    pDateset_source_mesh = pDriver_vector.Open(sFilename_source_mesh, ogr.GA_ReadOnly)
+    pDateset_source_mesh = pDriver_vector.Open(sFilename_source_mesh, 0)
     pLayer_source_mesh = pDateset_source_mesh.GetLayer()
     sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
     #build the rtree index for the polygons for the source mesh
-    aPolygon, aArea = get_polygon_list(sFilename_raster_mesh,
+    aPolygon, aArea, sProjection_source_wkt = get_polygon_list(sFilename_raster_mesh,
                                      iFlag_verbose_in=iFlag_verbose,
                                      sField_unique_id=sField_unique_id)
-    index_mesh = RTreeindex()
+    index_raster_mesh = RTreeindex() #build the spatial index for the raster mesh cell
     for idx, poly in enumerate(aPolygon):
         cellid, wkt = poly
         if wkt is None or wkt == '':
@@ -152,7 +153,7 @@ def run_remap(sFilename_target_mesh,
         left, right, bottom, top = envelope
         # Insert bounding box into spatial index
         pBound = (left, bottom, right, top)
-        index_mesh.insert(idx, pBound) #can use idx or cellid as the id
+        index_raster_mesh.insert(idx, pBound) #can use idx or cellid as the id
 
     pSpatialRef_target = osr.SpatialReference()
     pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
@@ -163,58 +164,31 @@ def run_remap(sFilename_target_mesh,
         'uraster', pSpatialRef_target, ogr.wkbPolygon)
     pLayer_defn_out = pLayer_out.GetLayerDefn()
     pFeature_out = ogr.Feature(pLayer_defn_out)
-
-    # add id, area and mean, min, max, std of the raster
-    # Determine the field type from source mesh
-    pLayer_source_defn = pLayer_source_mesh.GetLayerDefn()
-    iField_idx = pLayer_source_defn.GetFieldIndex(sField_unique_id)
-    if iField_idx >= 0:
-        pField_defn = pLayer_source_defn.GetFieldDefn(iField_idx)
-        eField_type = pField_defn.GetType()
-    else:
-        # Default to string type if field not found
-        eField_type = ogr.OFTString
-
-    pLayer_out.CreateField(ogr.FieldDefn(sField_unique_id, eField_type))
+    pLayer_out.CreateField(ogr.FieldDefn(sField_unique_id, ogr.OFTInteger))
     # define a field
     pField = ogr.FieldDefn('area', ogr.OFTReal)
     pField.SetWidth(32)
     pField.SetPrecision(2)
     pLayer_out.CreateField(pField)
-
     # in the future, we will also copy other attributes from the input geojson file
-
-
     pLayer_out.CreateField(ogr.FieldDefn('mean', ogr.OFTReal))
-
-
-
     options = ['COMPRESS=DEFLATE', 'PREDICTOR=2']  # reseverd for future use
-
     # Pre-compute GDAL options to avoid repeated object creation
-
-
     logger.info("run_remap: Starting main feature processing loop...")
-
-
-
-    n_features = len(aPolygon)
-    max_workers = min(cpu_count(), max(1, n_features))
-    logger.info(
-        f"Preparing to process {n_features} features (parallel threshold={iFeature_parallel_threshold})")
-
+    n_raster_features = len(aPolygon)
+    max_workers = min(cpu_count(), max(1, n_raster_features))
+    n_source_features = pLayer_source_mesh.GetFeatureCount()
+    logger.info(f"Total number of source mesh features to process: {n_source_features}")
     start_time = time.time()
-
     #now we need to find the intersecting polygons between the raster mesh and the source mesh
     for pFeature in pLayer_source_mesh:
         # Handle both string and integer field types
         pField_defn = pLayer_source_mesh.GetLayerDefn().GetFieldDefn(
             pLayer_source_mesh.GetLayerDefn().GetFieldIndex(sField_unique_id))
-        if pField_defn.GetType() == ogr.OFTString:
-            cellid = pFeature.GetFieldAsString(sField_unique_id)
-        else:
-            cellid = pFeature.GetFieldAsInteger(sField_unique_id)
+        cellid = pFeature.GetFieldAsInteger(sField_unique_id)
         pTarget_geometry = pFeature.GetGeometryRef()
+        aCoords = get_geometry_coordinates(pTarget_geometry)
+        dArea_total_source = calculate_polygon_area(aCoords[:, 0], aCoords[:, 1])
         if pTarget_geometry is None:
             logger.warning(
                 f"run_remap: Warning - Empty geometry for feature ID {cellid}, skipping...")
@@ -222,14 +196,18 @@ def run_remap(sFilename_target_mesh,
         envelope = pTarget_geometry.GetEnvelope()
         left, right, bottom, top = envelope
         # Query spatial index for candidate intersecting polygons
-        candidate_idxs = list(index_mesh.intersection((left, bottom, right, top)))
+        candidate_idxs = list(index_raster_mesh.intersection((left, bottom, right, top)))
         # Further process candidates to find actual intersections
+        aMesh_cell_within=list()
+        aArea_ratio=list()
+        aMesh_cell_intersect=list()
         for idx in candidate_idxs:
-            raster_cellid, raster_wkt = aPolygon[idx]
+            id, raster_wkt = aPolygon[idx]
             raster_geometry = ogr.CreateGeometryFromWkt(raster_wkt)
             #first check whether the mesh is inside the target polygon
             if pTarget_geometry.Contains(raster_geometry):
                 # keep the raster geometry for further processing
+                aMesh_cell_within.append(idx)
                 pass
             else:
                 if pTarget_geometry.Intersects(raster_geometry): #both intersect and touching
@@ -239,13 +217,83 @@ def run_remap(sFilename_target_mesh,
                     #should be a polygon geometry?
                     sGeometryName = pIntersected_geometry.GetGeometryName()
                     if sGeometryName == 'POLYGON':
+                        #Get the area of the intersected polygon
+                        dArea_raster = aArea[idx]
+                        aCoords_intersect = get_geometry_coordinates(
+                                    pIntersected_geometry)
+                        dArea_intersect = calculate_polygon_area(aCoords_intersect[:, 0], aCoords_intersect[:, 1])
+                        #check the area ratio
+                        aMesh_cell_intersect.append(idx)
+                        aArea_ratio.append(dArea_intersect / dArea_raster)
                         pass
                 else:
                     continue  # no intersection, skip
 
+        #create the output feature
+        pFeature_out = ogr.Feature(pLayer_defn_out)
+        #set the id field
+        pFeature_out.SetField(sField_unique_id, cellid)
+        #set the geometry as the target geometry
+        pFeature_out.SetGeometry(pTarget_geometry.Clone())
 
+        #now we can calculate the weighted area for the target
 
+        dArea_total = dArea_total_source
+        dArea_check = 0.0
+        #the weighted mean equation is:
+        #$$
+        #\text{Weighted Mean} = \frac{\sum_{i=1}^{N} (\text{Value}_i \times \text{Area}_i)}{\text{Total Area}}
+        #$$
+        dWeighted_sum = 0.0
+        #first process the within cells
+        for idx in aMesh_cell_within:
+            #convert the ids to row and column indices
+            nCol = idx % pRaster.ncolumn
+            nRow = idx // pRaster.ncolumn
+            #the idx start from the lower left corner, so we need to convert it to the upper left corner
+            nRow_converted = pRaster.nrow - 1 - nRow
+            #get the raster value
+            dRaster_value = pRaster_data[nRow_converted, nCol]
+            if dRaster_value == dMissing_value:
+                continue
+            dArea_mesh_cell = aArea[idx]
+            dWeighted_sum += dRaster_value * dArea_mesh_cell
+            dArea_check += dArea_mesh_cell
+        #then process the intersected cells
+        for k, idx in enumerate(aMesh_cell_intersect):
+            #convert the ids to row and column indices
+            nCol = idx % pRaster.ncolumn
+            nRow = idx // pRaster.ncolumn
+            #the idx start from the lower left corner, so we need to convert it to the upper left corner
+            nRow_converted = pRaster.nrow - 1 - nRow
+            #get the raster value
+            dRaster_value = pRaster_data[nRow_converted, nCol]
+            if dRaster_value == dMissing_value:
+                continue
+            dArea_mesh_cell = aArea[idx]
+            dArea_ratio = aArea_ratio[k]
+            dArea_intersected = dArea_mesh_cell * dArea_ratio
+            dWeighted_sum += dRaster_value * dArea_intersected
+            dArea_check += dArea_intersected
 
+        #the difference between dArea_check and dArea_total should be small
+        if abs(dArea_check - dArea_total) / dArea_total > 0.01:
+            logger.warning(
+                f"run_remap: Warning - Area check failed for feature ID {cellid}, skipping weighted mean calculation...")
+            dWeighted_mean = None
+        else:
+            dWeighted_mean = dWeighted_sum / dArea_total
+
+        #set the area field
+        pFeature_out.SetField('area', dArea_total_source)
+        #set the mean field
+        if dWeighted_mean is not None:
+            pFeature_out.SetField('mean', dWeighted_mean)
+        else:
+            pFeature_out.SetField('mean', None)
+        #create the feature in the output layer
+        pLayer_out.CreateFeature(pFeature_out)
+        pFeature_out = None  # destroy the feature to free memory
 
     # flush and close output
     pDataset_out.FlushCache()
@@ -258,8 +306,5 @@ def run_remap(sFilename_target_mesh,
     total_time = time.time() - start_time
     if iFlag_verbose:
         logger.info(f"Processing completed in {total_time:.2f} seconds")
-
-
-
 
     return

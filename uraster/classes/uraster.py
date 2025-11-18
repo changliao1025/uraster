@@ -765,12 +765,12 @@ class uraster:
             pRaster = sraster(sFilename_raster)
             pRaster.read_metadata()
             sFilename_raster_mesh = pRaster.create_raster_mesh()
+            #sFilename_raster_mesh = pRaster.sFilename_mesh
             return intersect.run_remap(
                 sFilename_target_mesh,
                 sFilename_source_mesh,
                 sFilename_raster,
                 sFilename_raster_mesh,
-                self.dArea_min,
                 iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
                 sFolder_raster_out_in=sFolder_raster_out_in,
                 iFlag_discrete_in=iFlag_discrete_in,
