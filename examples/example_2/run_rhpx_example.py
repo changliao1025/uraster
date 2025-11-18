@@ -1,24 +1,24 @@
 import os, sys, platform
-sPlatform_os = platform.system()
+sPath_current = os.path.dirname(os.path.abspath(__file__))
+sPath_library = os.path.dirname(os.path.dirname(sPath_current))
+sys.path.append(sPath_library)
 
-if sPlatform_os == 'Windows':
-    sPath  = 'C:\\workspace\\python\\uraster\\uraster'
-    sys.path.append(os.path.dirname(sPath))
-    sFilename_source_mesh = 'C:\\workspace\\python\\uraster\\data\\input\\mesh\\gdf_rhpx_res3.geojson' #use the L10-100 test mesh
-    sFilename_raster = 'C:\\workspace\\python\\uraster\\data\\input\\raster\\edgar_MNM_2015.tiff'
-    sFilename_target_mesh = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\rhpx_res3_uraster.geojson'
-    sFilename_mesh_png = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\mesh.jpg'
-    sFilename_variable_png = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\uraster.png'
-    sFilename_variable_animation = 'C:\\workspace\\python\\uraster\\data\\output\\rhpx\\global_uraster.mp4'
-else:
-    if sPlatform_os == 'Darwin':
-        sFilename_source_mesh = '/Users/liao313/workspace/python/uraster/data/input/mesh/gdf_rhpx_res3.geojson' #use the L10-100 test mesh
-        sFilename_raster = '/Users/liao313/workspace/python/uraster/data/input/raster/edgar_MNM_2015.tiff'
-        sFilename_target_mesh = '/Users/liao313/workspace/python/uraster/data/output/rhpx/rhpx_res3_uraster.geojson'
-        sFilename_mesh_png = '/Users/liao313/workspace/python/uraster/data/output/rhpx/mesh.jpg'
-        sFilename_raster_png = '/Users/liao313/workspace/python/uraster/data/output/rhpx/raster.png'
-        sFilename_variable_png = '/Users/liao313/workspace/python/uraster/data/output/rhpx/uraster.png'
-        sFilename_variable_animation = '/Users/liao313/workspace/python/uraster/data/output/rhpx/global_uraster.gif'
+# Construct the relative path to the data folder
+sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_9')
+
+# Print or use the data folder path
+print(f"Data folder path: {sFolder_data}")
+
+
+# Convert absolute paths to relative paths
+sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'gdf_rhpx_res3.geojson') # use the L10-100 test mesh
+sFilename_raster = os.path.join(sFolder_data, 'input', 'edgar_MNM_2015.tiff')
+
+sFilename_target_mesh = os.path.join(sFolder_data, 'output',  'rhpx_res3_uraster.geojson')
+sFilename_mesh_png = os.path.join(sFolder_data, 'output',  'mesh.jpg')
+sFilename_raster_png = os.path.join(sFolder_data, 'output',  'raster.png')
+sFilename_variable_png = os.path.join(sFolder_data, 'output',  'uraster.png')
+sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'global_uraster.gif')
 
 
 from uraster.classes.uraster import uraster
