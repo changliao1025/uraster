@@ -14,6 +14,7 @@ print(f"Data folder path: {sFolder_data}")
 
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'rhealpix_global_res3.geojson') # use the L10-100 test mesh
+sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson')
 sFilename_raster = os.path.join(sFolder_data, 'input', 'EDGAR_CH4_emission_global_2015.tiff')
 
 sFilename_target_mesh = os.path.join(sFolder_data, 'output',  'uraster.geojson')
@@ -30,7 +31,7 @@ def main():
     aConfig['sFilename_source_mesh'] = sFilename_source_mesh  # use the L10-100 test mesh
     aFilename_source_raster = []
     sFilename_source_raster_resample = sFilename_raster.replace('.tiff','_resample.tiff')
-    resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='bilinear', dMissing_value_source =0)
+    #resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0)
     aFilename_source_raster.append(sFilename_source_raster_resample)  #
     aConfig['aFilename_source_raster'] = aFilename_source_raster
     aConfig['sFilename_target_mesh'] = sFilename_target_mesh

@@ -1,4 +1,3 @@
-
 import os
 import logging
 import traceback
@@ -24,60 +23,16 @@ logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
 # Utility functions for common operations
 
-def _validate_geometry(geometry: Any, feature_id: Union[int, str], attempt_fix: bool = True) -> bool:
-    """
-    Validate and optionally fix OGR geometry objects.
 
-    Args:
-        geometry: OGR geometry object to validate
-        feature_id: Feature identifier for logging
-        attempt_fix: Whether to attempt fixing invalid geometries
-
-    Returns:
-        bool: True if geometry is valid (or was successfully fixed), False otherwise
-    """
-    if geometry is None:
-        logger.warning(f"Geometry is None for feature {feature_id}")
-        return False
-
-    if geometry.IsValid():
-        return True
-
-    if not attempt_fix:
-        logger.warning(f"Invalid geometry for feature {feature_id}")
-        return False
-
-    try:
-        # Attempt to fix invalid geometry using buffer(0) technique
-        logger.warning(
-            f"Invalid geometry for feature {feature_id}, attempting to fix")
-        fixed_geometry = geometry.Buffer(0)
-
-        if fixed_geometry and fixed_geometry.IsValid():
-            # Copy the fixed geometry back to the original
-            geometry.ImportFromWkt(fixed_geometry.ExportToWkt())
-            logger.debug(
-                f"Successfully fixed geometry for feature {feature_id}")
-            return True
-        else:
-            logger.warning(
-                f"Cannot fix invalid geometry for feature {feature_id}")
-            return False
-
-    except Exception as e:
-        logger.warning(
-            f"Error attempting to fix geometry for feature {feature_id}: {e}")
-        return False
-
-def _log_memory_usage(stage: str, iFlag_verbose: bool = False) -> None:
+def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
     """
     Log current memory usage if psutil is available.
 
     Args:
         stage: Description of the current processing stage
-        iFlag_verbose: Whether to log memory information
+        iFlag_verbose_in: Whether to log memory information
     """
-    if not PSUTIL_AVAILABLE or not iFlag_verbose:
+    if not PSUTIL_AVAILABLE or not iFlag_verbose_in:
         return
 
     try:
@@ -87,6 +42,233 @@ def _log_memory_usage(stage: str, iFlag_verbose: bool = False) -> None:
         logger.info(f"Memory usage at {stage}: {memory_mb:.1f} MB")
     except Exception as e:
         logger.debug(f"Could not get memory usage: {e}")
+
+def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool = False) -> bool:
+    """
+    Comprehensive check of all geometries in a mesh vector file.
+
+    Consolidates all polygon geometry validation including:
+    - Coordinate range validation (-180 to 180 for lon, -90 to 90 for lat)
+    - OGR geometry validity checks
+    - International Date Line crossing detection
+    - Multipolygon part validation
+    - Minimum vertex count checks
+
+    Args:
+        sFilename_source_mesh (str): Path to the source mesh vector file
+        iFlag_verbose_in (bool): If True, print detailed progress messages
+
+    Returns:
+        bool: True if all geometries are valid, False otherwise
+    """
+    try:
+        pDataset = ogr.Open(sFilename_source_mesh, 0)  # Read-only
+        if pDataset is None:
+            logger.error(f'Failed to open file: {sFilename_source_mesh}')
+            return False
+
+        if iFlag_verbose_in:
+            logger.info(f'Successfully opened mesh file: {sFilename_source_mesh}')
+
+        # Get the first layer
+        pLayer = pDataset.GetLayer(0)
+        if pLayer is None:
+            logger.error('Failed to get layer from the dataset.')
+            pDataset = None
+            return False
+
+        # Get layer information
+        pLayerDefn = pLayer.GetLayerDefn()
+        if pLayerDefn is None:
+            logger.error('Failed to get layer definition.')
+            pDataset = None
+            return False
+
+        nFeatures = pLayer.GetFeatureCount()
+        if nFeatures == 0:
+            logger.warning('Layer contains no features.')
+            pDataset = None
+            return False
+
+        if iFlag_verbose_in:
+            logger.info(f'Validating geometries for {nFeatures} features...')
+
+        # Process features with comprehensive validation
+        pLayer.ResetReading()
+        iFeature_index = 0
+        invalid_geometry_count = 0
+        valid_geometry_count = 0
+
+        for pFeature in pLayer:
+            if pFeature is None:
+                invalid_geometry_count += 1
+                iFeature_index += 1
+                continue
+
+            pGeometry = pFeature.GetGeometryRef()
+            if pGeometry is None:
+                logger.warning(f'Feature {iFeature_index} has no geometry')
+                invalid_geometry_count += 1
+                iFeature_index += 1
+                continue
+
+            # Skip GDAL geometry validation as it cannot handle IDL-crossing cells
+
+            sGeometry_type = pGeometry.GetGeometryName()
+
+            if sGeometry_type == 'POLYGON':
+                if not _validate_polygon_geometry(pGeometry, iFeature_index, iFlag_verbose_in):
+                    invalid_geometry_count += 1
+                else:
+                    valid_geometry_count += 1
+
+            elif sGeometry_type == 'MULTIPOLYGON':
+                if not _validate_multipolygon_geometry(pGeometry, iFeature_index, iFlag_verbose_in):
+                    invalid_geometry_count += 1
+                else:
+                    valid_geometry_count += 1
+
+            elif sGeometry_type in ['POINT', 'LINESTRING']:
+                logger.warning(f'Feature {iFeature_index}: Geometry type {sGeometry_type} not supported for mesh processing')
+                invalid_geometry_count += 1
+
+            else:
+                logger.warning(f'Feature {iFeature_index}: Unknown geometry type {sGeometry_type}')
+                invalid_geometry_count += 1
+
+            iFeature_index += 1
+
+        # Cleanup
+        pDataset = None
+
+        # Report validation results
+        total_features = valid_geometry_count + invalid_geometry_count
+        success_rate = (valid_geometry_count / total_features * 100) if total_features > 0 else 0
+
+        if iFlag_verbose_in or invalid_geometry_count > 0:
+            logger.info(f'Geometry validation summary:')
+            logger.info(f'  - Total features processed: {total_features}')
+            logger.info(f'  - Valid geometries: {valid_geometry_count}')
+            logger.info(f'  - Invalid geometries: {invalid_geometry_count}')
+            logger.info(f'  - Success rate: {success_rate:.1f}%')
+
+        if invalid_geometry_count > 0:
+            logger.warning('Found invalid geometries. Please use utility tools to fix them first.')
+            return False
+
+        if iFlag_verbose_in:
+            logger.info('All geometries passed validation')
+
+        return True
+
+    except Exception as e:
+        logger.error(f'Error in check_geometry_validity: {str(e)}')
+        logger.error(f'Traceback: {traceback.format_exc()}')
+        return False
+
+def _validate_polygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
+    """
+    Validate a single polygon geometry including coordinate range and IDL checks.
+
+    Args:
+        pGeometry: OGR Polygon geometry
+        feature_id: Feature identifier for logging
+        iFlag_verbose_in: Verbose logging flag
+
+    Returns:
+        bool: True if geometry is valid, False otherwise
+    """
+    try:
+        # Get coordinates
+        aCoord = get_geometry_coordinates(pGeometry)
+        if aCoord is None or len(aCoord) < 3:
+            logger.warning(f'Feature {feature_id}: Invalid or insufficient coordinates for polygon')
+            return False
+
+        # Validate coordinate bounds
+        lons = aCoord[:, 0]
+        lats = aCoord[:, 1]
+
+        # Check coordinate ranges
+        if (np.any(lons < -180) or np.any(lons > 180) or
+            np.any(lats < -90) or np.any(lats > 90)):
+            logger.warning(f'Feature {feature_id}: Coordinates outside valid range')
+            logger.warning(f'  Longitude range: {lons.min():.3f} to {lons.max():.3f}')
+            logger.warning(f'  Latitude range: {lats.min():.3f} to {lats.max():.3f}')
+            return False
+
+        # Check for International Date Line crossing (this is allowed but logged)
+        if check_cross_international_date_line_polygon(aCoord):
+            if iFlag_verbose_in:
+                logger.info(f'Feature {feature_id}: Polygon crosses International Date Line (valid)')
+        else:
+            #use gdal geometry validity check only when it does not cross IDL
+            if not pGeometry.IsValid():
+                logger.warning(f'Feature {feature_id}: Polygon geometry is invalid according to OGR')
+                return False
+        return True
+
+    except Exception as e:
+        logger.warning(f'Feature {feature_id}: Error validating polygon geometry: {str(e)}')
+        return False
+
+def _validate_multipolygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
+    """
+    Validate a multipolygon geometry by checking all constituent polygons.
+
+    Args:
+        pGeometry: OGR MultiPolygon geometry
+        feature_id: Feature identifier for logging
+        iFlag_verbose_in: Verbose logging flag
+
+    Returns:
+        bool: True if all parts are valid, False otherwise
+    """
+    try:
+        valid_parts = 0
+        total_parts = pGeometry.GetGeometryCount()
+
+        if total_parts == 0:
+            logger.warning(f'Feature {feature_id}: Multipolygon has no parts')
+            return False
+
+        for iPart in range(total_parts):
+            pPolygon_part = pGeometry.GetGeometryRef(iPart)
+            if pPolygon_part is None:
+                logger.warning(f'Feature {feature_id}: Multipolygon part {iPart} is None')
+                continue
+
+            # Skip GDAL geometry validation as it cannot handle IDL-crossing cells
+
+            # Validate coordinates of this part
+            aCoord_part = get_geometry_coordinates(pPolygon_part)
+            if aCoord_part is None or len(aCoord_part) < 3:
+                logger.warning(f'Feature {feature_id}: Multipolygon part {iPart} has insufficient coordinates')
+                continue
+
+            # Check coordinate bounds for this part
+            lons_part = aCoord_part[:, 0]
+            lats_part = aCoord_part[:, 1]
+
+            if (np.any(lons_part < -180) or np.any(lons_part > 180) or
+                np.any(lats_part < -90) or np.any(lats_part > 90)):
+                logger.warning(f'Feature {feature_id}: Multipolygon part {iPart} has coordinates outside valid range')
+                continue
+
+            valid_parts += 1
+
+        if valid_parts == 0:
+            logger.warning(f'Feature {feature_id}: No valid parts found in multipolygon')
+            return False
+
+        if iFlag_verbose_in and valid_parts < total_parts:
+            logger.info(f'Feature {feature_id}: Multipolygon has {valid_parts}/{total_parts} valid parts')
+
+        return True
+
+    except Exception as e:
+        logger.warning(f'Feature {feature_id}: Error validating multipolygon geometry: {str(e)}')
+        return False
 
 def get_polygon_list(
     sFilename_source_mesh: str,
@@ -101,7 +283,7 @@ def get_polygon_list(
 
     Args:
         sFilename_source_mesh (str): Path to the source mesh vector file
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             Default is False.
         sField_unique_id (str, optional): Name of the field containing unique cell IDs.
             Default is 'cellid'.
@@ -174,27 +356,14 @@ def get_polygon_list(
                 continue
 
             try:
-                # Get geometry and validate
+                # Get geometry (validation already done by check_geometry_validity)
                 pPolygon = pFeature_mesh.GetGeometryRef()
                 if pPolygon is None:
-                    logger.warning(f"Feature {i} has no geometry, skipping")
                     error_count += 1
                     i += 1
                     continue
 
-                if not pPolygon.IsValid():
-                    logger.warning(
-                        f"Feature {i} has invalid geometry, attempting to fix")
-                    pPolygon = pPolygon.Buffer(0)  # Attempt to fix
-                    if not pPolygon.IsValid():
-                        logger.warning(
-                            f"Cannot fix invalid geometry for feature {i}, skipping")
-                        error_count += 1
-                        i += 1
-                        continue
-
                 sGeometry_type = pPolygon.GetGeometryName()
-
                 # Read cellid from current feature with error handling
                 try:
                     # Handle both string and integer field types
@@ -216,77 +385,23 @@ def get_polygon_list(
                     try:
                         aCoord = get_geometry_coordinates(pPolygon)
                         if aCoord is None or len(aCoord) < 3:
-                            logger.warning(
-                                f"Invalid coordinates for polygon feature {i}, skipping")
                             error_count += 1
                             i += 1
                             continue
 
-                        # Check whether geometry crosses the International Date Line
-                        if check_cross_international_date_line_polygon(aCoord):
-                            dArea = 0.0
-                            if iFlag_verbose_in:
-                                logger.info(
-                                    f'Feature {i} crosses the international date line, splitting into multiple parts.')
-
-                            # Create multipolygon to handle IDL crossing
-                            pMultipolygon = ogr.Geometry(ogr.wkbMultiPolygon)
-                            aCoord_gcs_split = split_international_date_line_polygon_coordinates(
-                                aCoord)
-
-                            for aCoord_gcs in aCoord_gcs_split:
-                                try:
-                                    dArea += calculate_polygon_area(
-                                        aCoord_gcs[:, 0], aCoord_gcs[:, 1])
-
-                                    # Create polygon from coordinates
-                                    ring = ogr.Geometry(ogr.wkbLinearRing)
-                                    for iCoord in range(aCoord_gcs.shape[0]):
-                                        ring.AddPoint(
-                                            aCoord_gcs[iCoord, 0], aCoord_gcs[iCoord, 1])
-
-                                    ring.CloseRings()
-                                    polygon_part = ogr.Geometry(ogr.wkbPolygon)
-                                    polygon_part.AddGeometry(ring)
-
-                                    # Validate polygon part
-                                    if not polygon_part.IsValid():
-                                        polygon_part = polygon_part.Buffer(
-                                            0)  # Attempt to fix
-                                        if not polygon_part.IsValid():
-                                            logger.warning(
-                                                f'Polygon part of feature {i} is invalid after IDL splitting')
-                                            continue
-
-                                    pMultipolygon.AddGeometry(polygon_part)
-
-                                except Exception as part_error:
-                                    logger.warning(
-                                        f"Error processing IDL part for feature {i}: {part_error}")
-                                    continue
-
-                            if pMultipolygon.GetGeometryCount() > 0:
-                                wkt = pMultipolygon.ExportToWkt()
-                                aPolygon.append((current_cellid, wkt))
-                                aArea.append(dArea)
-                                processed_count += 1
-                            else:
-                                logger.warning(
-                                    f"No valid parts created for IDL feature {i}")
-                                error_count += 1
-                        else:
-                            # Regular polygon (no IDL crossing)
-                            try:
-                                dArea = calculate_polygon_area(
-                                    aCoord[:, 0], aCoord[:, 1])
-                                wkt = pPolygon.ExportToWkt()
-                                aPolygon.append((current_cellid, wkt))
-                                aArea.append(dArea)
-                                processed_count += 1
-                            except Exception as area_error:
-                                logger.warning(
-                                    f"Error calculating area for feature {i}: {area_error}")
-                                error_count += 1
+                        #no more need to split IDL crossing polygon here, as we have handled it in check_geometry_validity
+                        # Regular polygon (no IDL crossing)
+                        try:
+                            dArea = calculate_polygon_area(
+                                aCoord[:, 0], aCoord[:, 1])
+                            wkt = pPolygon.ExportToWkt()
+                            aPolygon.append((current_cellid, wkt))
+                            aArea.append(dArea)
+                            processed_count += 1
+                        except Exception as area_error:
+                            logger.warning(
+                                f"Error calculating area for feature {i}: {area_error}")
+                            error_count += 1
 
                     except Exception as polygon_error:
                         logger.warning(
@@ -300,7 +415,6 @@ def get_polygon_list(
                             pPolygon_part = pPolygon.GetGeometryRef(iPart)
                             if pPolygon_part is None:
                                 continue
-
                             try:
                                 aCoords_part = get_geometry_coordinates(
                                     pPolygon_part)
@@ -396,14 +510,14 @@ def get_unique_values_from_rasters(aFilename_raster: str,
 
     return list(aUnique_values) if aUnique_values else None
 
-def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_id=None):
+def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_unique_id=None):
     """
     Rebuild mesh topology from source mesh file by extracting vertices,
     connectivity, and centroids for unstructured mesh processing.
 
     Args:
         sFilename_mesh_in (str): Path to the source mesh file (GeoJSON, Shapefile, etc.)
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
         sField_unique_id (str, optional): Field name for unique cell IDs. If None, uses first field or feature index.
             Note: Field is always treated as integer type since setup_mesh_cellid() enforces this.
@@ -431,7 +545,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
         if pDataset is None:
             logger.error(f'Failed to open file: {sFilename_mesh_in}')
             return None
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Successfully opened mesh file: {sFilename_mesh_in}')
         # Get the first layer
         pLayer = pDataset.GetLayer(0)
@@ -446,14 +560,14 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
             pDataset = None
             return None
         nFeatures = pLayer.GetFeatureCount()
-        nCell_source = nFeatures #if there is no invalid features, this is the number of cells
+
         iFieldCount = pLayerDefn.GetFieldCount()
         if nFeatures == 0:
             logger.warning('Layer contains no features.')
             pDataset = None
             return None
         aCellID= []  # Will be populated dynamically as features are processed
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
         # Get the first field name (assuming it contains the data variable)
         if sField_unique_id is None:
@@ -472,36 +586,14 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
             if pFeature is None:
                 continue
             pGeometry = pFeature.GetGeometryRef()
-            if pGeometry is None:
-                logger.warning(f'Feature {iFeature_index} has no geometry, skipping')
-                iFeature_index += 1
-                invalid_geometry_count += 1
-                continue
             sGeometry_type = pGeometry.GetGeometryName()
             if sGeometry_type == 'POLYGON':
                 try:
-                    # Validate geometry before processing
-                    if not pGeometry.IsValid():
-                        logger.warning(f'Feature {iFeature_index} has invalid geometry')
-                        invalid_geometry_count += 1
-                        print(pGeometry.ExportToWkt())
-                        continue
-                    # Get coordinates of the polygon
+                    # Get coordinates of the polygon (validation already done by check_geometry_validity)
                     aCoord = get_geometry_coordinates(pGeometry)
-                    if aCoord is not None and len(aCoord) > 0:
-                        # Validate coordinate bounds
+                    if aCoord is not None and len(aCoord) >= 3:
                         lons = aCoord[:, 0]
                         lats = aCoord[:, 1]
-                        # Check for reasonable coordinate ranges
-                        if (np.any(lons < -180) or np.any(lons > 180) or
-                            np.any(lats < -90) or np.any(lats > 90)):
-                            logger.warning(f'Feature {iFeature_index} has coordinates outside valid range')
-                        # Check for minimum polygon area (avoid degenerate polygons)
-                        if len(aCoord) < 3:
-                            logger.warning(f'Feature {iFeature_index} has fewer than 3 vertices, skipping')
-                            iFeature_index += 1
-                            invalid_geometry_count += 1
-                            continue
                         lons_list.append(lons)
                         lats_list.append(lats)
                         # Calculate polygon area
@@ -509,7 +601,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                             dArea = calculate_polygon_area(lons, lats)
                             aArea_list.append(dArea)
                         except Exception as area_error:
-                            logger.warning(f'Could not calculate area for feature {iFeature_index}: {area_error}')
+                            logger.warning(f'Could not calculate area: {area_error}')
                             aArea_list.append(0.0)
                         # Get field data (always integer since setup_mesh_cellid enforces it)
                         if sVariable:
@@ -517,44 +609,31 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                                 field_value = pFeature.GetFieldAsInteger(sVariable)
                                 aCellID.append(int(field_value))
                             except (ValueError, TypeError, AttributeError) as e:
-                                logger.warning(f'Could not read integer field value for feature {iFeature_index}: {e}')
-                                aCellID.append(iFeature_index)
+                                logger.warning(f'Could not read integer field value: {e}')
+                                aCellID.append(len(aCellID))
                         else:
-                            aCellID.append(iFeature_index)  # Use feature index as default
+                            aCellID.append(len(aCellID))
                     else:
-                        logger.warning(f'Failed to extract coordinates from feature {iFeature_index}')
                         invalid_geometry_count += 1
                 except Exception as e:
-                    logger.warning(f'Error processing feature {iFeature_index}: {str(e)}')
+                    logger.warning(f'Error processing feature: {str(e)}')
                     invalid_geometry_count += 1
             elif sGeometry_type == 'MULTIPOLYGON':
                 try:
                     # Process multipolygon by extracting each constituent polygon
-                    if iFlag_verbose:
-                        logger.info(f'Processing multipolygon feature {iFeature_index} with {pGeometry.GetGeometryCount()} parts')
+                    if iFlag_verbose_in:
+                        logger.info('Processing multipolygon feature')
                     multipolygon_processed = False
                     for iPart in range(pGeometry.GetGeometryCount()):
                         pPolygon_part = pGeometry.GetGeometryRef(iPart)
                         if pPolygon_part is None:
-                            logger.warning(f'Multipolygon part {iPart} is None in feature {iFeature_index}')
+                            logger.warning('Multipolygon part is None')
                             continue
-                        if not pPolygon_part.IsValid():
-                            logger.warning(f'Multipolygon part {iPart} has invalid geometry in feature {iFeature_index}')
-                            continue
-                        # Get coordinates of the polygon part
+                        # Get coordinates of the polygon part (validation already done by check_geometry_validity)
                         aCoord_part = get_geometry_coordinates(pPolygon_part)
-                        if aCoord_part is not None and len(aCoord_part) > 0:
-                            # Validate coordinate bounds for this part
+                        if aCoord_part is not None and len(aCoord_part) >= 3:
                             lons_part = aCoord_part[:, 0]
                             lats_part = aCoord_part[:, 1]
-                            # Check for reasonable coordinate ranges
-                            if (np.any(lons_part < -180) or np.any(lons_part > 180) or
-                                np.any(lats_part < -90) or np.any(lats_part > 90)):
-                                logger.warning(f'Multipolygon part {iPart} in feature {iFeature_index} has coordinates outside valid range')
-                            # Check for minimum polygon area (avoid degenerate polygons)
-                            if len(aCoord_part) < 3:
-                                logger.warning(f'Multipolygon part {iPart} in feature {iFeature_index} has fewer than 3 vertices, skipping part')
-                                continue
                             lons_list.append(lons_part)
                             lats_list.append(lats_part)
                             # Calculate polygon area for this part
@@ -562,30 +641,16 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                                 dArea_part = calculate_polygon_area(lons_part, lats_part)
                                 aArea_list.append(dArea_part)
                             except Exception as area_error:
-                                logger.warning(f'Could not calculate area for multipolygon part {iPart} in feature {iFeature_index}: {area_error}')
+                                logger.warning(f'Could not calculate area for multipolygon part: {area_error}')
                                 aArea_list.append(0.0)
-                            # For multipolygon, use original feature index for all parts
-                            # Field is always integer since setup_mesh_cellid enforces it
-                            if sVariable:
-                                try:
-                                    field_value = pFeature.GetFieldAsInteger(sVariable)
-                                    aCellID.append(int(field_value))
-                                except (ValueError, TypeError, AttributeError) as e:
-                                    logger.warning(f'Could not read integer field value for multipolygon part {iPart} in feature {iFeature_index}: {e}')
-                                    aCellID.append(iFeature_index)
-                            else:
-                                aCellID.append(iFeature_index)
                             multipolygon_processed = True
                         else:
-                            logger.warning(f'Failed to extract coordinates from multipolygon part {iPart} in feature {iFeature_index}')
+                            logger.warning('Failed to extract coordinates from multipolygon part')
                     if not multipolygon_processed:
-                        logger.warning(f'No valid parts found in multipolygon feature {iFeature_index}')
+                        logger.warning('No valid parts found in multipolygon feature')
                         invalid_geometry_count += 1
-                    else:
-                        if iFlag_verbose:
-                            logger.info(f'Successfully processed multipolygon feature {iFeature_index}')
                 except Exception as e:
-                    logger.warning(f'Error processing multipolygon feature {iFeature_index}: {str(e)}')
+                    logger.warning(f'Error processing multipolygon feature: {str(e)}')
                     invalid_geometry_count += 1
             elif sGeometry_type in ['POINT', 'LINESTRING']:
                 logger.warning(f'Geometry type {sGeometry_type} not supported in feature {iFeature_index}, skipping')
@@ -593,10 +658,9 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
             else:
                 logger.warning(f'Unknown geometry type {sGeometry_type} in feature {iFeature_index}, skipping')
                 invalid_geometry_count += 1
-            iFeature_index += 1
         # Report processing statistics
         valid_mesh_cells = len(lons_list)
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Feature processing summary:')
             logger.info(f'  - Total input features: {iFeature_index}')
             logger.info(f'  - Valid mesh cells created: {valid_mesh_cells}')
@@ -612,7 +676,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
         if not lons_list:
             logger.error('No valid polygon features found in mesh file')
             return None
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Successfully processed {len(lons_list)} polygon features')
         # Calculate maximum vertices and pad coordinates efficiently
         try:
@@ -624,7 +688,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                 logger.error('No vertices found in any polygon')
                 return None
             nVertex_max = max_vertices
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(f'Maximum vertices per polygon: {max_vertices}')
             # Pre-allocate arrays for better memory efficiency
             num_polygons = len(lons_list)
@@ -694,7 +758,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                     logger.warning(f'No valid coordinates found for cell {i}')
                     cell_lons_1d[i] = 0.0
                     cell_lats_1d[i] = 0.0
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(f'Calculated centroids for {len(cell_lons_1d)} cells')
             # Validate centroid ranges
             lon_range = (np.min(cell_lons_1d), np.max(cell_lons_1d))
@@ -708,7 +772,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
             return None
         # Extract unique vertices and connectivity
         try:
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info('Extracting unique vertices and connectivity...')
             xv, yv, connectivity, vertex_to_index = extract_unique_vertices_and_connectivity(
                 lons_list, lats_list
@@ -716,7 +780,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
             if xv is None or yv is None or connectivity is None:
                 logger.error('Failed to extract unique vertices and connectivity')
                 return None
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(f'Extracted {len(xv)} unique vertices')
                 logger.info(f'Created connectivity matrix with shape: {connectivity.shape}')
         except Exception as e:
@@ -741,7 +805,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                 missing_count = len(cell_lons_1d) - len(aCellID)
                 aCellID.extend(range(len(aCellID), len(aCellID) + missing_count))
         aCellID = np.array(aCellID)
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Final aCellID array length: {len(aCellID)}')
         # Calculate and store area statistics
         if aArea_list:
@@ -753,7 +817,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
                 dArea_mean = float(np.mean(valid_areas))
                 dArea_max = float(np.max(valid_areas))
                 dArea_min = float(np.min(valid_areas))
-                if iFlag_verbose:
+                if iFlag_verbose_in:
                     logger.info(f'Mesh area statistics:')
                     logger.info(f'  - Min area: {dArea_min:.6f}')
                     logger.info(f'  - Max area: {dArea_max:.6f}')
@@ -785,14 +849,14 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose=False, sField_unique_
         if len(aVertex_longititude) > 0:
             vertex_lon_range = (np.min(aVertex_longititude), np.max(aVertex_longititude))
             vertex_lat_range = (np.min(aVertex_latitude), np.max(aVertex_latitude))
-            if not (-180 <= vertex_lon_range[0] <= 180 and -180 <= vertex_lon_range[1] <= 180):
-                logger.warning(f'Vertex longitudes outside valid range: {vertex_lon_range}')
-            if not (-90 <= vertex_lat_range[0] <= 90 and -90 <= vertex_lat_range[1] <= 90):
-                logger.warning(f'Vertex latitudes outside valid range: {vertex_lat_range}')
+            # Basic range reporting (detailed validation done by check_geometry_validity)
+            if iFlag_verbose_in:
+                logger.debug(f'Vertex longitude range: {vertex_lon_range}')
+                logger.debug(f'Vertex latitude range: {vertex_lat_range}')
         if not validation_passed:
             logger.error('Mesh topology rebuild failed validation')
             return None
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info('Mesh topology successfully rebuilt')
             logger.info(f'Final mesh statistics:')
             logger.info(f'  - Unique vertices: {len(aVertex_longititude)}')

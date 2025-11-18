@@ -88,24 +88,24 @@ class uraster:
                 f"Invalid remap method {self.iFlag_remap_method}, defaulting to 1 (nearest neighbor)")
             self.iFlag_remap_method = 1
 
-    def setup(self, iFlag_verbose=False):
+    def setup(self, iFlag_verbose_in=False):
         """
         Initialize and validate the uraster configuration.
         Checks raster files and mesh file for existence and validity.
 
         Args:
-            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
                 If False, only print error messages. Default is False.
 
         Returns:
             bool: True if setup successful, False otherwise
         """
-        raster_check = self.check_raster_files(iFlag_verbose=iFlag_verbose)
-        mesh_check = self.check_mesh_file(iFlag_verbose=iFlag_verbose)
+        raster_check = self.check_raster_files(iFlag_verbose_in=iFlag_verbose_in)
+        mesh_check = self.check_mesh_file(iFlag_verbose_in=iFlag_verbose_in)
 
         return raster_check is not None and mesh_check is not None
 
-    def check_raster_files(self, aFilename_source_raster_in=None, iFlag_verbose=False):
+    def check_raster_files(self, aFilename_source_raster_in=None, iFlag_verbose_in=False):
         """
         Validate and prepare input raster files, converting to WGS84 if needed.
 
@@ -118,7 +118,7 @@ class uraster:
         Args:
             aFilename_source_raster_in (list, optional): List of raster file paths.
                 If None, uses self.aFilename_source_raster
-            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
                 If False, only print error messages. Default is False.
 
         Returns:
@@ -144,7 +144,7 @@ class uraster:
                 f'Raster files must be provided as a list, got {type(aFilename_source_raster).__name__}')
             return None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(
                 f'Validating {len(aFilename_source_raster)} raster file(s)...')
 
@@ -188,7 +188,7 @@ class uraster:
                     f'Error opening raster with GDAL: {sFilename_raster_in}: {e}')
                 return None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info('All raster files exist and are readable')
 
         # Phase 2: Process and convert rasters to WGS84
@@ -210,7 +210,7 @@ class uraster:
 
         # Process each raster file
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(
                     f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
 
@@ -237,12 +237,12 @@ class uraster:
 
                 # Check if coordinate system matches WGS84
                 if pRaster.pSpatialRef_wkt == wkt_wgs84:
-                    if iFlag_verbose:
+                    if iFlag_verbose_in:
                         logger.info(f'  ✓ Already in WGS84 (EPSG:4326)')
                     aFilename_source_raster_out.append(sFilename_raster_in)
                 else:
                     # Convert to WGS84
-                    if iFlag_verbose:
+                    if iFlag_verbose_in:
                         logger.info(
                             f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}')
                     try:
@@ -258,7 +258,7 @@ class uraster:
                                 f'Converted WGS84 file not found: {pRaster_wgs84.sFilename}')
                             return None
 
-                        if iFlag_verbose:
+                        if iFlag_verbose_in:
                             logger.info(
                                 f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
                         aFilename_source_raster_out.append(
@@ -271,7 +271,7 @@ class uraster:
                         return None
 
                 # Log raster summary
-                if iFlag_verbose:
+                if iFlag_verbose_in:
                     logger.debug(
                         f'  - Dimensions: {pRaster.nrow} x {pRaster.ncolumn} pixels')
                     logger.debug(f'  - Data type: {pRaster.eType}')
@@ -300,18 +300,18 @@ class uraster:
                 f'Output count mismatch: expected {len(aFilename_source_raster)}, got {len(aFilename_source_raster_out)}')
             return None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(
                 f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
 
         return aFilename_source_raster_out
 
-    def check_mesh_file(self, iFlag_verbose=False):
+    def check_mesh_file(self, iFlag_verbose_in=False):
         """
         Check if the source mesh file exists and build its topology.
 
         Args:
-            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
                 If False, only print error messages. Default is False.
 
         Returns:
@@ -332,11 +332,16 @@ class uraster:
                 "No unique ID field specified for mesh cells (sField_unique_id)")
             return None
 
+        #check mesh geometry_validity, if there are invalid range, return None
+        #if there are cell cross IDL, need to split the cell into two parts, but it will valid
+        if not self.check_mesh_geometry_validity():
+            return None
+
         # Setup and validate the mesh cell ID field
         if not self.setup_mesh_cellid():
             return None
 
-        return self.rebuild_mesh_topology(iFlag_verbose=iFlag_verbose)
+        return self.rebuild_mesh_topology(iFlag_verbose_in=iFlag_verbose_in)
 
     def _get_geometry_type_name(self, geometry_type):
         """
@@ -372,6 +377,10 @@ class uraster:
                 return f"{name} (with flags)"
 
         return f"Unknown geometry type: {geometry_type}"
+
+    def check_mesh_geometry_validity(self, iFlag_verbose_in=False):
+
+        return utility.check_geometry_validity(self.sFilename_source_mesh, iFlag_verbose_in=iFlag_verbose_in)
 
     def setup_mesh_cellid(self):
         """
@@ -585,7 +594,7 @@ class uraster:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def rebuild_mesh_topology(self, iFlag_verbose=False):
+    def rebuild_mesh_topology(self, iFlag_verbose_in=False):
         """
         Rebuild mesh topology from source mesh file by extracting vertices,
         connectivity, and centroids for unstructured mesh processing.
@@ -594,7 +603,7 @@ class uraster:
         and updates all instance attributes with the comprehensive mesh information.
 
         Args:
-            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
                 If False, only print error messages. Default is False.
 
         Returns:
@@ -603,9 +612,8 @@ class uraster:
         # Use the enhanced standalone function from _visual module
         mesh_info = utility.rebuild_mesh_topology(
             self.sFilename_source_mesh,
-            iFlag_verbose=iFlag_verbose,
+            iFlag_verbose_in=iFlag_verbose_in,
             sField_unique_id=self.sField_unique_id)
-
 
         if mesh_info is None:
             return None
@@ -723,7 +731,7 @@ class uraster:
                   iFlag_save_clipped_raster_in=0,
                   sFolder_raster_out_in=None,
                   iFlag_discrete_in=False,
-                  iFlag_verbose=False):
+                  iFlag_verbose_in=False):
         """
         Perform zonal statistics by clipping raster data to mesh polygons.
 
@@ -764,8 +772,8 @@ class uraster:
             sFilename_raster = aFilename_source_raster[0]
             pRaster = sraster(sFilename_raster)
             pRaster.read_metadata()
-            sFilename_raster_mesh = pRaster.create_raster_mesh()
-            #sFilename_raster_mesh = pRaster.sFilename_mesh
+            #sFilename_raster_mesh = pRaster.create_raster_mesh()
+            sFilename_raster_mesh = pRaster.sFilename_mesh
             return intersect.run_remap(
                 sFilename_target_mesh,
                 sFilename_source_mesh,
@@ -774,7 +782,7 @@ class uraster:
                 iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
                 sFolder_raster_out_in=sFolder_raster_out_in,
                 iFlag_discrete_in=iFlag_discrete_in,
-                iFlag_verbose=iFlag_verbose)
+                iFlag_verbose_in=iFlag_verbose_in)
 
         else:
             return extract.run_remap(
@@ -787,7 +795,7 @@ class uraster:
                 iFlag_stat_in=iFlag_stat_in,
                 iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
                 sFolder_raster_out_in=sFolder_raster_out_in,
-                iFlag_verbose_in=iFlag_verbose,
+                iFlag_verbose_in=iFlag_verbose_in,
                 sField_unique_id=self.sField_unique_id)
 
     def visualize_source_mesh(self,
@@ -797,7 +805,7 @@ class uraster:
                               dZoom_factor=0.7,
                               iFlag_show_coastlines=True,
                               iFlag_show_graticule=True,
-                              iFlag_verbose=False):
+                              iFlag_verbose_in=False):
         """
         Visualize the source mesh topology using GeoVista 3D globe rendering.
 
@@ -817,7 +825,7 @@ class uraster:
                 Default is True.
             iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
                 Default is True.
-            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
                 If False, only print error messages. Default is False.
 
         Returns:
@@ -833,17 +841,17 @@ class uraster:
             dZoom_factor=dZoom_factor,
             iFlag_show_coastlines=iFlag_show_coastlines,
             iFlag_show_graticule=iFlag_show_graticule,
-            iFlag_verbose=iFlag_verbose
+            iFlag_verbose_in=iFlag_verbose_in
         )
 
-    def visualize_raster(self, sFilename_out=None, iFlag_verbose=False):
+    def visualize_raster(self, sFilename_out=None, iFlag_verbose_in=False):
         """
         Visualize source raster data using GeoVista.
 
         Note:
             Not yet implemented. Placeholder for future raster visualization.
         """
-        return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose=iFlag_verbose)
+        return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose_in=iFlag_verbose_in)
 
     def visualize_target_mesh(self, sVariable_in=None,
                               sUnit_in=None,
@@ -858,7 +866,7 @@ class uraster:
                               iAnimation_frames=360,
                               dAnimation_speed=1.0,
                               sAnimation_format='mp4',
-                              iFlag_verbose=False):
+                              iFlag_verbose_in=False):
         """
         Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
@@ -894,7 +902,7 @@ class uraster:
                 Default is 10.0. Calculated as 360 / iAnimation_frames if not specified.
             sAnimation_format (str, optional): Animation output format.
                 Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
-            iFlag_verbose (bool, optional): If True, print detailed progress messages.
+            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
                 If False, only print error messages. Default is False.
 
         Returns:
@@ -923,11 +931,11 @@ class uraster:
             iAnimation_frames=iAnimation_frames,
             dAnimation_speed=dAnimation_speed,
             sAnimation_format=sAnimation_format,
-            iFlag_verbose=iFlag_verbose
+            iFlag_verbose_in=iFlag_verbose_in
         )
 
     def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
-                                   iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose=False):
+                                   iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose_in=False):
         """
         Create a rotating animation of the 3D globe visualization.
 
@@ -935,7 +943,7 @@ class uraster:
         """
         return _visual._create_rotation_animation(
             self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,
-            iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose
+            iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose_in
         )
 
     def cleanup(self):

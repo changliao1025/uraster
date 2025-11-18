@@ -293,3 +293,4 @@ python_crash_*.txt
 *.geojson
 *.tiff
 *.nc
+*.gif

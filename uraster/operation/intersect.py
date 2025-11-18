@@ -50,7 +50,7 @@ def run_remap(sFilename_target_mesh,
               iFlag_save_clipped_raster_in=0,
               sFolder_raster_out_in=None,
               iFlag_discrete_in=False,
-              iFlag_verbose=False,
+              iFlag_verbose_in=False,
               iFeature_parallel_threshold=5000,
               sField_unique_id='cellid'):
     """
@@ -73,7 +73,7 @@ def run_remap(sFilename_target_mesh,
         sFolder_raster_out_in (str, optional): Output folder for clipped rasters.
             Required if iFlag_save_clipped_raster_in=1.
         sFormat_in (str, optional): GDAL raster format. Default is 'GTiff'.
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
 
     Returns:
@@ -87,7 +87,7 @@ def run_remap(sFilename_target_mesh,
 
 
 
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info("run_remap: Starting input file validation...")
     # check input files
 
@@ -97,7 +97,7 @@ def run_remap(sFilename_target_mesh,
         logger.error('The raster file does not exist!')
         return
 
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info(
             f"Checking source mesh file: {os.path.basename(sFilename_source_mesh)}")
     if os.path.exists(sFilename_source_mesh):
@@ -105,7 +105,7 @@ def run_remap(sFilename_target_mesh,
     else:
         logger.error('The vector mesh file does not exist!')
         return
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info("Input file validation completed successfully")
 
     # Determine output vector format from filename extension
@@ -119,7 +119,7 @@ def run_remap(sFilename_target_mesh,
     sName = os.path.basename(sFilename_source_raster)
     sRasterName_no_extension = os.path.splitext(sName)[0]
 
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info(
             "run_remap: Reading raster metadata and determining processing bounds...")
 
@@ -132,7 +132,7 @@ def run_remap(sFilename_target_mesh,
     pPixelHeight = pRaster.dResolution_y
     dMissing_value = pRaster.dNoData
 
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
     pDateset_source_mesh = pDriver_vector.Open(sFilename_source_mesh, 0)
@@ -140,7 +140,7 @@ def run_remap(sFilename_target_mesh,
     sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
     #build the rtree index for the polygons for the source mesh
     aPolygon, aArea, sProjection_source_wkt = get_polygon_list(sFilename_raster_mesh,
-                                     iFlag_verbose_in=iFlag_verbose,
+                                     iFlag_verbose_in=iFlag_verbose_in,
                                      sField_unique_id=sField_unique_id)
     index_raster_mesh = RTreeindex() #build the spatial index for the raster mesh cell
     for idx, poly in enumerate(aPolygon):
@@ -182,52 +182,97 @@ def run_remap(sFilename_target_mesh,
     start_time = time.time()
     #now we need to find the intersecting polygons between the raster mesh and the source mesh
     for pFeature in pLayer_source_mesh:
-        # Handle both string and integer field types
-        pField_defn = pLayer_source_mesh.GetLayerDefn().GetFieldDefn(
-            pLayer_source_mesh.GetLayerDefn().GetFieldIndex(sField_unique_id))
         cellid = pFeature.GetFieldAsInteger(sField_unique_id)
         pTarget_geometry = pFeature.GetGeometryRef()
-        aCoords = get_geometry_coordinates(pTarget_geometry)
-        dArea_total_source = calculate_polygon_area(aCoords[:, 0], aCoords[:, 1])
+        #get name
         if pTarget_geometry is None:
             logger.warning(
                 f"run_remap: Warning - Empty geometry for feature ID {cellid}, skipping...")
             continue
-        envelope = pTarget_geometry.GetEnvelope()
-        left, right, bottom, top = envelope
-        # Query spatial index for candidate intersecting polygons
-        candidate_idxs = list(index_raster_mesh.intersection((left, bottom, right, top)))
-        # Further process candidates to find actual intersections
+        aCoords = get_geometry_coordinates(pTarget_geometry)
+        sGeometryName = pTarget_geometry.GetGeometryName()
         aMesh_cell_within=list()
         aArea_ratio=list()
         aMesh_cell_intersect=list()
-        for idx in candidate_idxs:
-            id, raster_wkt = aPolygon[idx]
-            raster_geometry = ogr.CreateGeometryFromWkt(raster_wkt)
-            #first check whether the mesh is inside the target polygon
-            if pTarget_geometry.Contains(raster_geometry):
-                # keep the raster geometry for further processing
-                aMesh_cell_within.append(idx)
-                pass
-            else:
-                if pTarget_geometry.Intersects(raster_geometry): #both intersect and touching
-                    # get the intersected geometry
-                    pIntersected_geometry = pTarget_geometry.Intersection(
-                        raster_geometry)
-                    #should be a polygon geometry?
-                    sGeometryName = pIntersected_geometry.GetGeometryName()
-                    if sGeometryName == 'POLYGON':
-                        #Get the area of the intersected polygon
-                        dArea_raster = aArea[idx]
-                        aCoords_intersect = get_geometry_coordinates(
-                                    pIntersected_geometry)
-                        dArea_intersect = calculate_polygon_area(aCoords_intersect[:, 0], aCoords_intersect[:, 1])
-                        #check the area ratio
-                        aMesh_cell_intersect.append(idx)
-                        aArea_ratio.append(dArea_intersect / dArea_raster)
-                        pass
+        if sGeometryName == 'POLYGON':
+            dArea_total_source = calculate_polygon_area(aCoords[:, 0], aCoords[:, 1])
+            envelope = pTarget_geometry.GetEnvelope()
+            left, right, bottom, top = envelope
+            # Query spatial index for candidate intersecting polygons
+            candidate_idxs = list(index_raster_mesh.intersection((left, bottom, right, top)))
+            # Further process candidates to find actual intersections
+
+            for idx in candidate_idxs:
+                id, raster_wkt = aPolygon[idx]
+                raster_geometry = ogr.CreateGeometryFromWkt(raster_wkt)
+                #first check whether the mesh is inside the target polygon
+                if pTarget_geometry.Contains(raster_geometry):
+                    # keep the raster geometry for further processing
+                    aMesh_cell_within.append(idx)
+                    pass
                 else:
-                    continue  # no intersection, skip
+                    if pTarget_geometry.Intersects(raster_geometry): #both intersect and touching
+                        # get the intersected geometry
+                        pIntersected_geometry = pTarget_geometry.Intersection(
+                            raster_geometry)
+                        #should be a polygon geometry?
+                        sGeometryName = pIntersected_geometry.GetGeometryName()
+                        if sGeometryName == 'POLYGON':
+                            #Get the area of the intersected polygon
+                            dArea_raster = aArea[idx]
+                            aCoords_intersect = get_geometry_coordinates(
+                                        pIntersected_geometry)
+                            dArea_intersect = calculate_polygon_area(aCoords_intersect[:, 0], aCoords_intersect[:, 1])
+                            #check the area ratio
+                            aMesh_cell_intersect.append(idx)
+                            aArea_ratio.append(dArea_intersect / dArea_raster)
+                            pass
+                    else:
+                        continue  # no intersection, skip
+
+        elif sGeometryName == 'MULTIPOLYGON':
+            dArea_total_source = 0.0
+            for i in range(pTarget_geometry.GetGeometryCount()):
+                pSub_geometry = pTarget_geometry.GetGeometryRef(i)
+                aCoords_sub = get_geometry_coordinates(pSub_geometry)
+                dArea_sub = calculate_polygon_area(aCoords_sub[:, 0], aCoords_sub[:, 1])
+                dArea_total_source += dArea_sub
+
+                #now we need to find the intersecting raster mesh cells for each sub-geometry
+                envelope = pSub_geometry.GetEnvelope()
+                left, right, bottom, top = envelope
+                # Query spatial index for candidate intersecting polygons
+                candidate_idxs = list(index_raster_mesh.intersection((left, bottom, right, top)))
+                # Further process candidates to find actual intersections
+                for idx in candidate_idxs:
+                    id, raster_wkt = aPolygon[idx]
+                    raster_geometry = ogr.CreateGeometryFromWkt(raster_wkt)
+                    #first check whether the mesh is inside the target polygon
+                    if pSub_geometry.Contains(raster_geometry):
+                        # keep the raster geometry for further processing
+                        if idx not in aMesh_cell_within:
+                            aMesh_cell_within.append(idx)
+                        pass
+                    else:
+                        if pSub_geometry.Intersects(raster_geometry): #both intersect and touching
+                            # get the intersected geometry
+                            pIntersected_geometry = pSub_geometry.Intersection(
+                                raster_geometry)
+                            #should be a polygon geometry?
+                            sGeometryName = pIntersected_geometry.GetGeometryName()
+                            if sGeometryName == 'POLYGON':
+                                #Get the area of the intersected polygon
+                                dArea_raster = aArea[idx]
+                                aCoords_intersect = get_geometry_coordinates(
+                                            pIntersected_geometry)
+                                dArea_intersect = calculate_polygon_area(aCoords_intersect[:, 0], aCoords_intersect[:, 1])
+                                #check the area ratio
+                                aMesh_cell_intersect.append(idx)
+                                aArea_ratio.append(dArea_intersect / dArea_raster)
+                                pass
+                        else:
+                            continue  # no intersection, skip
+
 
         #create the output feature
         pFeature_out = ogr.Feature(pLayer_defn_out)
@@ -254,11 +299,13 @@ def run_remap(sFilename_target_mesh,
             nRow_converted = pRaster.nrow - 1 - nRow
             #get the raster value
             dRaster_value = pRaster_data[nRow_converted, nCol]
+            dArea_mesh_cell = aArea[idx]
             if dRaster_value == dMissing_value:
                 continue
-            dArea_mesh_cell = aArea[idx]
-            dWeighted_sum += dRaster_value * dArea_mesh_cell
-            dArea_check += dArea_mesh_cell
+            else:
+                dWeighted_sum += dRaster_value * dArea_mesh_cell
+                dArea_check += dArea_mesh_cell
+
         #then process the intersected cells
         for k, idx in enumerate(aMesh_cell_intersect):
             #convert the ids to row and column indices
@@ -268,19 +315,24 @@ def run_remap(sFilename_target_mesh,
             nRow_converted = pRaster.nrow - 1 - nRow
             #get the raster value
             dRaster_value = pRaster_data[nRow_converted, nCol]
-            if dRaster_value == dMissing_value:
-                continue
             dArea_mesh_cell = aArea[idx]
             dArea_ratio = aArea_ratio[k]
             dArea_intersected = dArea_mesh_cell * dArea_ratio
-            dWeighted_sum += dRaster_value * dArea_intersected
-            dArea_check += dArea_intersected
+            if dRaster_value == dMissing_value:
+                continue
+            else:
+                dWeighted_sum += dRaster_value * dArea_intersected
+                dArea_check += dArea_intersected
+
 
         #the difference between dArea_check and dArea_total should be small
         if abs(dArea_check - dArea_total) / dArea_total > 0.01:
             logger.warning(
-                f"run_remap: Warning - Area check failed for feature ID {cellid}, skipping weighted mean calculation...")
-            dWeighted_mean = None
+                f"run_remap: Warning - Area check failed for feature ID {cellid}...")
+            if dArea_check == 0:
+                dWeighted_mean = None
+            else:
+                dWeighted_mean = dWeighted_sum / dArea_check
         else:
             dWeighted_mean = dWeighted_sum / dArea_total
 
@@ -304,7 +356,7 @@ def run_remap(sFilename_target_mesh,
 
     # Report processing summary
     total_time = time.time() - start_time
-    if iFlag_verbose:
+    if iFlag_verbose_in:
         logger.info(f"Processing completed in {total_time:.2f} seconds")
 
     return

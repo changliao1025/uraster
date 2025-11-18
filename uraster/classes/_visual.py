@@ -227,20 +227,20 @@ def _validate_output_path(sFilename: Optional[str]) -> bool:
 
     return True
 
-def _setup_geovista_plotter(iFlag_off_screen: bool = False, iFlag_verbose: bool = False):
+def _setup_geovista_plotter(iFlag_off_screen: bool = False, iFlag_verbose_in: bool = False):
     """
     Set up GeoVista plotter with error handling.
 
     Args:
         iFlag_off_screen: Whether to create off-screen plotter
-        iFlag_verbose: Enable verbose logging
+        iFlag_verbose_in: Enable verbose logging
 
     Returns:
         GeoVista plotter instance or None if failed
     """
     try:
         import geovista as gv
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info('GeoVista library imported successfully')
     except ImportError as e:
         logger.error('GeoVista library not available. Install with: pip install geovista')
@@ -250,11 +250,11 @@ def _setup_geovista_plotter(iFlag_off_screen: bool = False, iFlag_verbose: bool 
     try:
         if iFlag_off_screen:
             pPlotter = gv.GeoPlotter(off_screen=True)
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.debug('Created off-screen plotter')
         else:
             pPlotter = gv.GeoPlotter()
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.debug('Created interactive plotter')
         return pPlotter
     except Exception as e:
@@ -353,7 +353,7 @@ def visualize_source_mesh(self,
                           iFlag_show_graticule: bool = True,
                           sCoastline_color: str = 'black',
                           dCoastline_width: float = 1.0,
-                          iFlag_verbose: bool = False) -> bool:
+                          iFlag_verbose_in: bool = False) -> bool:
     """
     Visualize the source mesh topology using GeoVista 3D globe rendering.
 
@@ -373,7 +373,7 @@ def visualize_source_mesh(self,
         sCoastline_color: Color for coastlines. Default is 'black'.
             Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
         dCoastline_width: Line width for coastlines. Default is 1.0.
-        iFlag_verbose: If True, print detailed progress messages. Default is False.
+        iFlag_verbose_in: If True, print detailed progress messages. Default is False.
 
     Returns:
         True if visualization successful, False otherwise
@@ -399,7 +399,7 @@ def visualize_source_mesh(self,
         show_graticule=iFlag_show_graticule,
         coastline_color=sCoastline_color,
         coastline_width=dCoastline_width,
-        verbose=iFlag_verbose
+        verbose=iFlag_verbose_in
     )
 
     try:
@@ -454,7 +454,7 @@ def visualize_source_mesh(self,
             logger.info(f'Created GeoVista mesh with {mesh.n_cells} cells and {mesh.n_points} points')
 
         # Setup plotter
-        pPlotter = _setup_geovista_plotter(iFlag_off_screen=(sFilename_out is not None), iFlag_verbose=config.verbose)
+        pPlotter = _setup_geovista_plotter(iFlag_off_screen=(sFilename_out is not None), iFlag_verbose_in=config.verbose)
         if pPlotter is None:
             return False
 
@@ -491,14 +491,14 @@ def visualize_source_mesh(self,
         logger.error(f'Traceback: {traceback.format_exc()}')
         return False
 
-def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbose: bool = False) -> bool:
+def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbose_in: bool = False) -> bool:
     """
     Handle visualization output (save file or show interactive).
 
     Args:
         pPlotter: GeoVista plotter instance
         sFilename: Output filename or None for interactive
-        iFlag_verbose: Enable verbose logging
+        iFlag_verbose_in: Enable verbose logging
 
     Returns:
         bool: True if successful, False otherwise
@@ -507,7 +507,7 @@ def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbo
         if sFilename is not None:
             # Save screenshot
             pPlotter.screenshot(sFilename)
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info(f'✓ Visualization saved to: {sFilename}')
 
                 # Verify file was created
@@ -521,7 +521,7 @@ def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbo
             return True
         else:
             # Interactive display
-            if iFlag_verbose:
+            if iFlag_verbose_in:
                 logger.info('Opening interactive visualization window...')
             pPlotter.show()
             return True
@@ -545,7 +545,7 @@ def visualize_raster(self,
                     sColormap: str = 'viridis',
                     sCoastline_color: str = 'black',
                     dCoastline_width: float = 1.0,
-                    iFlag_verbose: bool = False) -> bool:
+                    iFlag_verbose_in: bool = False) -> bool:
     """
     Visualize source raster data using GeoVista.
 
@@ -562,7 +562,7 @@ def visualize_raster(self,
         sColormap: Matplotlib colormap name for raster visualization.
         sCoastline_color: Color for coastlines. Default is 'black'.
         dCoastline_width: Line width for coastlines. Default is 1.0.
-        iFlag_verbose: If True, print detailed progress messages.
+        iFlag_verbose_in: If True, print detailed progress messages.
 
     Returns:
         True if visualization successful, False otherwise
@@ -589,7 +589,7 @@ def visualize_raster(self,
         colormap=sColormap,
         coastline_color=sCoastline_color,
         coastline_width=dCoastline_width,
-        verbose=iFlag_verbose
+        verbose=iFlag_verbose_in
     )
 
     try:
@@ -599,7 +599,7 @@ def visualize_raster(self,
             logger.info(f'Visualizing {len(self.aFilename_source_raster)} raster file(s)...')
 
         # Setup plotter
-        pPlotter = _setup_geovista_plotter(iFlag_off_screen=(sFilename_out is not None), iFlag_verbose=config.verbose)
+        pPlotter = _setup_geovista_plotter(iFlag_off_screen=(sFilename_out is not None), iFlag_verbose_in=config.verbose)
         if pPlotter is None:
             return False
 
@@ -677,14 +677,14 @@ def visualize_raster(self,
         logger.error(f'Traceback: {traceback.format_exc()}')
         return False
 
-def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose: bool = False) -> Optional[Tuple[np.ndarray, int]]:
+def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose_in: bool = False) -> Optional[Tuple[np.ndarray, int]]:
     """
     Extract variable data from target mesh file.
 
     Args:
         sFilename: Path to target mesh file
         sVariable: Variable name to extract
-        iFlag_verbose: Enable verbose logging
+        iFlag_verbose_in: Enable verbose logging
 
     Returns:
         Tuple of (data_array, feature_count) or None if failed
@@ -714,7 +714,7 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose: boo
         iFieldCount = pLayerDefn.GetFieldCount()
         nFeatures = pLayer.GetFeatureCount()
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Target mesh contains {nFeatures} features with {iFieldCount} fields')
 
         # Check if variable field exists
@@ -725,7 +725,7 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose: boo
             pDataset = None
             return None
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Extracting variable: {sVariable}')
 
         # Extract variable data from features, handling multipolygons correctly
@@ -798,7 +798,7 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose: boo
         logger.error(f'Traceback: {traceback.format_exc()}')
         return None
 
-def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iFlag_verbose: bool = False) -> Optional[Tuple[Any, str, np.ndarray]]:
+def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iFlag_verbose_in: bool = False) -> Optional[Tuple[Any, str, np.ndarray]]:
     """
     Create GeoVista mesh from uraster instance and attach data.
 
@@ -806,7 +806,7 @@ def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iF
         pUraster_instance: The uraster instance
         aData: Data array to attach to mesh
         sVariable: Variable name for the data
-        iFlag_verbose: Enable verbose logging
+        iFlag_verbose_in: Enable verbose logging
 
     Returns:
         Tuple of (mesh, scalars_name, valid_cell_indices) or None if failed
@@ -830,7 +830,7 @@ def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iF
                 return None
 
         # Transform to GeoVista unstructured mesh
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info('Creating GeoVista mesh...')
         pMesh = gv.Transform.from_unstructured(
             pUraster_instance.aVertex_longititude,
@@ -839,7 +839,7 @@ def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iF
             crs=CRS
         )
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Created mesh with {pMesh.n_cells} cells and {pMesh.n_points} points')
 
         # Attach data to mesh
@@ -863,7 +863,7 @@ def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iF
 
         aValid_cell_indices = np.where(aValid_data_mask)[0]
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Attached data "{sScalars}" to mesh cells')
             logger.info(f'Valid cells for visualization: {iN_valid}/{len(aData)}')
 
@@ -890,7 +890,7 @@ def visualize_target_mesh(self,
                          iAnimation_frames: Optional[int] = 36,
                          dAnimation_speed: Optional[float] = 1.0,
                          sAnimation_format: Optional[str] = 'mp4',
-                         iFlag_verbose: Optional[bool] = False) -> bool:
+                         iFlag_verbose_in: Optional[bool] = False) -> bool:
     """
     Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
@@ -929,7 +929,7 @@ def visualize_target_mesh(self,
             Default is 1.0. Calculated as 360 / iAnimation_frames if not specified.
         sAnimation_format (str, optional): Animation output format.
             Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
-        iFlag_verbose (bool, optional): If True, print detailed progress messages.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
 
     Returns:
@@ -977,7 +977,7 @@ def visualize_target_mesh(self,
         colormap=sColormap,
         coastline_color=sCoastline_color,
         coastline_width=dCoastline_width,
-        verbose=iFlag_verbose
+        verbose=iFlag_verbose_in
     )
 
     animation_config = AnimationConfig(
@@ -1073,7 +1073,7 @@ def _handle_single_frame_visualization(pMesh, sScalars: str, aValid_cell_indices
     """
     try:
         # Setup plotter
-        pPlotter = _setup_geovista_plotter(iFlag_off_screen=(sFilename is not None), iFlag_verbose=pConfig.verbose)
+        pPlotter = _setup_geovista_plotter(iFlag_off_screen=(sFilename is not None), iFlag_verbose_in=pConfig.verbose)
         if pPlotter is None:
             return False
 
@@ -1127,7 +1127,7 @@ def _handle_animation_visualization(pMesh, sScalars: str, aValid_cell_indices: n
 
     try:
         # Setup off-screen plotter for animation
-        pPlotter = _setup_geovista_plotter(iFlag_off_screen=True, iFlag_verbose=pConfig.verbose)
+        pPlotter = _setup_geovista_plotter(iFlag_off_screen=True, iFlag_verbose_in=pConfig.verbose)
         if pPlotter is None:
             return False
 
@@ -1170,7 +1170,7 @@ def _handle_animation_visualization(pMesh, sScalars: str, aValid_cell_indices: n
         return False
 
 def _create_rotation_animation(pPlotter, sFilename_out, dLongitude_start, dLatitude_focus,
-                               dZoom_factor, iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose):
+                               dZoom_factor, iAnimation_frames, dAnimation_speed, sAnimation_format, iFlag_verbose_in):
     """
     Create a rotating animation of the 3D globe visualization.
 
@@ -1186,13 +1186,13 @@ def _create_rotation_animation(pPlotter, sFilename_out, dLongitude_start, dLatit
         iAnimation_frames (int): Number of frames for 360° rotation
         dAnimation_speed (float): Degrees per frame
         sAnimation_format (str): Output format ('mp4', 'gif', 'avi')
-        iFlag_verbose (bool): Enable verbose logging
+        iFlag_verbose_in (bool): Enable verbose logging
 
     Returns:
         bool: True if animation created successfully, False otherwise
     """
     try:
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'Creating {iAnimation_frames}-frame rotation animation')
             logger.info(f'  - Starting longitude: {dLongitude_start:.1f}°')
             logger.info(f'  - Base latitude: {dLatitude_focus:.1f}°')
@@ -1209,7 +1209,7 @@ def _create_rotation_animation(pPlotter, sFilename_out, dLongitude_start, dLatit
         # Initialize movie recording
         pPlotter.open_movie(sFilename_out, framerate=30)
 
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info('Generating animation frames...')
 
         for iFrame in range(iAnimation_frames):
@@ -1265,7 +1265,7 @@ def _create_rotation_animation(pPlotter, sFilename_out, dLongitude_start, dLatit
             try:
                 pPlotter.write_frame()
 
-                if iFlag_verbose and (iFrame + 1) % max(1, iAnimation_frames // 10) == 0:
+                if iFlag_verbose_in and (iFrame + 1) % max(1, iAnimation_frames // 10) == 0:
                     dProgress = ((iFrame + 1) / iAnimation_frames) * 100
                     logger.info(f'  Progress: {dProgress:.0f}% ({iFrame + 1}/{iAnimation_frames} frames)')
 
@@ -1290,7 +1290,7 @@ def _create_rotation_animation(pPlotter, sFilename_out, dLongitude_start, dLatit
 
         # Log success information
         iFile_size = os.path.getsize(sFilename_out)
-        if iFlag_verbose:
+        if iFlag_verbose_in:
             logger.info(f'✓ Animation created successfully: {sFilename_out}')
             logger.info(f'  File size: {iFile_size / (1024*1024):.2f} MB')
             logger.info(f'  Frames: {iAnimation_frames}')
