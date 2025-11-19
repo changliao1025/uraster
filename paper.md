@@ -12,10 +12,18 @@ authors:
     orcid: 0000-0002-7348-8858
     affiliation: 1
 
+  - name: Mingke Li
+    orcid: 0000-0001-6310-4964
+    affiliation: 2
+
 
 affiliations:
- - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
-   index: 1
+  - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
+    index: 1
+
+  - name: University of Calgary, Calgary, Canada
+    index: 2
+
 date: 13 Nov 2025
 
 bibliography: paper.bib
@@ -71,7 +79,7 @@ PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-7
 
 # References
 
-Liao, C. (2025). uraster: A Python package to transform raster data to unstructured mesh using GDAL. (v0.1.1). Zenodo. https://doi.org/10.5281/zenodo.17613497
+Liao, C. (2025). uraster: A Python package to transform raster data to unstructured mesh using GDAL. (v0.1.2). Zenodo. https://doi.org/10.5281/zenodo.17613497
 
 
 

@@ -1,4 +1,5 @@
 import os
+import platform
 import numpy as np
 from osgeo import osr
 from osgeo import gdal
@@ -36,7 +37,11 @@ class sraster:
             if os.path.isfile(sFilename_in):
                 #setup the mesh filename using robust path handling
                 base, ext = os.path.splitext(sFilename_in)
-                self.sFilename_mesh = f"{base}_mesh.geoparquet"
+                #check platform, as MacOS does not support geoparquet well
+                if platform.system() == 'Darwin':
+                    self.sFilename_mesh = f"{base}_mesh.geojson"
+                else:
+                    self.sFilename_mesh = f"{base}_mesh.geoparquet"
             else:
                 raise FileNotFoundError(f"File does not exist: {sFilename_in}")
         # NoData value
@@ -142,6 +147,34 @@ class sraster:
 
         return
 
+    def read_data(self, iBand=1):
+        """
+        Read raster data from the specified band.
+        """
+        # Check if file exists
+        if not os.path.isfile(self.sFilename):
+            raise FileNotFoundError(f"File does not exist: {self.sFilename}")
+
+        pDataset = None
+        array = None
+        try:
+            pDataset = gdal.Open(self.sFilename)
+            if pDataset is None:
+                raise RuntimeError(f"Unable to open file: {self.sFilename}")
+
+            if iBand < 1 or iBand > pDataset.RasterCount:
+                raise ValueError(f"Invalid band index: {iBand}")
+
+            pBand = pDataset.GetRasterBand(iBand)
+            array = pBand.ReadAsArray()
+
+        finally:
+            # Ensure dataset is properly closed
+            if pDataset is not None:
+                pDataset = None
+
+        return array
+
     def print_info(self):
         """
         Print raster metadata information.
@@ -210,6 +243,7 @@ class sraster:
             nrow_in = self.nrow
             sFilename_output_in = self.sFilename_mesh
 
+            #the mesh starts from the lower left corner
             create_latlon_mesh(dLongitude_left_in,
                        dLatitude_bot_in,
                        dResolution_degree_in,

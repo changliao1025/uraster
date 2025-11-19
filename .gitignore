@@ -290,3 +290,7 @@ python_crash_*.txt
 **/retired/
 **/retired/**
 *.geoparquet
+*.geojson
+*.tiff
+*.nc
+*.gif
