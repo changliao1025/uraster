@@ -234,6 +234,14 @@ def run_remap(sFilename_target_mesh,
             dArea_total_source = 0.0
             for i in range(pTarget_geometry.GetGeometryCount()):
                 pSub_geometry = pTarget_geometry.GetGeometryRef(i)
+                #check validity
+                if not pSub_geometry.IsValid():
+                    #flatten to 2d
+                    pSub_geometry.FlattenTo2D()
+                    logger.warning(f"Problematic geometry at coordinates: {pSub_geometry.ExportToWkt()}")
+                    logger.warning("Invalid geometry detected, attempting to fix...")
+                    continue
+
                 aCoords_sub = get_geometry_coordinates(pSub_geometry)
                 dArea_sub = calculate_polygon_area(aCoords_sub[:, 0], aCoords_sub[:, 1])
                 dArea_total_source += dArea_sub
@@ -324,17 +332,19 @@ def run_remap(sFilename_target_mesh,
                 dWeighted_sum += dRaster_value * dArea_intersected
                 dArea_check += dArea_intersected
 
-
-        #the difference between dArea_check and dArea_total should be small
-        if abs(dArea_check - dArea_total) / dArea_total > 0.01:
-            logger.warning(
-                f"run_remap: Warning - Area check failed for feature ID {cellid}...")
-            if dArea_check == 0:
-                dWeighted_mean = None
-            else:
-                dWeighted_mean = dWeighted_sum / dArea_check
+        if dArea_check == 0:
+            dWeighted_mean = None
         else:
-            dWeighted_mean = dWeighted_sum / dArea_total
+            #the difference between dArea_check and dArea_total should be small
+            if abs(dArea_check - dArea_total) / dArea_total > 0.01:
+                logger.warning(
+                    f"run_remap: Warning - Area check failed for feature ID {cellid}...")
+                if dArea_check == 0:
+                    dWeighted_mean = None
+                else:
+                    dWeighted_mean = dWeighted_sum / dArea_check
+            else:
+                dWeighted_mean = dWeighted_sum / dArea_total
 
         #set the area field
         pFeature_out.SetField('area', dArea_total_source)

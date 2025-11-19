@@ -14,7 +14,7 @@ print(f"Data folder path: {sFolder_data}")
 
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'rhealpix_global_res3.geojson') # use the L10-100 test mesh
-sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson')
+#sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson')
 sFilename_raster = os.path.join(sFolder_data, 'input', 'EDGAR_CH4_emission_global_2015.tiff')
 
 sFilename_target_mesh = os.path.join(sFolder_data, 'output',  'uraster.geojson')
@@ -59,7 +59,7 @@ def main():
         sColormap=sColormap,
         dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in,
         iFlag_create_animation=True,
-        iAnimation_frames=360,       # 1° longitude per frame
+        iAnimation_frames=360,    # 1° longitude per frame
         sAnimation_format='mp4')
 
     pRaster.cleanup()

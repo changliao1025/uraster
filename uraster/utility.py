@@ -6,6 +6,7 @@ import numpy as np
 from osgeo import gdal, ogr
 from uraster.classes.sraster import sraster
 gdal.UseExceptions()
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
@@ -17,12 +18,10 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-
 # Set up logging
 logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
 # Utility functions for common operations
-
 
 def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
     """
@@ -116,6 +115,20 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
 
             sGeometry_type = pGeometry.GetGeometryName()
 
+            aCoord = get_geometry_coordinates(pGeometry)
+            #also check longitude and latitude range -180-180
+            if aCoord is None or len(aCoord) < 3:
+                logger.warning(f'Feature {iFeature_index}: Invalid or insufficient coordinates')
+                invalid_geometry_count += 1
+                iFeature_index += 1
+                continue
+            if (np.any(aCoord[:,0] < -180) or np.any(aCoord[:,0] > 180) or
+                np.any(aCoord[:,1] < -90) or np.any(aCoord[:,1] > 90)):
+                logger.warning(f'Feature {iFeature_index}: Coordinates out of valid range')
+                invalid_geometry_count += 1
+                iFeature_index += 1
+                continue
+
             if sGeometry_type == 'POLYGON':
                 if not _validate_polygon_geometry(pGeometry, iFeature_index, iFlag_verbose_in):
                     invalid_geometry_count += 1
@@ -153,7 +166,7 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
             logger.info(f'  - Success rate: {success_rate:.1f}%')
 
         if invalid_geometry_count > 0:
-            logger.warning('Found invalid geometries. Please use utility tools to fix them first.')
+            logger.warning('Found invalid geometries. The program will attempt to fix them.')
             return False
 
         if iFlag_verbose_in:
@@ -165,6 +178,17 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
         logger.error(f'Error in check_geometry_validity: {str(e)}')
         logger.error(f'Traceback: {traceback.format_exc()}')
         return False
+
+def check_mesh_quality(sFilename_mesh_in, iFlag_verbose_in=False):
+    if not check_geometry_validity(sFilename_mesh_in, iFlag_verbose_in=iFlag_verbose_in):
+        # we need to fix the mesh using the IDL splitting utility
+        # Make the filename adjustment more flexible to handle any format
+        # Get the file extension and base name
+        file_base, file_ext = os.path.splitext(sFilename_mesh_in)
+        sFilename_source_mesh_fixed = f"{file_base}_fixed{file_ext}"
+        fix_mesh_longitude_range_and_idl_crossing(sFilename_mesh_in, sFilename_source_mesh_fixed)
+        return sFilename_source_mesh_fixed
+    return sFilename_mesh_in
 
 def _validate_polygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
     """
@@ -198,7 +222,8 @@ def _validate_polygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
             return False
 
         # Check for International Date Line crossing (this is allowed but logged)
-        if check_cross_international_date_line_polygon(aCoord):
+        iCross_idl, dummy = check_cross_international_date_line_polygon(aCoord)
+        if iCross_idl:
             if iFlag_verbose_in:
                 logger.info(f'Feature {feature_id}: Polygon crosses International Date Line (valid)')
         else:
@@ -582,6 +607,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
         pLayer.ResetReading()
         iFeature_index = 0
         invalid_geometry_count = 0
+        iCount_multipolygon_cells = 0
         for pFeature in pLayer:
             if pFeature is None:
                 continue
@@ -624,6 +650,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                     if iFlag_verbose_in:
                         logger.info('Processing multipolygon feature')
                     multipolygon_processed = False
+                    iCount_multipolygon_cells += 1
                     for iPart in range(pGeometry.GetGeometryCount()):
                         pPolygon_part = pGeometry.GetGeometryRef(iPart)
                         if pPolygon_part is None:
@@ -878,7 +905,8 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             'area_max': dArea_max,
             'area_mean': dArea_mean,
             'max_vertices_per_cell': nVertex_max,
-            'num_cells': len(aCenter_longititude),
+            'num_cells': nFeatures,
+            'num_polygns': len(aCenter_longititude),
             'num_vertices': len(aVertex_longititude),
             'success': True
         }
@@ -888,3 +916,356 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
         logger.error(f'Unexpected error in rebuild_mesh_topology: {str(e)}')
         logger.error(f'Traceback: {traceback.format_exc()}')
         return None
+
+def normalize_longitude(lon):
+    """
+    Normalize longitude to [-180, 180] range by wrapping.
+    Optimized using modular arithmetic instead of loops.
+
+    Args:
+        lon (float): Longitude value
+
+    Returns:
+        float: Normalized longitude in [-180, 180] range
+    """
+    # Use modular arithmetic for O(1) normalization
+    normalized = ((lon + 180) % 360) - 180
+    return normalized
+
+def fix_coordinates(coords):
+    """
+    Recursively fix longitude values in coordinate arrays.
+    Handles nested coordinate structures for different geometry types.
+
+    Args:
+        coords: Coordinate array (can be nested)
+
+    Returns:
+        Fixed coordinate array with normalized longitudes
+    """
+    if not coords:
+        return coords
+
+    # Check if this is a coordinate pair [lon, lat]
+    if isinstance(coords[0], (int, float)):
+        return [normalize_longitude(coords[0]), coords[1]]
+    else:
+        return [fix_coordinates(coord) for coord in coords]
+
+def fix_longitude_range_gdal(geometry, in_place=False):
+    """
+    Fix longitude values using GDAL geometry operations.
+    Normalizes longitude coordinates to [-180, 180] range.
+
+    Args:
+        geometry: OGR Geometry object
+        in_place (bool): If True, modify geometry in place (faster)
+
+    Returns:
+        OGR Geometry object with normalized longitude coordinates
+    """
+    if geometry is None:
+        return geometry
+
+    # Optionally clone the geometry to avoid modifying the original
+    fixed_geometry = geometry if in_place else geometry.Clone()
+
+    # Get geometry type
+    geom_type = fixed_geometry.GetGeometryName()
+
+    if geom_type in ['POLYGON', 'MULTIPOLYGON', 'LINESTRING', 'MULTILINESTRING', 'POINT', 'MULTIPOINT']:
+        # For complex geometries, iterate through all geometry parts
+        if geom_type.startswith('MULTI') or geom_type == 'POLYGON':
+            _fix_geometry_coordinates_recursive(fixed_geometry)
+        else:
+            # For simple geometries, fix coordinates directly using batch processing
+            point_count = fixed_geometry.GetPointCount()
+            if point_count > 0:
+                # Process points in batches for better performance
+                for i in range(point_count):
+                    x, y, z = fixed_geometry.GetPoint(i)
+                    # Normalize longitude using modular arithmetic
+                    normalized_x = ((x + 180) % 360) - 180
+                    # Avoid exact +180° by nudging to just under 180°
+                    if abs(normalized_x - 180.0) < 1e-10:
+                        normalized_x = 180.0 - 1e-8
+                    fixed_geometry.SetPoint(i, normalized_x, y, z)
+
+    return fixed_geometry
+
+def _fix_geometry_coordinates_recursive(geometry):
+    """
+    Recursively fix coordinates in complex geometries.
+
+    Args:
+        geometry: OGR Geometry object to fix in-place
+    """
+    geom_count = geometry.GetGeometryCount()
+
+    if geom_count > 0:
+        # Recurse through sub-geometries
+        for i in range(geom_count):
+            sub_geom = geometry.GetGeometryRef(i)
+            _fix_geometry_coordinates_recursive(sub_geom)
+    else:
+        # Fix coordinates in this geometry
+        point_count = geometry.GetPointCount()
+        for i in range(point_count):
+            x, y, z = geometry.GetPoint(i)
+            if abs(x - 180.0) < 1e-10:
+                x = 180.0 - 1e-8  # Nudge to just under 180°
+            if abs(x + 180.0) < 1e-10:
+                x = -180.0 + 1e-8  # Nudge to just above -180°
+            # Normalize longitude using modular arithmetic
+            normalized_x = ((x + 180) % 360) - 180
+            geometry.SetPoint(i, normalized_x, y, z)
+
+def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handle_idl_crossing=True):
+    """
+    Comprehensive GDAL-based function to fix longitude range issues and optionally handle
+    International Date Line (IDL) crossing in vector files.
+
+    This function combines the functionality of both fix_mesh_longitude_range_gdal and fix_idl_crossing
+    into a single optimized function that can handle multiple layers and IDL crossing.
+
+    Args:
+        input_file (str): Path to input vector file (any GDAL-supported format)
+        output_file (str): Path to output vector file
+        handle_idl_crossing (bool): Whether to check and split polygons crossing the IDL (default: True)
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    pDriver = None
+    pDataset = None
+    pDataset_out = None
+
+    try:
+        # Open source dataset
+        pDriver = get_vector_driver_from_filename(sFilename_in)
+        pDataset = pDriver.Open(sFilename_in, 0)
+        if pDataset is None:
+            logger.error(f"Could not open input file: {sFilename_in}")
+            return False
+
+        # Create output dataset
+        pDriver_out = get_vector_driver_from_filename(sFilename_out)
+        #delete output file if it already exists
+        if os.path.exists(sFilename_out):
+            pDriver_out.DeleteDataSource(sFilename_out)
+        pDataset_out = pDriver_out.CreateDataSource(sFilename_out)
+        if pDataset_out is None:
+            logger.error(f"Could not create output file: {sFilename_out}")
+            return False
+
+        # Process each layer
+        layer_count = pDataset.GetLayerCount()
+        logger.info(f"Processing {layer_count} layer(s) from {sFilename_in}")
+
+        total_processed = 0
+
+        for layer_idx in range(layer_count):
+            pLayer = pDataset.GetLayerByIndex(layer_idx)
+            if pLayer is None:
+                logger.warning(f"Could not get layer {layer_idx}")
+                continue
+
+            pLayerDefn = pLayer.GetLayerDefn()
+            sSpatial_ref = pLayer.GetSpatialRef()
+            layer_name = pLayer.GetName()
+            nFeatures = pLayer.GetFeatureCount()
+
+            logger.info(f"Processing layer '{layer_name}' with {nFeatures} features")
+
+            # Create output layer with same schema
+            pLayer_out = pDataset_out.CreateLayer(layer_name, sSpatial_ref, ogr.wkbUnknown)
+            if pLayer_out is None:
+                logger.error(f"Could not create output layer: {layer_name}")
+                continue
+
+            # Copy field definitions
+            for iField in range(pLayerDefn.GetFieldCount()):
+                field_defn = pLayerDefn.GetFieldDefn(iField)
+                pLayer_out.CreateField(field_defn)
+
+            # Process features with progress tracking
+            processed_count = 0
+            idl_crossing_count = 0
+
+            for pFeature in pLayer:
+                try:
+                    geometry = pFeature.GetGeometryRef()
+                    if geometry is None:
+                        logger.warning(f"Feature ID {pFeature.GetFID()} has no geometry, skipping...")
+                        continue
+
+                    geometry_type = geometry.GetGeometryName()
+
+                    #check whether geometry contains poles
+                    aCoord_origin = get_geometry_coordinates(geometry)
+                    if np.min(np.abs(aCoord_origin[:, 1])) >88.0:
+                        continue
+                    # Fix longitude coordinates using GDAL
+                    fixed_geometry = fix_longitude_range_gdal(geometry)
+                    # Handle IDL crossing for polygon geometries if requested
+                    if handle_idl_crossing and geometry_type in ['POLYGON', 'MULTIPOLYGON']:
+                        # Check for IDL crossing after longitude normalization
+                        aCoord = get_geometry_coordinates(fixed_geometry)
+                        bCross_idl, aCoord_updated = check_cross_international_date_line_polygon(aCoord)
+
+                        if bCross_idl:
+                            idl_crossing_count += 1
+                            logger.info(f"Feature ID {pFeature.GetFID()} crosses the International Date Line. Splitting...")
+
+                            [eastern_polygon, western_polygon] = split_international_date_line_polygon_coordinates(aCoord)
+
+                            # Create a multipolygon geometry
+                            pGeometry_multi = ogr.Geometry(ogr.wkbMultiPolygon)
+
+                            # Create eastern polygon
+                            pPolygon_eastern = ogr.Geometry(ogr.wkbPolygon)
+                            pLinearRing_eastern = ogr.Geometry(ogr.wkbLinearRing)
+                            for coord in eastern_polygon:
+                                pLinearRing_eastern.AddPoint(coord[0], coord[1])
+                            pLinearRing_eastern.CloseRings()
+                            pPolygon_eastern.AddGeometry(pLinearRing_eastern)
+                            pGeometry_multi.AddGeometry(pPolygon_eastern)
+
+                            # Create western polygon
+                            pPolygon_western = ogr.Geometry(ogr.wkbPolygon)
+                            pLinearRing_western = ogr.Geometry(ogr.wkbLinearRing)
+                            for coord in western_polygon:
+                                pLinearRing_western.AddPoint(coord[0], coord[1])
+                            pLinearRing_western.CloseRings()
+                            pPolygon_western.AddGeometry(pLinearRing_western)
+                            pGeometry_multi.AddGeometry(pPolygon_western)
+
+                            final_geometry = pGeometry_multi
+                        else:
+                            if aCoord_updated is not None:
+                                # Update fixed_geometry with adjusted coordinates to create a polygon, usually because of IDL
+                                fixed_geometry = create_geometry_from_coordinates(aCoord_updated, geometry_type)
+                            else:
+                                final_geometry = fixed_geometry
+                    else:
+                        final_geometry = fixed_geometry
+
+                    # Create output feature
+                    pFeature_out = ogr.Feature(pLayer_out.GetLayerDefn())
+                    pFeature_out.SetGeometry(final_geometry)
+
+                    # Copy all field values
+                    for iField in range(pLayerDefn.GetFieldCount()):
+                        sField_name = pLayerDefn.GetFieldDefn(iField).GetName()
+                        pFeature_out.SetField(sField_name, pFeature.GetField(sField_name))
+
+                    pLayer_out.CreateFeature(pFeature_out)
+                    pFeature_out = None
+
+                    processed_count += 1
+                    if processed_count % 1000 == 0:
+                        logger.info(f"Processed {processed_count}/{nFeatures} features in layer '{layer_name}'...")
+
+                except Exception as e:
+                    logger.error(f"Error processing feature ID {pFeature.GetFID()} in layer '{layer_name}': {str(e)}")
+                    continue
+
+            if handle_idl_crossing and idl_crossing_count > 0:
+                logger.info(f"Layer '{layer_name}': {processed_count} features processed, {idl_crossing_count} IDL crossings handled")
+            else:
+                logger.info(f"Layer '{layer_name}': {processed_count} features processed")
+
+            total_processed += processed_count
+
+        # Cleanup
+        pDataset_out.FlushCache()
+        pDataset_out = None
+        pDataset = None
+
+        logger.info(f"Successfully processed {total_processed} total features and created fixed file: {sFilename_out}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error in fix_mesh_longitude_range_and_idl: {str(e)}")
+        return False
+
+    finally:
+        # Ensure proper cleanup
+        if pDataset_out is not None:
+            pDataset_out.FlushCache()
+            pDataset_out = None
+        if pDataset is not None:
+            pDataset = None
+
+def create_geometry_from_coordinates(aCoord, geometry_type):
+    """
+    Create an OGR Geometry object from coordinate array based on specified geometry type.
+
+    Args:
+        aCoord (np.ndarray): Array of coordinates
+        geometry_type (str): Type of geometry ('POLYGON', 'LINESTRING', etc.)
+
+    Returns:
+        OGR Geometry object
+    """
+    if geometry_type == 'POLYGON':
+        pPolygon = ogr.Geometry(ogr.wkbPolygon)
+        pLinearRing = ogr.Geometry(ogr.wkbLinearRing)
+        for coord in aCoord:
+            pLinearRing.AddPoint(coord[0], coord[1])
+        pLinearRing.CloseRings()
+        pPolygon.AddGeometry(pLinearRing)
+        return pPolygon
+    elif geometry_type == 'LINESTRING':
+        pLineString = ogr.Geometry(ogr.wkbLineString)
+        for coord in aCoord:
+            pLineString.AddPoint(coord[0], coord[1])
+        return pLineString
+    elif geometry_type == 'POINT':
+        pPoint = ogr.Geometry(ogr.wkbPoint)
+        pPoint.AddPoint(aCoord[0][0], aCoord[0][1])
+        return pPoint
+    else:
+        logger.error(f"Unsupported geometry type for creation: {geometry_type}")
+        return None
+
+def check_geometry_contains_pole(geometry: ogr.Geometry, pole: str = 'both') -> Tuple[bool, bool]:
+    """
+    Check if a geometry contains the North Pole, South Pole, or both.
+
+    Parameters
+    ----------
+    geometry : ogr.Geometry
+        The OGR geometry to check
+    pole : str, default='both'
+        Which pole(s) to check: 'north', 'south', or 'both'
+
+    Returns
+    -------
+    Tuple[bool, bool]
+        (contains_north_pole, contains_south_pole)
+    """
+    if geometry is None or geometry.IsEmpty():
+        return False, False
+
+    # Create pole points
+    north_pole = ogr.Geometry(ogr.wkbPoint)
+    north_pole.AddPoint(0.0, 90.0)  # Longitude can be any value at pole
+
+    south_pole = ogr.Geometry(ogr.wkbPoint)
+    south_pole.AddPoint(0.0, -90.0)
+
+    aCoord = get_geometry_coordinates(geometry)
+    if np.min(np.abs(aCoord[:, 1])) >88.0:
+        return False, False
+
+    contains_north = False
+    contains_south = False
+
+    if pole in ['north', 'both']:
+        contains_north = geometry.Contains(north_pole)
+
+    if pole in ['south', 'both']:
+        contains_south = geometry.Contains(south_pole)
+
+    return contains_north, contains_south

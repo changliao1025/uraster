@@ -62,6 +62,7 @@ class uraster:
         self.nCell = -1
         self.nCell_source = -1
         self.nCell_target = -1
+        self.nPolygon = -1
         self.nVertex_max = 0  # Will be calculated dynamically
 
         # Mesh topology data
@@ -334,8 +335,9 @@ class uraster:
 
         #check mesh geometry_validity, if there are invalid range, return None
         #if there are cell cross IDL, need to split the cell into two parts, but it will valid
-        if not self.check_mesh_geometry_validity():
-            return None
+        self.sFilename_source_mesh = self.check_mesh_geometry_validity(iFlag_verbose_in=iFlag_verbose_in)
+        if not self.sFilename_source_mesh:
+         return None
 
         # Setup and validate the mesh cell ID field
         if not self.setup_mesh_cellid():
@@ -380,7 +382,7 @@ class uraster:
 
     def check_mesh_geometry_validity(self, iFlag_verbose_in=False):
 
-        return utility.check_geometry_validity(self.sFilename_source_mesh, iFlag_verbose_in=iFlag_verbose_in)
+        return utility.check_mesh_quality(self.sFilename_source_mesh, iFlag_verbose_in=iFlag_verbose_in)
 
     def setup_mesh_cellid(self):
         """
@@ -629,7 +631,8 @@ class uraster:
         self.dArea_max = mesh_info['area_max']
         self.dArea_mean = mesh_info['area_mean']
         self.nVertex_max = mesh_info['max_vertices_per_cell']
-        self.nCell_source = mesh_info['num_cells']  # Update cell count
+        self.nPolygon = mesh_info['num_polygns']  # Update cell count
+        self.nCell_source = mesh_info['num_cells']
 
         # Return the traditional tuple format for backward compatibility
         return (mesh_info['vertices_longitude'],

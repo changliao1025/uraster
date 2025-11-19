@@ -734,6 +734,8 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose_in: 
         pFeature = pLayer.GetNextFeature()
         iFeature_count = 0
 
+        iCount_multipolygons = 0
+
         while pFeature is not None:
             pGeometry = pFeature.GetGeometryRef()
             if pGeometry is not None:
@@ -749,6 +751,7 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose_in: 
                         aData_list.append(np.nan)
 
                 elif sGeometry_type == 'MULTIPOLYGON':
+                    iCount_multipolygons += 1
                     # Multipolygon - add the same data value for each polygon part
                     try:
                         dField_value = pFeature.GetField(sVariable)
@@ -763,10 +766,15 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose_in: 
                             if pPolygon_part is not None and pPolygon_part.IsValid():
                                 aData_list.append(dData_value)
                                 iValid_parts += 1
+                            else:
+                                pPolygon_part.FlattenTo2D()
+                                sWkt = pPolygon_part.ExportToWkt()
+                                logger.warning(f'Invalid polygon part {iPart} in multipolygon feature {iFeature_count}: {sWkt} ')
+                                aData_list.append(np.nan)
 
                         if iValid_parts == 0:
                             logger.warning(f'No valid parts found in multipolygon feature {iFeature_count}')
-                            aData_list.append(np.nan)
+                            #aData_list.append(np.nan)
 
                     except Exception as e:
                         logger.warning(f'Error reading field {sVariable} from multipolygon feature {iFeature_count}: {e}')
@@ -997,12 +1005,8 @@ def visualize_target_mesh(self,
         if pData_result is None:
             return False
 
-        aData, nFeatures = pData_result
-        self.nCell_target = nFeatures
+        aData, nFeature = pData_result
 
-        # Validate feature count matches source
-        if self.nCell_source > 0 and self.nCell_target != self.nCell_source:
-            logger.warning(f'Feature count mismatch: target={self.nCell_target}, source={self.nCell_source}')
 
         # Validate data
         aValid_data_mask = np.isfinite(aData)
