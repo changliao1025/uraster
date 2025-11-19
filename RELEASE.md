@@ -126,10 +126,10 @@ For critical bug fixes:
 # Create hotfix branch from main
 git checkout main
 git pull origin main
-git checkout -b hotfix/v0.1.1
+git checkout -b hotfix/v0.1.2
 
 # Make minimal changes to fix the issue
-# Update version to patch level (e.g., 0.1.0 → 0.1.1)
+# Update version to patch level (e.g., 0.1.0 → 0.1.2)
 # Update CHANGELOG.md
 
 # Follow normal release process

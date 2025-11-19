@@ -23,7 +23,7 @@ affiliations:
 
   - name: University of Calgary, Calgary, Canada
     index: 2
-    
+
 date: 13 Nov 2025
 
 bibliography: paper.bib
@@ -79,7 +79,7 @@ PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-7
 
 # References
 
-Liao, C. (2025). uraster: A Python package to transform raster data to unstructured mesh using GDAL. (v0.1.1). Zenodo. https://doi.org/10.5281/zenodo.17613497
+Liao, C. (2025). uraster: A Python package to transform raster data to unstructured mesh using GDAL. (v0.1.2). Zenodo. https://doi.org/10.5281/zenodo.17613497
 
 
 
