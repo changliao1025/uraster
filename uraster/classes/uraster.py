@@ -58,6 +58,9 @@ class uraster:
         self.aFilename_source_raster = aConfig.get(
             'aFilename_source_raster', [])
 
+        self.iFlag_polar = aConfig.get('iFlag_polar', 0)  # Default to 0 (non-polar)
+        self.iFlag_global = aConfig.get('iFlag_global', 1)  # Default to 1 (global)
+
         # Cell counts
         self.nCell = -1
         self.nCell_source = -1
