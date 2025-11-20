@@ -35,29 +35,107 @@ Here's a simple example to convert raster data to an unstructured mesh:
    config = {
        'sFilename_source_mesh': 'path/to/your/mesh.geojson',
        'aFilename_source_raster': ['path/to/your/raster.tif'],
-       'sFilename_target_mesh': 'path/to/output/mesh_with_stats.geojson'
+       'sFilename_target_mesh': 'path/to/output/mesh_with_stats.geojson',
+       'iFlag_remap_method': 1,  # 1=nearest neighbor, 2=bilinear, 3=weighted average
+       'sField_unique_id': 'cellid',  # Field name for unique cell IDs
+       'iFlag_global': 1,  # 1 for global datasets, 0 for regional
+       'iFlag_polar': 0   # 1 if data includes polar regions, 0 otherwise
    }
 
    # Create uraster instance
    processor = uraster(config)
 
    # Setup and validate inputs
-   processor.setup(iFlag_verbose=True)
+   processor.setup(iFlag_verbose_in=True)
 
    # Run zonal statistics to transfer raster values to mesh
-   processor.run_remap(iFlag_verbose=True)
+   processor.run_remap(iFlag_verbose_in=True)
 
-**3. Visualization (Optional)**
+**2a. Advanced Configuration**
 
-Visualize your results:
+For more control over processing:
 
 .. code-block:: python
 
-   # Visualize the output mesh with statistics
+   # Advanced configuration with discrete data support
+   config_advanced = {
+       'sFilename_source_mesh': 'path/to/your/mesh.geojson',
+       'aFilename_source_raster': ['path/to/discrete_raster.tif'],
+       'sFilename_target_mesh': 'path/to/output/mesh_with_stats.geojson',
+       'iFlag_remap_method': 1,  # Only method 1 supported for discrete data
+       'sField_unique_id': 'cellid'
+   }
+
+   processor = uraster(config_advanced)
+   processor.setup(iFlag_verbose_in=True)
+
+   # Run with discrete data handling
+   processor.run_remap(
+       iFlag_discrete_in=True,  # Enable discrete data mode
+       iFlag_stat_in=False,     # Disable statistics for discrete data
+       iFlag_verbose_in=True
+   )
+
+**2b. Memory Management**
+
+uraster includes intelligent memory management for large datasets:
+
+.. code-block:: python
+
+   # Configure memory management
+   processor.set_cache_threshold(threshold_mb=200)  # Set cache threshold to 200MB
+
+   # Get cache information
+   cache_info = processor._get_cache_info()
+   print(f"Cached files: {cache_info['cached_files']}")
+
+   # Use context manager for data-intensive operations
+   with processor.get_sraster_with_data('large_raster.tif') as raster:
+       raster.read_data()  # Process large raster data
+       # Automatic cleanup when exiting context
+
+**3. Visualization (Optional)**
+
+Visualize your results using the enhanced GeoVista 3D visualization:
+
+.. code-block:: python
+
+   # Basic visualization of the output mesh with statistics
    processor.visualize_target_mesh(
        sVariable_in='mean',
        sFilename_out='output_visualization.png',
        sColormap='viridis'
+   )
+
+   # Advanced visualization with custom focus and styling
+   processor.visualize_target_mesh(
+       sVariable_in='mean',
+       sUnit_in='mm/year',  # Unit label for colorbar
+       sFilename_out='advanced_viz.png',
+       dLongitude_focus_in=-100.0,  # Focus on Americas
+       dLatitude_focus_in=45.0,
+       dZoom_factor=0.8,
+       iFlag_show_coastlines=True,
+       iFlag_show_graticule=True,
+       sColormap='plasma'
+   )
+
+   # Create rotating animation
+   processor.visualize_target_mesh(
+       sVariable_in='mean',
+       sFilename_out='rotation_animation.mp4',
+       iFlag_create_animation=True,
+       iAnimation_frames=72,  # 5° per frame for smooth rotation
+       sAnimation_format='mp4',
+       iFlag_verbose_in=True
+   )
+
+   # Visualize source mesh topology
+   processor.visualize_source_mesh(
+       sFilename_out='source_mesh.png',
+       dLongitude_focus_in=0.0,
+       dLatitude_focus_in=0.0,
+       iFlag_show_coastlines=True
    )
 
 **4. Examples**

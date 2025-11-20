@@ -16,10 +16,31 @@ pip install -e .
 
 ## Dependencies
 
+### Core Dependencies
 - Python >= 3.8
 - numpy >= 1.19.0
 - GDAL >= 3.0.0
-- psutil >= 5.0.0
+- osgeo (GDAL Python bindings)
+- pyearth >= 0.1.0
+
+### Optional Dependencies
+- psutil >= 5.0.0 (for memory monitoring)
+- geovista >= 0.1.0 (for 3D visualization)
+- imageio[ffmpeg] (for animation creation)
+
+### Installing Optional Dependencies
+
+For full functionality including 3D visualization and animations:
+
+```bash
+pip install geovista imageio[ffmpeg] psutil
+```
+
+Or install with conda:
+
+```bash
+conda install -c conda-forge geovista imageio psutil
+```
 
 ### Installing GDAL
 
