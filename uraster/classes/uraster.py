@@ -92,6 +92,184 @@ class uraster:
                 f"Invalid remap method {self.iFlag_remap_method}, defaulting to 1 (nearest neighbor)")
             self.iFlag_remap_method = 1
 
+        # Memory management: raster caching infrastructure
+        self._raster_cache = {}  # filename -> sraster instance (metadata only)
+        self._cache_size_threshold = 100 * 1024 * 1024  # 100MB threshold for caching decisions
+        self._cache_enabled = True  # Allow disabling cache if needed
+
+    def _get_sraster(self, sFilename_or_aFilename, load_data=False, use_cache=True, iFlag_verbose_in=False):
+        """
+        Get sraster instance(s) with intelligent caching for single files or tiled datasets.
+
+        Args:
+            sFilename_or_aFilename (str or list): Single raster file path or list of tiled raster files
+            load_data (bool): Whether to load raster data array (memory intensive)
+            use_cache (bool): Whether to use/create cached instances
+            iFlag_verbose_in (bool): Enable verbose logging
+
+        Returns:
+            sraster or list: Single sraster instance or list of sraster instances
+
+        Note:
+            - Supports both single files and tiled datasets (list of files)
+            - Small files (< 100MB): Cache metadata for fast repeated access
+            - Large files (> 100MB): Create transient instances to prevent memory issues
+            - For tiled datasets: Efficiently handles metadata caching across all tiles
+        """
+        # Handle single file case
+        if isinstance(sFilename_or_aFilename, str):
+            return self._get_single_sraster(sFilename_or_aFilename, load_data, use_cache, iFlag_verbose_in)
+
+        # Handle list of files (tiled dataset)
+        elif isinstance(sFilename_or_aFilename, (list, tuple)):
+            if iFlag_verbose_in:
+                logger.info(f"Processing tiled dataset with {len(sFilename_or_aFilename)} raster files")
+
+            sraster_list = []
+            for idx, sFilename in enumerate(sFilename_or_aFilename):
+                if iFlag_verbose_in:
+                    logger.info(f"  Processing tile {idx+1}/{len(sFilename_or_aFilename)}: {os.path.basename(sFilename)}")
+
+                pRaster = self._get_single_sraster(sFilename, load_data, use_cache, iFlag_verbose_in)
+                sraster_list.append(pRaster)
+
+            if iFlag_verbose_in:
+                cached_count = sum(1 for f in sFilename_or_aFilename if f in self._raster_cache)
+                logger.info(f"Tiled dataset processed: {cached_count}/{len(sFilename_or_aFilename)} tiles cached")
+
+            return sraster_list
+
+        else:
+            raise ValueError(f"sFilename_or_aFilename must be str or list, got {type(sFilename_or_aFilename)}")
+
+    def _get_single_sraster(self, sFilename, load_data=False, use_cache=True, iFlag_verbose_in=False):
+        """
+        Get single sraster instance with intelligent caching.
+
+        Internal method used by _get_sraster for individual file processing.
+        """
+        if not self._cache_enabled or not use_cache:
+            # Cache disabled or explicitly requested not to cache
+            if iFlag_verbose_in:
+                logger.debug(f"Creating transient sraster instance for: {os.path.basename(sFilename)}")
+            pRaster = sraster(sFilename)
+            pRaster.read_metadata()
+            return pRaster
+
+        # Check if we already have this file cached
+        if sFilename in self._raster_cache:
+            if iFlag_verbose_in:
+                logger.debug(f"Using cached sraster metadata for: {os.path.basename(sFilename)}")
+            return self._raster_cache[sFilename]
+
+        # File not cached, need to decide whether to cache it
+        try:
+            file_size = os.path.getsize(sFilename) if os.path.exists(sFilename) else 0
+            should_cache = file_size < self._cache_size_threshold
+
+            if iFlag_verbose_in:
+                size_mb = file_size / (1024 * 1024)
+                threshold_mb = self._cache_size_threshold / (1024 * 1024)
+                logger.debug(f"Raster {os.path.basename(sFilename)}: {size_mb:.1f}MB "
+                           f"(threshold: {threshold_mb:.0f}MB, will_cache: {should_cache})")
+
+            pRaster = sraster(sFilename)
+            pRaster.read_metadata()
+
+            if should_cache and not load_data:
+                # Cache metadata only for small files
+                self._raster_cache[sFilename] = pRaster
+                if iFlag_verbose_in:
+                    logger.debug(f"Cached metadata for: {os.path.basename(sFilename)}")
+            elif should_cache and load_data:
+                if iFlag_verbose_in:
+                    logger.debug(f"Small file but data requested - not caching to avoid memory bloat: {os.path.basename(sFilename)}")
+            else:
+                if iFlag_verbose_in:
+                    logger.debug(f"Large file - using transient instance: {os.path.basename(sFilename)}")
+
+            return pRaster
+
+        except Exception as e:
+            logger.warning(f"Error in _get_single_sraster for {sFilename}: {e}")
+            # Fallback to simple creation
+            pRaster = sraster(sFilename)
+            pRaster.read_metadata()
+            return pRaster
+
+    def _clear_raster_cache(self):
+        """Clear the raster cache to free memory."""
+        if self._raster_cache:
+            cache_count = len(self._raster_cache)
+            self._raster_cache.clear()
+            logger.info(f"Cleared raster cache ({cache_count} instances freed)")
+
+    def _get_cache_info(self):
+        """Get information about current cache state."""
+        return {
+            'cached_files': len(self._raster_cache),
+            'cache_enabled': self._cache_enabled,
+            'size_threshold_mb': self._cache_size_threshold / (1024 * 1024),
+            'cached_filenames': [os.path.basename(f) for f in self._raster_cache.keys()]
+        }
+
+    def get_sraster_with_data(self, sFilename_or_aFilename, iFlag_verbose_in=False):
+        """
+        Context manager for data-intensive sraster operations.
+
+        Ensures proper cleanup of memory-intensive operations by creating
+        transient instances that are automatically cleaned up after use.
+
+        Args:
+            sFilename_or_aFilename (str or list): Single file or list of raster files
+            iFlag_verbose_in (bool): Enable verbose logging
+
+        Returns:
+            context manager: Yields sraster instance(s) with data loaded
+
+        Example:
+            with self.get_sraster_with_data('large_file.tif') as pRaster:
+                pRaster.read_data()  # Load pixel data
+                # Process data here
+                # Automatic cleanup when exiting context
+        """
+        class SRasterDataContext:
+            def __init__(self, uraster_instance, filename_or_list, verbose):
+                self.uraster_instance = uraster_instance
+                self.filename_or_list = filename_or_list
+                self.verbose = verbose
+                self.sraster_instances = None
+
+            def __enter__(self):
+                # Always create fresh instances for data operations, never cache data
+                self.sraster_instances = self.uraster_instance._get_sraster(
+                    self.filename_or_list,
+                    load_data=False,  # Don't preload data, let user control when
+                    use_cache=False,  # Never cache data-intensive instances
+                    iFlag_verbose_in=self.verbose
+                )
+                return self.sraster_instances
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                # Cleanup: explicitly release any data arrays if they exist
+                if isinstance(self.sraster_instances, list):
+                    for pRaster in self.sraster_instances:
+                        if hasattr(pRaster, 'aData') and pRaster.aData is not None:
+                            pRaster.aData = None
+                        if hasattr(pRaster, 'pDataset') and pRaster.pDataset is not None:
+                            pRaster.pDataset = None
+                else:
+                    pRaster = self.sraster_instances
+                    if hasattr(pRaster, 'aData') and pRaster.aData is not None:
+                        pRaster.aData = None
+                    if hasattr(pRaster, 'pDataset') and pRaster.pDataset is not None:
+                        pRaster.pDataset = None
+
+                if self.verbose:
+                    logger.debug("Released data arrays for memory cleanup")
+
+        return SRasterDataContext(self, sFilename_or_aFilename, iFlag_verbose_in)
+
     def setup(self, iFlag_verbose_in=False):
         """
         Initialize and validate the uraster configuration.
@@ -219,9 +397,8 @@ class uraster:
                     f'Processing raster {idx}/{len(aFilename_source_raster)}: {os.path.basename(sFilename_raster_in)}')
 
             try:
-                # Create sraster instance and read metadata
-                pRaster = sraster(sFilename_raster_in)
-                pRaster.read_metadata()
+                # Create sraster instance using intelligent caching and read metadata
+                pRaster = self._get_sraster(sFilename_raster_in, load_data=False, use_cache=True, iFlag_verbose_in=iFlag_verbose_in)
 
                 # Validate critical metadata
                 if pRaster.pSpatialRef_wkt is None:
@@ -308,7 +485,72 @@ class uraster:
             logger.info(
                 f'Successfully validated and prepared {len(aFilename_source_raster_out)} raster file(s)')
 
+        # Handle cache invalidation when raster list changes due to reprojection
+        self._handle_raster_list_update(aFilename_source_raster, aFilename_source_raster_out, iFlag_verbose_in)
+
+        self.aFilename_source_raster = aFilename_source_raster_out
         return aFilename_source_raster_out
+
+    def _handle_raster_list_update(self, aFilename_original, aFilename_processed, iFlag_verbose_in=False):
+        """
+        Handle cache invalidation when raster file list changes due to reprojection.
+
+        When rasters are reprojected to WGS84, the output filenames differ from input filenames.
+        This invalidates cached instances for the original files and requires cache management.
+
+        Args:
+            aFilename_original (list): Original input raster filenames
+            aFilename_processed (list): Processed/reprojected raster filenames
+            iFlag_verbose_in (bool): Enable verbose logging
+        """
+        if not self._cache_enabled or not self._raster_cache:
+            return
+
+        files_changed = aFilename_original != aFilename_processed
+
+        if files_changed:
+            if iFlag_verbose_in:
+                logger.info("Raster file list changed due to reprojection - managing cache...")
+
+            # Count how many files were reprojected
+            original_set = set(aFilename_original)
+            processed_set = set(aFilename_processed)
+            reprojected_count = len(original_set - processed_set)
+
+            if reprojected_count > 0:
+                if iFlag_verbose_in:
+                    logger.info(f"  - {reprojected_count} file(s) were reprojected")
+
+                # Remove cache entries for original files that were reprojected
+                cache_keys_to_remove = []
+                for original_file in aFilename_original:
+                    if original_file not in processed_set and original_file in self._raster_cache:
+                        cache_keys_to_remove.append(original_file)
+
+                for key in cache_keys_to_remove:
+                    del self._raster_cache[key]
+                    if iFlag_verbose_in:
+                        logger.debug(f"  - Removed cache entry for: {os.path.basename(key)}")
+
+                if cache_keys_to_remove:
+                    logger.info(f"  - Cleared {len(cache_keys_to_remove)} stale cache entries")
+
+                # Pre-cache metadata for new reprojected files if they're small enough
+                if iFlag_verbose_in:
+                    logger.info("  - Pre-caching metadata for reprojected files...")
+
+                for processed_file in aFilename_processed:
+                    if processed_file not in aFilename_original:  # This is a new reprojected file
+                        try:
+                            # Use _get_sraster to apply intelligent caching logic
+                            self._get_sraster(processed_file, load_data=False, use_cache=True, iFlag_verbose_in=False)
+                        except Exception as e:
+                            if iFlag_verbose_in:
+                                logger.warning(f"  - Could not pre-cache {os.path.basename(processed_file)}: {e}")
+
+        else:
+            if iFlag_verbose_in:
+                logger.debug("No raster reprojection needed - cache remains valid")
 
     def check_mesh_file(self, iFlag_verbose_in=False):
         """
@@ -688,8 +930,8 @@ class uraster:
         for idx, sFilename in enumerate(self.aFilename_source_raster, 1):
             print(f"\n[{idx}] {sFilename}")
             try:
-                pRaster = sraster(sFilename)
-                pRaster.read_metadata()
+                # Use cached sraster instance for metadata access
+                pRaster = self._get_sraster(sFilename, load_data=False, use_cache=True, iFlag_verbose_in=False)
                 pRaster.print_info()
             except Exception as e:
                 logger.error(f"Error reading raster info: {e}")
@@ -776,10 +1018,9 @@ class uraster:
         if iFlag_weighted_average_in:
             # call the polygon calculation with weighted average
             sFilename_raster = aFilename_source_raster[0]
-            pRaster = sraster(sFilename_raster)
-            pRaster.read_metadata()
-            #sFilename_raster_mesh = pRaster.create_raster_mesh()
-            sFilename_raster_mesh = pRaster.sFilename_mesh
+            # Use cached sraster instance for metadata access
+            pRaster = self._get_sraster(sFilename_raster, load_data=False, use_cache=True, iFlag_verbose_in=iFlag_verbose_in)
+            sFilename_raster_mesh = pRaster.create_raster_mesh()
             return intersect.run_remap(
                 sFilename_target_mesh,
                 sFilename_source_mesh,
@@ -954,12 +1195,49 @@ class uraster:
 
     def cleanup(self):
         """
-        Cleanup method to release spatial reference objects and other resources.
+        Comprehensive cleanup method to release spatial reference objects,
+        cached raster instances, and other resources.
         """
         try:
+            # Clean up raster cache
+            if hasattr(self, '_raster_cache') and self._raster_cache:
+                cache_count = len(self._raster_cache)
+                self._raster_cache.clear()
+                logger.debug(f'Cleared raster cache ({cache_count} instances)')
+
+            # Clean up spatial reference objects
             if hasattr(self, 'pSpatialRef') and self.pSpatialRef is not None:
                 self.pSpatialRef = None
-                logger.debug(
-                    'Spatial reference object cleaned up successfully')
+                logger.debug('Spatial reference object cleaned up successfully')
+
+            # Reset cache configuration
+            if hasattr(self, '_cache_enabled'):
+                self._cache_enabled = True  # Reset to default state
+
         except Exception as e:
-            logger.warning(f'Error during cleanup of spatial reference: {e}')
+            logger.warning(f'Error during cleanup: {e}')
+
+    def set_cache_enabled(self, enabled=True):
+        """
+        Enable or disable raster caching.
+
+        Args:
+            enabled (bool): Whether to enable caching. Default is True.
+
+        Note:
+            Disabling cache clears existing cached instances.
+        """
+        if not enabled and hasattr(self, '_raster_cache'):
+            self._clear_raster_cache()
+        self._cache_enabled = enabled
+        logger.info(f"Raster caching {'enabled' if enabled else 'disabled'}")
+
+    def set_cache_threshold(self, threshold_mb=100):
+        """
+        Set the file size threshold for caching decisions.
+
+        Args:
+            threshold_mb (int): File size threshold in megabytes. Default is 100MB.
+        """
+        self._cache_size_threshold = threshold_mb * 1024 * 1024
+        logger.info(f"Cache size threshold set to {threshold_mb}MB")

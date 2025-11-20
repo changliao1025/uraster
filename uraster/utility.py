@@ -295,6 +295,7 @@ def _validate_multipolygon_geometry(pGeometry, feature_id, iFlag_verbose_in=Fals
         logger.warning(f'Feature {feature_id}: Error validating multipolygon geometry: {str(e)}')
         return False
 
+
 def get_polygon_list(
     sFilename_source_mesh: str,
     iFlag_verbose_in: bool = False,
@@ -758,7 +759,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             cell_lats_1d = []
             # Pre-allocate arrays for better performance
             cell_lons_1d = np.zeros(len(lons_list), dtype=np.float64)
-            cell_lats_1d = np.zeros(len(lons_list), dtype=np.float64)
+            cell_lats_1d = np.zeros(len(lats_list), dtype=np.float64)
             for i in range(len(lons_list)):
                 # Calculate centroid of each cell (ignoring NaN values)
                 valid_mask = ~np.isnan(lons[i])
@@ -916,41 +917,6 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
         logger.error(f'Unexpected error in rebuild_mesh_topology: {str(e)}')
         logger.error(f'Traceback: {traceback.format_exc()}')
         return None
-
-def normalize_longitude(lon):
-    """
-    Normalize longitude to [-180, 180] range by wrapping.
-    Optimized using modular arithmetic instead of loops.
-
-    Args:
-        lon (float): Longitude value
-
-    Returns:
-        float: Normalized longitude in [-180, 180] range
-    """
-    # Use modular arithmetic for O(1) normalization
-    normalized = ((lon + 180) % 360) - 180
-    return normalized
-
-def fix_coordinates(coords):
-    """
-    Recursively fix longitude values in coordinate arrays.
-    Handles nested coordinate structures for different geometry types.
-
-    Args:
-        coords: Coordinate array (can be nested)
-
-    Returns:
-        Fixed coordinate array with normalized longitudes
-    """
-    if not coords:
-        return coords
-
-    # Check if this is a coordinate pair [lon, lat]
-    if isinstance(coords[0], (int, float)):
-        return [normalize_longitude(coords[0]), coords[1]]
-    else:
-        return [fix_coordinates(coord) for coord in coords]
 
 def fix_longitude_range_gdal(geometry, in_place=False):
     """
