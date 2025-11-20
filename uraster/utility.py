@@ -1,16 +1,17 @@
+from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
+from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
+from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
+from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 import os
 import logging
 import traceback
 from typing import Optional, Tuple, List, Dict, Any, Union
 import numpy as np
+from numpy.typing import NDArray
 from osgeo import gdal, ogr
 from uraster.classes.sraster import sraster
 gdal.UseExceptions()
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
-from pyearth.gis.geometry.international_date_line_utility import split_international_date_line_polygon_coordinates, check_cross_international_date_line_polygon
-from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import extract_unique_vertices_and_connectivity
 # Try to import psutil for memory monitoring (optional)
 try:
     import psutil
@@ -22,6 +23,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
 # Utility functions for common operations
+
 
 def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
     """
@@ -41,6 +43,7 @@ def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
         logger.info(f"Memory usage at {stage}: {memory_mb:.1f} MB")
     except Exception as e:
         logger.debug(f"Could not get memory usage: {e}")
+
 
 def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool = False) -> bool:
     """
@@ -67,7 +70,8 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
             return False
 
         if iFlag_verbose_in:
-            logger.info(f'Successfully opened mesh file: {sFilename_source_mesh}')
+            logger.info(
+                f'Successfully opened mesh file: {sFilename_source_mesh}')
 
         # Get the first layer
         pLayer = pDataset.GetLayer(0)
@@ -116,15 +120,17 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
             sGeometry_type = pGeometry.GetGeometryName()
 
             aCoord = get_geometry_coordinates(pGeometry)
-            #also check longitude and latitude range -180-180
+            # also check longitude and latitude range -180-180
             if aCoord is None or len(aCoord) < 3:
-                logger.warning(f'Feature {iFeature_index}: Invalid or insufficient coordinates')
+                logger.warning(
+                    f'Feature {iFeature_index}: Invalid or insufficient coordinates')
                 invalid_geometry_count += 1
                 iFeature_index += 1
                 continue
-            if (np.any(aCoord[:,0] < -180) or np.any(aCoord[:,0] > 180) or
-                np.any(aCoord[:,1] < -90) or np.any(aCoord[:,1] > 90)):
-                logger.warning(f'Feature {iFeature_index}: Coordinates out of valid range')
+            if (np.any(aCoord[:, 0] < -180) or np.any(aCoord[:, 0] > 180) or
+                    np.any(aCoord[:, 1] < -90) or np.any(aCoord[:, 1] > 90)):
+                logger.warning(
+                    f'Feature {iFeature_index}: Coordinates out of valid range')
                 invalid_geometry_count += 1
                 iFeature_index += 1
                 continue
@@ -142,11 +148,13 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
                     valid_geometry_count += 1
 
             elif sGeometry_type in ['POINT', 'LINESTRING']:
-                logger.warning(f'Feature {iFeature_index}: Geometry type {sGeometry_type} not supported for mesh processing')
+                logger.warning(
+                    f'Feature {iFeature_index}: Geometry type {sGeometry_type} not supported for mesh processing')
                 invalid_geometry_count += 1
 
             else:
-                logger.warning(f'Feature {iFeature_index}: Unknown geometry type {sGeometry_type}')
+                logger.warning(
+                    f'Feature {iFeature_index}: Unknown geometry type {sGeometry_type}')
                 invalid_geometry_count += 1
 
             iFeature_index += 1
@@ -156,7 +164,8 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
 
         # Report validation results
         total_features = valid_geometry_count + invalid_geometry_count
-        success_rate = (valid_geometry_count / total_features * 100) if total_features > 0 else 0
+        success_rate = (valid_geometry_count / total_features *
+                        100) if total_features > 0 else 0
 
         if iFlag_verbose_in or invalid_geometry_count > 0:
             logger.info(f'Geometry validation summary:')
@@ -166,7 +175,8 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
             logger.info(f'  - Success rate: {success_rate:.1f}%')
 
         if invalid_geometry_count > 0:
-            logger.warning('Found invalid geometries. The program will attempt to fix them.')
+            logger.warning(
+                'Found invalid geometries. The program will attempt to fix them.')
             return False
 
         if iFlag_verbose_in:
@@ -179,18 +189,32 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
         logger.error(f'Traceback: {traceback.format_exc()}')
         return False
 
-def check_mesh_quality(sFilename_mesh_in, iFlag_verbose_in=False):
+
+def check_mesh_quality(sFilename_mesh_in: str, iFlag_verbose_in: bool = False) -> str:
+    """
+    Check mesh quality and fix if necessary.
+
+    Args:
+        sFilename_mesh_in (str): Path to the input mesh file
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
+            Default is False.
+
+    Returns:
+        str: Path to the validated/fixed mesh file
+    """
     if not check_geometry_validity(sFilename_mesh_in, iFlag_verbose_in=iFlag_verbose_in):
         # we need to fix the mesh using the IDL splitting utility
         # Make the filename adjustment more flexible to handle any format
         # Get the file extension and base name
         file_base, file_ext = os.path.splitext(sFilename_mesh_in)
         sFilename_source_mesh_fixed = f"{file_base}_fixed{file_ext}"
-        fix_mesh_longitude_range_and_idl_crossing(sFilename_mesh_in, sFilename_source_mesh_fixed)
+        fix_mesh_longitude_range_and_idl_crossing(
+            sFilename_mesh_in, sFilename_source_mesh_fixed)
         return sFilename_source_mesh_fixed
     return sFilename_mesh_in
 
-def _validate_polygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
+
+def _validate_polygon_geometry(pGeometry: 'ogr.Geometry', feature_id: Union[int, str], iFlag_verbose_in: bool = False) -> bool:
     """
     Validate a single polygon geometry including coordinate range and IDL checks.
 
@@ -206,7 +230,8 @@ def _validate_polygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
         # Get coordinates
         aCoord = get_geometry_coordinates(pGeometry)
         if aCoord is None or len(aCoord) < 3:
-            logger.warning(f'Feature {feature_id}: Invalid or insufficient coordinates for polygon')
+            logger.warning(
+                f'Feature {feature_id}: Invalid or insufficient coordinates for polygon')
             return False
 
         # Validate coordinate bounds
@@ -215,29 +240,36 @@ def _validate_polygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
 
         # Check coordinate ranges
         if (np.any(lons < -180) or np.any(lons > 180) or
-            np.any(lats < -90) or np.any(lats > 90)):
-            logger.warning(f'Feature {feature_id}: Coordinates outside valid range')
-            logger.warning(f'  Longitude range: {lons.min():.3f} to {lons.max():.3f}')
-            logger.warning(f'  Latitude range: {lats.min():.3f} to {lats.max():.3f}')
+                np.any(lats < -90) or np.any(lats > 90)):
+            logger.warning(
+                f'Feature {feature_id}: Coordinates outside valid range')
+            logger.warning(
+                f'  Longitude range: {lons.min():.3f} to {lons.max():.3f}')
+            logger.warning(
+                f'  Latitude range: {lats.min():.3f} to {lats.max():.3f}')
             return False
 
         # Check for International Date Line crossing (this is allowed but logged)
         iCross_idl, dummy = check_cross_international_date_line_polygon(aCoord)
         if iCross_idl:
             if iFlag_verbose_in:
-                logger.info(f'Feature {feature_id}: Polygon crosses International Date Line (valid)')
+                logger.info(
+                    f'Feature {feature_id}: Polygon crosses International Date Line (valid)')
         else:
-            #use gdal geometry validity check only when it does not cross IDL
+            # use gdal geometry validity check only when it does not cross IDL
             if not pGeometry.IsValid():
-                logger.warning(f'Feature {feature_id}: Polygon geometry is invalid according to OGR')
+                logger.warning(
+                    f'Feature {feature_id}: Polygon geometry is invalid according to OGR')
                 return False
         return True
 
     except Exception as e:
-        logger.warning(f'Feature {feature_id}: Error validating polygon geometry: {str(e)}')
+        logger.warning(
+            f'Feature {feature_id}: Error validating polygon geometry: {str(e)}')
         return False
 
-def _validate_multipolygon_geometry(pGeometry, feature_id, iFlag_verbose_in=False):
+
+def _validate_multipolygon_geometry(pGeometry: 'ogr.Geometry', feature_id: Union[int, str], iFlag_verbose_in: bool = False) -> bool:
     """
     Validate a multipolygon geometry by checking all constituent polygons.
 
@@ -260,7 +292,8 @@ def _validate_multipolygon_geometry(pGeometry, feature_id, iFlag_verbose_in=Fals
         for iPart in range(total_parts):
             pPolygon_part = pGeometry.GetGeometryRef(iPart)
             if pPolygon_part is None:
-                logger.warning(f'Feature {feature_id}: Multipolygon part {iPart} is None')
+                logger.warning(
+                    f'Feature {feature_id}: Multipolygon part {iPart} is None')
                 continue
 
             # Skip GDAL geometry validation as it cannot handle IDL-crossing cells
@@ -268,7 +301,8 @@ def _validate_multipolygon_geometry(pGeometry, feature_id, iFlag_verbose_in=Fals
             # Validate coordinates of this part
             aCoord_part = get_geometry_coordinates(pPolygon_part)
             if aCoord_part is None or len(aCoord_part) < 3:
-                logger.warning(f'Feature {feature_id}: Multipolygon part {iPart} has insufficient coordinates')
+                logger.warning(
+                    f'Feature {feature_id}: Multipolygon part {iPart} has insufficient coordinates')
                 continue
 
             # Check coordinate bounds for this part
@@ -276,24 +310,29 @@ def _validate_multipolygon_geometry(pGeometry, feature_id, iFlag_verbose_in=Fals
             lats_part = aCoord_part[:, 1]
 
             if (np.any(lons_part < -180) or np.any(lons_part > 180) or
-                np.any(lats_part < -90) or np.any(lats_part > 90)):
-                logger.warning(f'Feature {feature_id}: Multipolygon part {iPart} has coordinates outside valid range')
+                    np.any(lats_part < -90) or np.any(lats_part > 90)):
+                logger.warning(
+                    f'Feature {feature_id}: Multipolygon part {iPart} has coordinates outside valid range')
                 continue
 
             valid_parts += 1
 
         if valid_parts == 0:
-            logger.warning(f'Feature {feature_id}: No valid parts found in multipolygon')
+            logger.warning(
+                f'Feature {feature_id}: No valid parts found in multipolygon')
             return False
 
         if iFlag_verbose_in and valid_parts < total_parts:
-            logger.info(f'Feature {feature_id}: Multipolygon has {valid_parts}/{total_parts} valid parts')
+            logger.info(
+                f'Feature {feature_id}: Multipolygon has {valid_parts}/{total_parts} valid parts')
 
         return True
 
     except Exception as e:
-        logger.warning(f'Feature {feature_id}: Error validating multipolygon geometry: {str(e)}')
+        logger.warning(
+            f'Feature {feature_id}: Error validating multipolygon geometry: {str(e)}')
         return False
+
 
 def get_polygon_list(
     sFilename_source_mesh: str,
@@ -395,9 +434,11 @@ def get_polygon_list(
                     pField_defn = pLayer_mesh.GetLayerDefn().GetFieldDefn(
                         pLayer_mesh.GetLayerDefn().GetFieldIndex(sField_unique_id))
                     if pField_defn.GetType() == ogr.OFTString:
-                        current_cellid = pFeature_mesh.GetFieldAsString(sField_unique_id)
+                        current_cellid = pFeature_mesh.GetFieldAsString(
+                            sField_unique_id)
                     else:
-                        current_cellid = pFeature_mesh.GetFieldAsInteger(sField_unique_id)
+                        current_cellid = pFeature_mesh.GetFieldAsInteger(
+                            sField_unique_id)
 
                     if current_cellid is None or current_cellid == '':
                         current_cellid = i  # Use feature index as fallback
@@ -414,7 +455,7 @@ def get_polygon_list(
                             i += 1
                             continue
 
-                        #no more need to split IDL crossing polygon here, as we have handled it in check_geometry_validity
+                        # no more need to split IDL crossing polygon here, as we have handled it in check_geometry_validity
                         # Regular polygon (no IDL crossing)
                         try:
                             dArea = calculate_polygon_area(
@@ -513,29 +554,38 @@ def get_polygon_list(
         except Exception as e:
             logger.warning(f"Error cleaning up dataset: {e}")
 
-def get_unique_values_from_rasters(aFilename_raster: str,
-                                    dMissing_value: float,
-                                    band_index: int = 1,
-                                    iFlag_verbose_in: bool = False) -> Optional[List[float]]:
+
+def get_unique_values_from_rasters(aFilename_raster: List[str],
+                                   dMissing_value: float,
+                                   band_index: int = 1,
+                                   iFlag_verbose_in: bool = False) -> Optional[List[float]]:
     """
     Extract unique values from a raster band.
 
     Args:
-        sFilename_raster (str): Path to the raster file
-        band_index (int, optional): Band index to read (1-based). Default is
+        aFilename_raster (List[str]): List of paths to the raster files
+        dMissing_value (float): Missing value to exclude from unique values
+        band_index (int, optional): Band index to read (1-based). Default is 1.
+        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
+            Default is False.
 
+    Returns:
+        Optional[List[float]]: List of unique values found across all rasters,
+            or None if no valid values are found.
     """
     aUnique_values = set()
     for sFilename in aFilename_raster:
         pRaster = sraster(sFilename)
         if pRaster is not None:
-            unique_values = pRaster.get_unique_values(band_index, dMissing_value, iFlag_verbose_in)
+            unique_values = pRaster.get_unique_values(
+                band_index, dMissing_value, iFlag_verbose_in)
             if unique_values is not None:
                 aUnique_values.update(unique_values)
 
     return list(aUnique_values) if aUnique_values else None
 
-def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_unique_id=None):
+
+def rebuild_mesh_topology(sFilename_mesh_in: str, iFlag_verbose_in: bool = False, sField_unique_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Rebuild mesh topology from source mesh file by extracting vertices,
     connectivity, and centroids for unstructured mesh processing.
@@ -591,12 +641,14 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             logger.warning('Layer contains no features.')
             pDataset = None
             return None
-        aCellID= []  # Will be populated dynamically as features are processed
+        aCellID = []  # Will be populated dynamically as features are processed
         if iFlag_verbose_in:
-            logger.info(f'Processing {nFeatures} features with {iFieldCount} fields')
+            logger.info(
+                f'Processing {nFeatures} features with {iFieldCount} fields')
         # Get the first field name (assuming it contains the data variable)
         if sField_unique_id is None:
-            sVariable = pLayerDefn.GetFieldDefn(0).GetName() if iFieldCount > 0 else None
+            sVariable = pLayerDefn.GetFieldDefn(
+                0).GetName() if iFieldCount > 0 else None
         else:
             sVariable = sField_unique_id
         # Initialize lists for storing geometry data
@@ -627,15 +679,18 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                             dArea = calculate_polygon_area(lons, lats)
                             aArea_list.append(dArea)
                         except Exception as area_error:
-                            logger.warning(f'Could not calculate area: {area_error}')
+                            logger.warning(
+                                f'Could not calculate area: {area_error}')
                             aArea_list.append(0.0)
                         # Get field data (always integer since setup_mesh_cellid enforces it)
                         if sVariable:
                             try:
-                                field_value = pFeature.GetFieldAsInteger(sVariable)
+                                field_value = pFeature.GetFieldAsInteger(
+                                    sVariable)
                                 aCellID.append(int(field_value))
                             except (ValueError, TypeError, AttributeError) as e:
-                                logger.warning(f'Could not read integer field value: {e}')
+                                logger.warning(
+                                    f'Could not read integer field value: {e}')
                                 aCellID.append(len(aCellID))
                         else:
                             aCellID.append(len(aCellID))
@@ -665,25 +720,32 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                             lats_list.append(lats_part)
                             # Calculate polygon area for this part
                             try:
-                                dArea_part = calculate_polygon_area(lons_part, lats_part)
+                                dArea_part = calculate_polygon_area(
+                                    lons_part, lats_part)
                                 aArea_list.append(dArea_part)
                             except Exception as area_error:
-                                logger.warning(f'Could not calculate area for multipolygon part: {area_error}')
+                                logger.warning(
+                                    f'Could not calculate area for multipolygon part: {area_error}')
                                 aArea_list.append(0.0)
                             multipolygon_processed = True
                         else:
-                            logger.warning('Failed to extract coordinates from multipolygon part')
+                            logger.warning(
+                                'Failed to extract coordinates from multipolygon part')
                     if not multipolygon_processed:
-                        logger.warning('No valid parts found in multipolygon feature')
+                        logger.warning(
+                            'No valid parts found in multipolygon feature')
                         invalid_geometry_count += 1
                 except Exception as e:
-                    logger.warning(f'Error processing multipolygon feature: {str(e)}')
+                    logger.warning(
+                        f'Error processing multipolygon feature: {str(e)}')
                     invalid_geometry_count += 1
             elif sGeometry_type in ['POINT', 'LINESTRING']:
-                logger.warning(f'Geometry type {sGeometry_type} not supported in feature {iFeature_index}, skipping')
+                logger.warning(
+                    f'Geometry type {sGeometry_type} not supported in feature {iFeature_index}, skipping')
                 invalid_geometry_count += 1
             else:
-                logger.warning(f'Unknown geometry type {sGeometry_type} in feature {iFeature_index}, skipping')
+                logger.warning(
+                    f'Unknown geometry type {sGeometry_type} in feature {iFeature_index}, skipping')
                 invalid_geometry_count += 1
         # Report processing statistics
         valid_mesh_cells = len(lons_list)
@@ -691,20 +753,26 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             logger.info(f'Feature processing summary:')
             logger.info(f'  - Total input features: {iFeature_index}')
             logger.info(f'  - Valid mesh cells created: {valid_mesh_cells}')
-            logger.info(f'  - Invalid/skipped features: {invalid_geometry_count}')
-            logger.info(f'  - Success rate: {((iFeature_index-invalid_geometry_count)/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
+            logger.info(
+                f'  - Invalid/skipped features: {invalid_geometry_count}')
+            logger.info(
+                f'  - Success rate: {((iFeature_index-invalid_geometry_count)/iFeature_index*100):.1f}%' if iFeature_index > 0 else '  - Success rate: 0%')
             # Report multipolygon handling statistics
-            multipolygon_cells = valid_mesh_cells - (iFeature_index - invalid_geometry_count)
+            multipolygon_cells = valid_mesh_cells - \
+                (iFeature_index - invalid_geometry_count)
             if multipolygon_cells > 0:
-                logger.info(f'  - Additional cells from multipolygons: {multipolygon_cells}')
-                logger.info(f'  - Total mesh cells (including multipolygon parts): {valid_mesh_cells}')
+                logger.info(
+                    f'  - Additional cells from multipolygons: {multipolygon_cells}')
+                logger.info(
+                    f'  - Total mesh cells (including multipolygon parts): {valid_mesh_cells}')
         # Clean up dataset
         pDataset = None
         if not lons_list:
             logger.error('No valid polygon features found in mesh file')
             return None
         if iFlag_verbose_in:
-            logger.info(f'Successfully processed {len(lons_list)} polygon features')
+            logger.info(
+                f'Successfully processed {len(lons_list)} polygon features')
         # Calculate maximum vertices and pad coordinates efficiently
         try:
             if not lons_list:
@@ -719,8 +787,10 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                 logger.info(f'Maximum vertices per polygon: {max_vertices}')
             # Pre-allocate arrays for better memory efficiency
             num_polygons = len(lons_list)
-            lons_padded = np.full((num_polygons, max_vertices), np.nan, dtype=np.float64)
-            lats_padded = np.full((num_polygons, max_vertices), np.nan, dtype=np.float64)
+            lons_padded = np.full(
+                (num_polygons, max_vertices), np.nan, dtype=np.float64)
+            lats_padded = np.full(
+                (num_polygons, max_vertices), np.nan, dtype=np.float64)
             # Fill padded arrays efficiently
             for i, (lon_coords, lat_coords) in enumerate(zip(lons_list, lats_list)):
                 # Ensure coordinates are numpy arrays with proper dtype
@@ -728,7 +798,8 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                 lat_coords = np.asarray(lat_coords, dtype=np.float64)
                 # Validate coordinate data
                 if len(lon_coords) != len(lat_coords):
-                    logger.warning(f'Coordinate length mismatch in polygon {i}: lon={len(lon_coords)}, lat={len(lat_coords)}')
+                    logger.warning(
+                        f'Coordinate length mismatch in polygon {i}: lon={len(lon_coords)}, lat={len(lat_coords)}')
                     min_len = min(len(lon_coords), len(lat_coords))
                     lon_coords = lon_coords[:min_len]
                     lat_coords = lat_coords[:min_len]
@@ -736,7 +807,8 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                 if not (np.all(np.isfinite(lon_coords)) and np.all(np.isfinite(lat_coords))):
                     logger.warning(f'Invalid coordinates found in polygon {i}')
                     # Remove invalid coordinates
-                    valid_mask = np.isfinite(lon_coords) & np.isfinite(lat_coords)
+                    valid_mask = np.isfinite(
+                        lon_coords) & np.isfinite(lat_coords)
                     lon_coords = lon_coords[valid_mask]
                     lat_coords = lat_coords[valid_mask]
                 coord_len = len(lon_coords)
@@ -744,7 +816,8 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                     lons_padded[i, :coord_len] = lon_coords
                     lats_padded[i, :coord_len] = lat_coords
                 else:
-                    logger.warning(f'No valid coordinates remaining for polygon {i}')
+                    logger.warning(
+                        f'No valid coordinates remaining for polygon {i}')
             # Convert to the expected format for backward compatibility
             lons = lons_padded
             lats = lats_padded
@@ -758,7 +831,7 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             cell_lats_1d = []
             # Pre-allocate arrays for better performance
             cell_lons_1d = np.zeros(len(lons_list), dtype=np.float64)
-            cell_lats_1d = np.zeros(len(lons_list), dtype=np.float64)
+            cell_lats_1d = np.zeros(len(lats_list), dtype=np.float64)
             for i in range(len(lons_list)):
                 # Calculate centroid of each cell (ignoring NaN values)
                 valid_mask = ~np.isnan(lons[i])
@@ -773,11 +846,14 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                         cell_lons_1d[i] = centroid_lon
                         cell_lats_1d[i] = centroid_lat
                     else:
-                        logger.warning(f'Invalid centroid calculated for cell {i}: lon={centroid_lon}, lat={centroid_lat}')
+                        logger.warning(
+                            f'Invalid centroid calculated for cell {i}: lon={centroid_lon}, lat={centroid_lat}')
                         # Use geometric center of bounding box as fallback
                         if len(valid_lons) > 0 and len(valid_lats) > 0:
-                            cell_lons_1d[i] = (np.min(valid_lons) + np.max(valid_lons)) / 2.0
-                            cell_lats_1d[i] = (np.min(valid_lats) + np.max(valid_lats)) / 2.0
+                            cell_lons_1d[i] = (
+                                np.min(valid_lons) + np.max(valid_lons)) / 2.0
+                            cell_lats_1d[i] = (
+                                np.min(valid_lats) + np.max(valid_lats)) / 2.0
                         else:
                             cell_lons_1d[i] = 0.0
                             cell_lats_1d[i] = 0.0
@@ -786,14 +862,17 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                     cell_lons_1d[i] = 0.0
                     cell_lats_1d[i] = 0.0
             if iFlag_verbose_in:
-                logger.info(f'Calculated centroids for {len(cell_lons_1d)} cells')
+                logger.info(
+                    f'Calculated centroids for {len(cell_lons_1d)} cells')
             # Validate centroid ranges
             lon_range = (np.min(cell_lons_1d), np.max(cell_lons_1d))
             lat_range = (np.min(cell_lats_1d), np.max(cell_lats_1d))
             if not (-180 <= lon_range[0] <= 180 and -180 <= lon_range[1] <= 180):
-                logger.warning(f'Longitude centroids outside valid range: {lon_range}')
+                logger.warning(
+                    f'Longitude centroids outside valid range: {lon_range}')
             if not (-90 <= lat_range[0] <= 90 and -90 <= lat_range[1] <= 90):
-                logger.warning(f'Latitude centroids outside valid range: {lat_range}')
+                logger.warning(
+                    f'Latitude centroids outside valid range: {lat_range}')
         except Exception as e:
             logger.error(f'Error during centroid calculation: {str(e)}')
             return None
@@ -805,13 +884,16 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
                 lons_list, lats_list
             )
             if xv is None or yv is None or connectivity is None:
-                logger.error('Failed to extract unique vertices and connectivity')
+                logger.error(
+                    'Failed to extract unique vertices and connectivity')
                 return None
             if iFlag_verbose_in:
                 logger.info(f'Extracted {len(xv)} unique vertices')
-                logger.info(f'Created connectivity matrix with shape: {connectivity.shape}')
+                logger.info(
+                    f'Created connectivity matrix with shape: {connectivity.shape}')
         except Exception as e:
-            logger.error(f'Error during vertex/connectivity extraction: {str(e)}')
+            logger.error(
+                f'Error during vertex/connectivity extraction: {str(e)}')
             return None
         # Store results in class attributes
         aVertex_longititude = xv
@@ -821,23 +903,27 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
         aConnectivity = connectivity
         # Ensure aCellID matches the number of valid mesh cells
         if len(aCellID) != len(cell_lons_1d):
-            logger.warning(f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)})")
+            logger.warning(
+                f"aCellID length ({len(aCellID)}) doesn't match mesh cells ({len(cell_lons_1d)})")
             if len(aCellID) > len(cell_lons_1d):
                 # Truncate aCellID to match mesh cells
                 logger.warning("Truncating aCellID to match mesh cell count")
                 aCellID = aCellID[:len(cell_lons_1d)]
             else:
                 # Extend aCellID with sequential indices
-                logger.warning("Extending aCellID with sequential indices to match mesh cell count")
+                logger.warning(
+                    "Extending aCellID with sequential indices to match mesh cell count")
                 missing_count = len(cell_lons_1d) - len(aCellID)
-                aCellID.extend(range(len(aCellID), len(aCellID) + missing_count))
+                aCellID.extend(
+                    range(len(aCellID), len(aCellID) + missing_count))
         aCellID = np.array(aCellID)
         if iFlag_verbose_in:
             logger.info(f'Final aCellID array length: {len(aCellID)}')
         # Calculate and store area statistics
         if aArea_list:
             area_array = np.array(aArea_list)
-            valid_areas = area_array[area_array > 0]  # Exclude zero areas from statistics
+            # Exclude zero areas from statistics
+            valid_areas = area_array[area_array > 0]
             if len(valid_areas) > 0:
                 dArea_min = float(np.min(valid_areas))
                 dArea_max = float(np.max(valid_areas))
@@ -860,7 +946,8 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             logger.error('No unique vertices extracted')
             validation_passed = False
         if len(aCenter_longititude) != len(lons_list):
-            logger.error(f'Centroid count mismatch: expected {len(lons_list)}, got {len(aCenter_longititude)}')
+            logger.error(
+                f'Centroid count mismatch: expected {len(lons_list)}, got {len(aCenter_longititude)}')
             validation_passed = False
         if aConnectivity is None or aConnectivity.size == 0:
             logger.error('Empty connectivity matrix')
@@ -870,12 +957,15 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             max_vertex_index = len(aVertex_longititude) - 1
             valid_connectivity = aConnectivity[aConnectivity >= 0]
             if len(valid_connectivity) > 0 and np.max(valid_connectivity) > max_vertex_index:
-                logger.error('Connectivity matrix contains invalid vertex indices')
+                logger.error(
+                    'Connectivity matrix contains invalid vertex indices')
                 validation_passed = False
         # Check for reasonable mesh bounds
         if len(aVertex_longititude) > 0:
-            vertex_lon_range = (np.min(aVertex_longititude), np.max(aVertex_longititude))
-            vertex_lat_range = (np.min(aVertex_latitude), np.max(aVertex_latitude))
+            vertex_lon_range = (np.min(aVertex_longititude),
+                                np.max(aVertex_longititude))
+            vertex_lat_range = (np.min(aVertex_latitude),
+                                np.max(aVertex_latitude))
             # Basic range reporting (detailed validation done by check_geometry_validity)
             if iFlag_verbose_in:
                 logger.debug(f'Vertex longitude range: {vertex_lon_range}')
@@ -890,8 +980,10 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
             logger.info(f'  - Mesh cells: {len(aCenter_longititude)}')
             logger.info(f'  - Max vertices per cell: {nVertex_max}')
             logger.info(f'  - Connectivity shape: {aConnectivity.shape}')
-            logger.info(f'  - Vertex longitude range: [{np.min(aVertex_longititude):.3f}, {np.max(aVertex_longititude):.3f}]')
-            logger.info(f'  - Vertex latitude range: [{np.min(aVertex_latitude):.3f}, {np.max(aVertex_latitude):.3f}]')
+            logger.info(
+                f'  - Vertex longitude range: [{np.min(aVertex_longititude):.3f}, {np.max(aVertex_longititude):.3f}]')
+            logger.info(
+                f'  - Vertex latitude range: [{np.min(aVertex_latitude):.3f}, {np.max(aVertex_latitude):.3f}]')
 
         # Return comprehensive mesh topology information
         mesh_info = {
@@ -917,52 +1009,19 @@ def rebuild_mesh_topology(sFilename_mesh_in, iFlag_verbose_in=False, sField_uniq
         logger.error(f'Traceback: {traceback.format_exc()}')
         return None
 
-def normalize_longitude(lon):
-    """
-    Normalize longitude to [-180, 180] range by wrapping.
-    Optimized using modular arithmetic instead of loops.
 
-    Args:
-        lon (float): Longitude value
-
-    Returns:
-        float: Normalized longitude in [-180, 180] range
-    """
-    # Use modular arithmetic for O(1) normalization
-    normalized = ((lon + 180) % 360) - 180
-    return normalized
-
-def fix_coordinates(coords):
-    """
-    Recursively fix longitude values in coordinate arrays.
-    Handles nested coordinate structures for different geometry types.
-
-    Args:
-        coords: Coordinate array (can be nested)
-
-    Returns:
-        Fixed coordinate array with normalized longitudes
-    """
-    if not coords:
-        return coords
-
-    # Check if this is a coordinate pair [lon, lat]
-    if isinstance(coords[0], (int, float)):
-        return [normalize_longitude(coords[0]), coords[1]]
-    else:
-        return [fix_coordinates(coord) for coord in coords]
-
-def fix_longitude_range_gdal(geometry, in_place=False):
+def fix_longitude_range_gdal(geometry: 'ogr.Geometry', in_place: bool = False) -> 'ogr.Geometry':
     """
     Fix longitude values using GDAL geometry operations.
     Normalizes longitude coordinates to [-180, 180] range.
 
     Args:
-        geometry: OGR Geometry object
-        in_place (bool): If True, modify geometry in place (faster)
+        geometry (ogr.Geometry): OGR Geometry object to fix
+        in_place (bool, optional): If True, modify geometry in place (faster).
+            Default is False.
 
     Returns:
-        OGR Geometry object with normalized longitude coordinates
+        ogr.Geometry: OGR Geometry object with normalized longitude coordinates
     """
     if geometry is None:
         return geometry
@@ -993,12 +1052,13 @@ def fix_longitude_range_gdal(geometry, in_place=False):
 
     return fixed_geometry
 
-def _fix_geometry_coordinates_recursive(geometry):
+
+def _fix_geometry_coordinates_recursive(geometry: 'ogr.Geometry') -> None:
     """
     Recursively fix coordinates in complex geometries.
 
     Args:
-        geometry: OGR Geometry object to fix in-place
+        geometry (ogr.Geometry): OGR Geometry object to fix in-place
     """
     geom_count = geometry.GetGeometryCount()
 
@@ -1020,7 +1080,8 @@ def _fix_geometry_coordinates_recursive(geometry):
             normalized_x = ((x + 180) % 360) - 180
             geometry.SetPoint(i, normalized_x, y, z)
 
-def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handle_idl_crossing=True):
+
+def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: str, handle_idl_crossing: bool = True) -> bool:
     """
     Comprehensive GDAL-based function to fix longitude range issues and optionally handle
     International Date Line (IDL) crossing in vector files.
@@ -1029,9 +1090,10 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
     into a single optimized function that can handle multiple layers and IDL crossing.
 
     Args:
-        input_file (str): Path to input vector file (any GDAL-supported format)
-        output_file (str): Path to output vector file
-        handle_idl_crossing (bool): Whether to check and split polygons crossing the IDL (default: True)
+        sFilename_in (str): Path to input vector file (any GDAL-supported format)
+        sFilename_out (str): Path to output vector file
+        handle_idl_crossing (bool, optional): Whether to check and split polygons crossing the IDL.
+            Default is True.
 
     Returns:
         bool: True if successful, False otherwise
@@ -1050,7 +1112,7 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
 
         # Create output dataset
         pDriver_out = get_vector_driver_from_filename(sFilename_out)
-        #delete output file if it already exists
+        # delete output file if it already exists
         if os.path.exists(sFilename_out):
             pDriver_out.DeleteDataSource(sFilename_out)
         pDataset_out = pDriver_out.CreateDataSource(sFilename_out)
@@ -1075,10 +1137,12 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
             layer_name = pLayer.GetName()
             nFeatures = pLayer.GetFeatureCount()
 
-            logger.info(f"Processing layer '{layer_name}' with {nFeatures} features")
+            logger.info(
+                f"Processing layer '{layer_name}' with {nFeatures} features")
 
             # Create output layer with same schema
-            pLayer_out = pDataset_out.CreateLayer(layer_name, sSpatial_ref, ogr.wkbUnknown)
+            pLayer_out = pDataset_out.CreateLayer(
+                layer_name, sSpatial_ref, ogr.wkbUnknown)
             if pLayer_out is None:
                 logger.error(f"Could not create output layer: {layer_name}")
                 continue
@@ -1096,14 +1160,15 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
                 try:
                     geometry = pFeature.GetGeometryRef()
                     if geometry is None:
-                        logger.warning(f"Feature ID {pFeature.GetFID()} has no geometry, skipping...")
+                        logger.warning(
+                            f"Feature ID {pFeature.GetFID()} has no geometry, skipping...")
                         continue
 
                     geometry_type = geometry.GetGeometryName()
 
-                    #check whether geometry contains poles
+                    # check whether geometry contains poles
                     aCoord_origin = get_geometry_coordinates(geometry)
-                    if np.min(np.abs(aCoord_origin[:, 1])) >88.0:
+                    if np.min(np.abs(aCoord_origin[:, 1])) > 88.0:
                         continue
                     # Fix longitude coordinates using GDAL
                     fixed_geometry = fix_longitude_range_gdal(geometry)
@@ -1111,31 +1176,38 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
                     if handle_idl_crossing and geometry_type in ['POLYGON', 'MULTIPOLYGON']:
                         # Check for IDL crossing after longitude normalization
                         aCoord = get_geometry_coordinates(fixed_geometry)
-                        bCross_idl, aCoord_updated = check_cross_international_date_line_polygon(aCoord)
+                        bCross_idl, aCoord_updated = check_cross_international_date_line_polygon(
+                            aCoord)
 
                         if bCross_idl:
                             idl_crossing_count += 1
-                            logger.info(f"Feature ID {pFeature.GetFID()} crosses the International Date Line. Splitting...")
+                            logger.info(
+                                f"Feature ID {pFeature.GetFID()} crosses the International Date Line. Splitting...")
 
-                            [eastern_polygon, western_polygon] = split_international_date_line_polygon_coordinates(aCoord)
+                            [eastern_polygon, western_polygon] = split_international_date_line_polygon_coordinates(
+                                aCoord)
 
                             # Create a multipolygon geometry
                             pGeometry_multi = ogr.Geometry(ogr.wkbMultiPolygon)
 
                             # Create eastern polygon
                             pPolygon_eastern = ogr.Geometry(ogr.wkbPolygon)
-                            pLinearRing_eastern = ogr.Geometry(ogr.wkbLinearRing)
+                            pLinearRing_eastern = ogr.Geometry(
+                                ogr.wkbLinearRing)
                             for coord in eastern_polygon:
-                                pLinearRing_eastern.AddPoint(coord[0], coord[1])
+                                pLinearRing_eastern.AddPoint(
+                                    coord[0], coord[1])
                             pLinearRing_eastern.CloseRings()
                             pPolygon_eastern.AddGeometry(pLinearRing_eastern)
                             pGeometry_multi.AddGeometry(pPolygon_eastern)
 
                             # Create western polygon
                             pPolygon_western = ogr.Geometry(ogr.wkbPolygon)
-                            pLinearRing_western = ogr.Geometry(ogr.wkbLinearRing)
+                            pLinearRing_western = ogr.Geometry(
+                                ogr.wkbLinearRing)
                             for coord in western_polygon:
-                                pLinearRing_western.AddPoint(coord[0], coord[1])
+                                pLinearRing_western.AddPoint(
+                                    coord[0], coord[1])
                             pLinearRing_western.CloseRings()
                             pPolygon_western.AddGeometry(pLinearRing_western)
                             pGeometry_multi.AddGeometry(pPolygon_western)
@@ -1144,7 +1216,8 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
                         else:
                             if aCoord_updated is not None:
                                 # Update fixed_geometry with adjusted coordinates to create a polygon, usually because of IDL
-                                fixed_geometry = create_geometry_from_coordinates(aCoord_updated, geometry_type)
+                                fixed_geometry = create_geometry_from_coordinates(
+                                    aCoord_updated, geometry_type)
                             else:
                                 final_geometry = fixed_geometry
                     else:
@@ -1157,23 +1230,28 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
                     # Copy all field values
                     for iField in range(pLayerDefn.GetFieldCount()):
                         sField_name = pLayerDefn.GetFieldDefn(iField).GetName()
-                        pFeature_out.SetField(sField_name, pFeature.GetField(sField_name))
+                        pFeature_out.SetField(
+                            sField_name, pFeature.GetField(sField_name))
 
                     pLayer_out.CreateFeature(pFeature_out)
                     pFeature_out = None
 
                     processed_count += 1
                     if processed_count % 1000 == 0:
-                        logger.info(f"Processed {processed_count}/{nFeatures} features in layer '{layer_name}'...")
+                        logger.info(
+                            f"Processed {processed_count}/{nFeatures} features in layer '{layer_name}'...")
 
                 except Exception as e:
-                    logger.error(f"Error processing feature ID {pFeature.GetFID()} in layer '{layer_name}': {str(e)}")
+                    logger.error(
+                        f"Error processing feature ID {pFeature.GetFID()} in layer '{layer_name}': {str(e)}")
                     continue
 
             if handle_idl_crossing and idl_crossing_count > 0:
-                logger.info(f"Layer '{layer_name}': {processed_count} features processed, {idl_crossing_count} IDL crossings handled")
+                logger.info(
+                    f"Layer '{layer_name}': {processed_count} features processed, {idl_crossing_count} IDL crossings handled")
             else:
-                logger.info(f"Layer '{layer_name}': {processed_count} features processed")
+                logger.info(
+                    f"Layer '{layer_name}': {processed_count} features processed")
 
             total_processed += processed_count
 
@@ -1182,7 +1260,8 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
         pDataset_out = None
         pDataset = None
 
-        logger.info(f"Successfully processed {total_processed} total features and created fixed file: {sFilename_out}")
+        logger.info(
+            f"Successfully processed {total_processed} total features and created fixed file: {sFilename_out}")
         return True
 
     except Exception as e:
@@ -1197,16 +1276,17 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in, sFilename_out, handl
         if pDataset is not None:
             pDataset = None
 
-def create_geometry_from_coordinates(aCoord, geometry_type):
+
+def create_geometry_from_coordinates(aCoord: NDArray[np.floating], geometry_type: str) -> Optional['ogr.Geometry']:
     """
     Create an OGR Geometry object from coordinate array based on specified geometry type.
 
     Args:
-        aCoord (np.ndarray): Array of coordinates
-        geometry_type (str): Type of geometry ('POLYGON', 'LINESTRING', etc.)
+        aCoord (NDArray[np.floating]): Array of coordinates with shape (n, 2) or (n, 3)
+        geometry_type (str): Type of geometry ('POLYGON', 'LINESTRING', 'POINT')
 
     Returns:
-        OGR Geometry object
+        Optional[ogr.Geometry]: OGR Geometry object, or None if geometry type is unsupported
     """
     if geometry_type == 'POLYGON':
         pPolygon = ogr.Geometry(ogr.wkbPolygon)
@@ -1226,6 +1306,6 @@ def create_geometry_from_coordinates(aCoord, geometry_type):
         pPoint.AddPoint(aCoord[0][0], aCoord[0][1])
         return pPoint
     else:
-        logger.error(f"Unsupported geometry type for creation: {geometry_type}")
+        logger.error(
+            f"Unsupported geometry type for creation: {geometry_type}")
         return None
-

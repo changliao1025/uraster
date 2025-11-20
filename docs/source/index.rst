@@ -49,10 +49,10 @@ Quick Start
    processor = uraster(config)
 
    # Setup and validate inputs
-   processor.setup(iFlag_verbose=True)
+   processor.setup(iFlag_verbose_in=True)
 
    # Run zonal statistics
-   processor.run_remap(iFlag_verbose=True)
+   processor.run_remap(iFlag_verbose_in=True)
 
    # Visualize results
    processor.visualize_target_mesh(

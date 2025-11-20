@@ -274,7 +274,7 @@ def _process_single_polygon(
         # Calculate statistics with improved error handling
         try:
             # Filter out missing/nodata values with proper handling of different data types
-            if np.isnan(dMissing_value):
+            if isinstance(dMissing_value, (int, float)) and np.isnan(dMissing_value):
                 valid_mask = ~np.isnan(aData_clip_copy)
             else:
                 valid_mask = aData_clip_copy != dMissing_value

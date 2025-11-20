@@ -292,5 +292,6 @@ python_crash_*.txt
 *.geoparquet
 *.geojson
 *.tiff
+*.tif
 *.nc
 *.gif
