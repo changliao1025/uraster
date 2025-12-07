@@ -353,6 +353,9 @@ def visualize_source_mesh(self,
                           iFlag_show_graticule: bool = True,
                           sCoastline_color: str = 'black',
                           dCoastline_width: float = 1.0,
+                          iFlag_wireframe_only: bool = False,
+                          dEdge_width: float = 1.0,
+                          sEdge_color: str = 'black',
                           iFlag_verbose_in: bool = False) -> bool:
     """
     Visualize the source mesh topology using GeoVista 3D globe rendering.
@@ -373,6 +376,12 @@ def visualize_source_mesh(self,
         sCoastline_color: Color for coastlines. Default is 'black'.
             Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
         dCoastline_width: Line width for coastlines. Default is 1.0.
+        iFlag_wireframe_only: If True, show only mesh edges without cell filling.
+            Default is False (shows filled cells).
+        dEdge_width: Line width for mesh edges when wireframe mode is enabled.
+            Default is 1.0.
+        sEdge_color: Color for mesh edges in wireframe mode. Default is 'black'.
+            Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
         iFlag_verbose_in: If True, print detailed progress messages. Default is False.
 
     Returns:
@@ -382,6 +391,7 @@ def visualize_source_mesh(self,
         - Requires 'geovista' package: pip install geovista
         - Interactive mode requires display environment
         - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
+        - Wireframe mode is useful for examining mesh structure and topology
     """
     # Validate inputs using new utility functions
     if not _validate_mesh_data(self):
@@ -458,18 +468,32 @@ def visualize_source_mesh(self,
         if pPlotter is None:
             return False
 
-        # Configure scalar bar (colorbar) appearance
-        sargs = {
-            "title": name,
-            "shadow": True,
-            "title_font_size": 10,
-            "label_font_size": 10,
-            "fmt": "%.0f",  # Integer formatting for cell IDs
-            "n_labels": 5,
-        }
+        # Add mesh to plotter with appropriate rendering style
+        if iFlag_wireframe_only:
+            # Wireframe mode: show only edges without filling (no colorbar needed)
+            if config.verbose:
+                logger.info('Rendering mesh in wireframe mode (edges only)')
 
-        # Add mesh to plotter
-        pPlotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
+            pPlotter.add_mesh(
+                mesh,
+                style='wireframe',
+                line_width=dEdge_width,
+                color=sEdge_color,
+                show_edges=True,
+                show_scalar_bar=False  # No colorbar for wireframe
+            )
+        else:
+            # Standard mode: show filled cells with scalars and colorbar
+            sargs = {
+                "title": name,
+                "shadow": True,
+                "title_font_size": 10,
+                "label_font_size": 10,
+                "fmt": "%.0f",  # Integer formatting for cell IDs
+                "n_labels": 5,
+            }
+
+            pPlotter.add_mesh(mesh, scalars=name, scalar_bar_args=sargs)
 
         # Configure camera
         _configure_camera(pPlotter, config)

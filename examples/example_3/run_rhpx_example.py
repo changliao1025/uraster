@@ -44,7 +44,7 @@ def main():
     # visualize source mesh at the Wuhan City area
     dLongitude_focus_in = 114.305393
     dLatitude_focus_in = 30.592850
-    pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
+    pRaster.visualize_source_mesh(sFilename_out=None, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
     #pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
 
     pRaster.run_remap(iFlag_weighted_average_in=False)

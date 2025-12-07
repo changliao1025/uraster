@@ -1052,6 +1052,7 @@ class uraster:
                               dZoom_factor=0.7,
                               iFlag_show_coastlines=True,
                               iFlag_show_graticule=True,
+                              iFlag_wireframe_only=True,
                               iFlag_verbose_in=False):
         """
         Visualize the source mesh topology using GeoVista 3D globe rendering.
@@ -1088,7 +1089,8 @@ class uraster:
             dZoom_factor=dZoom_factor,
             iFlag_show_coastlines=iFlag_show_coastlines,
             iFlag_show_graticule=iFlag_show_graticule,
-            iFlag_verbose_in=iFlag_verbose_in
+            iFlag_verbose_in=iFlag_verbose_in,
+            iFlag_wireframe_only=iFlag_wireframe_only
         )
 
     def visualize_raster(self, sFilename_out=None, iFlag_verbose_in=False):
