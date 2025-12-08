@@ -1079,8 +1079,11 @@ def fix_longitude_range_gdal(geometry: 'ogr.Geometry', in_place: bool = False) -
                     # Avoid exact +180° by nudging to just under 180°
                     if abs(normalized_x - 180.0) < 1e-10:
                         normalized_x = 180.0 - 1e-8
-                    fixed_geometry.SetPoint(i, normalized_x, y, z)
+                    # Use SetPoint_2D to ensure 2D geometry
+                    fixed_geometry.SetPoint_2D(i, normalized_x, y)
 
+    # Ensure the final geometry is 2D
+    fixed_geometry.FlattenTo2D()
     return fixed_geometry
 
 
@@ -1109,7 +1112,8 @@ def _fix_geometry_coordinates_recursive(geometry: 'ogr.Geometry') -> None:
                 x = -180.0 + 1e-8  # Nudge to just above -180°
             # Normalize longitude using modular arithmetic
             normalized_x = ((x + 180) % 360) - 180
-            geometry.SetPoint(i, normalized_x, y, z)
+            # Use SetPoint_2D to ensure 2D geometry
+            geometry.SetPoint_2D(i, normalized_x, y)
 
 
 def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: str, handle_idl_crossing: bool = True) -> bool:
@@ -1203,6 +1207,9 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                         continue
                     # Fix longitude coordinates using GDAL
                     fixed_geometry = fix_longitude_range_gdal(geometry)
+                    # Ensure the geometry is 2D
+                    if fixed_geometry is not None:
+                        fixed_geometry.FlattenTo2D()
                     # Handle IDL crossing for polygon geometries if requested
                     if handle_idl_crossing and geometry_type in ['POLYGON', 'MULTIPOLYGON']:
                         # Check for IDL crossing after longitude normalization
@@ -1218,7 +1225,7 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                             [eastern_polygon, western_polygon] = split_international_date_line_polygon_coordinates(
                                 aCoord)
 
-                            # Create a multipolygon geometry
+                            # Create a multipolygon geometry (force 2D)
                             pGeometry_multi = ogr.Geometry(ogr.wkbMultiPolygon)
 
                             # Create eastern polygon
@@ -1226,10 +1233,13 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                             pLinearRing_eastern = ogr.Geometry(
                                 ogr.wkbLinearRing)
                             for coord in eastern_polygon:
-                                pLinearRing_eastern.AddPoint(
+                                # Force 2D by only using x,y coordinates
+                                pLinearRing_eastern.AddPoint_2D(
                                     coord[0], coord[1])
                             pLinearRing_eastern.CloseRings()
                             pPolygon_eastern.AddGeometry(pLinearRing_eastern)
+                            # Ensure the polygon is 2D
+                            pPolygon_eastern.FlattenTo2D()
                             pGeometry_multi.AddGeometry(pPolygon_eastern)
 
                             # Create western polygon
@@ -1237,22 +1247,32 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                             pLinearRing_western = ogr.Geometry(
                                 ogr.wkbLinearRing)
                             for coord in western_polygon:
-                                pLinearRing_western.AddPoint(
+                                # Force 2D by only using x,y coordinates
+                                pLinearRing_western.AddPoint_2D(
                                     coord[0], coord[1])
                             pLinearRing_western.CloseRings()
                             pPolygon_western.AddGeometry(pLinearRing_western)
+                            # Ensure the polygon is 2D
+                            pPolygon_western.FlattenTo2D()
                             pGeometry_multi.AddGeometry(pPolygon_western)
 
+                            # Ensure the entire multipolygon is 2D
+                            pGeometry_multi.FlattenTo2D()
                             final_geometry = pGeometry_multi
                         else:
                             if aCoord_updated is not None:
                                 # Update fixed_geometry with adjusted coordinates to create a polygon, usually because of IDL
                                 fixed_geometry = create_geometry_from_coordinates(
                                     aCoord_updated, geometry_type)
+                                final_geometry = fixed_geometry
                             else:
                                 final_geometry = fixed_geometry
                     else:
                         final_geometry = fixed_geometry
+
+                    # Ensure final geometry is always 2D
+                    if final_geometry is not None:
+                        final_geometry.FlattenTo2D()
 
                     # Create output feature
                     pFeature_out = ogr.Feature(pLayer_out.GetLayerDefn())
@@ -1323,9 +1343,12 @@ def create_geometry_from_coordinates(aCoord: NDArray[np.floating], geometry_type
         pPolygon = ogr.Geometry(ogr.wkbPolygon)
         pLinearRing = ogr.Geometry(ogr.wkbLinearRing)
         for coord in aCoord:
-            pLinearRing.AddPoint(coord[0], coord[1])
+            # Force 2D by only using x,y coordinates
+            pLinearRing.AddPoint_2D(coord[0], coord[1])
         pLinearRing.CloseRings()
         pPolygon.AddGeometry(pLinearRing)
+        # Ensure the polygon is 2D
+        pPolygon.FlattenTo2D()
         return pPolygon
     elif geometry_type == 'LINESTRING':
         pLineString = ogr.Geometry(ogr.wkbLineString)
