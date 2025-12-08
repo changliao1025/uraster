@@ -295,3 +295,4 @@ python_crash_*.txt
 *.tif
 *.nc
 *.gif
+*.parquet

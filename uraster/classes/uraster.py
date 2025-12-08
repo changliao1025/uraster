@@ -4,15 +4,13 @@ import traceback
 import numpy as np
 from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from uraster.operation import extract, intersect
 from uraster.classes import _visual
 from uraster.classes.sraster import sraster
 from uraster import utility
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-# Set up logging for crash detection
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from uraster.utility import setup_logger
+logger = setup_logger(__name__.split('.')[-1])
 crs = "EPSG:4326"
 pDriver_geojson = ogr.GetDriverByName('GeoJSON')
 pDriver_shp = ogr.GetDriverByName('ESRI Shapefile')
@@ -580,9 +578,9 @@ class uraster:
 
         #check mesh geometry_validity, if there are invalid range, return None
         #if there are cell cross IDL, need to split the cell into two parts, but it will valid
-        self.sFilename_source_mesh = self.check_mesh_geometry_validity(iFlag_verbose_in=iFlag_verbose_in)
+        #self.sFilename_source_mesh = self.check_mesh_geometry_validity(iFlag_verbose_in=iFlag_verbose_in)
         if not self.sFilename_source_mesh:
-         return None
+            return None
 
         # Setup and validate the mesh cell ID field
         if not self.setup_mesh_cellid():

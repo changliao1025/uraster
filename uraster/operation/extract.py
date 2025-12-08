@@ -1,18 +1,18 @@
 # Extract module for uraster - contains remap workflow functions
-from uraster.utility import get_polygon_list, get_unique_values_from_rasters
-from uraster.classes.sraster import sraster
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import cpu_count
 import os
-import logging
 import time
 import traceback
 from typing import Optional, Tuple, List, Dict, Any, Union
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import cpu_count
 from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
-
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
+from uraster.utility import get_polygon_list, get_unique_values_from_rasters
+from uraster.classes.sraster import sraster
+from uraster.utility import setup_logger
+logger = setup_logger(__name__.split('.')[-1])
 # Try to import psutil for memory monitoring (optional)
 try:
     import psutil
@@ -20,9 +20,6 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-
-# Set up logging
-logger = logging.getLogger(__name__)
 crs = "EPSG:4326"
 
 # Initialize GDAL drivers with error handling
@@ -41,6 +38,15 @@ WARP_TIMEOUT_SECONDS = 30      # Seconds - timeout for GDAL Warp operations
 PROGRESS_REPORT_INTERVAL = 5   # Report progress every N features
 MAX_CONSECUTIVE_FAILURES = 10   # Maximum consecutive failures before stopping
 HEARTBEAT_INTERVAL = 5          # Seconds between heartbeat logs during long operations
+
+# Define a custom error handler
+def custom_error_handler(err_class, err_num, err_msg):
+    if "NaN or Infinity value found" in err_msg:
+        # Log the warning or handle it
+        print(f"Custom Warning: {err_msg}")
+    else:
+        # Let other errors pass through
+        print(f"GDAL Error [{err_num}]: {err_msg}")
 
 
 def _determine_optimal_resampling(
@@ -247,8 +253,10 @@ def _process_single_polygon(
         # Run GDAL Warp with timing
         warp_start_time = time.time()
         pWrapOption = gdal.WarpOptions(**gdal_warp_options)
+        gdal.PushErrorHandler(custom_error_handler)
         pDataset_warp = gdal.Warp(
             "", aFilename_source_raster, options=pWrapOption)
+        gdal.PopErrorHandler()
 
         if pDataset_warp is None:
             return iFeature_idx, iCellid, False, f"GDAL Warp failed for feature {iCellid}"
@@ -837,8 +845,28 @@ def _process_task(args: Tuple[int, Union[int, str], str, List[str], Dict[str, An
             merged_data, merged_transform = _process_multipolygon_idl(feature_idx, cellid,
                                                                       wkt, aFilename_source_raster, gdal_warp_options_base, dMissing_value, iFlag_discrete_in, iFlag_verbose_in, aUnique_value)
 
-            if merged_data is None:
-                return feature_idx, cellid, False, "Failed to process multipolygon"
+            if merged_data is None or (isinstance(merged_data, np.ndarray) and merged_data.size == 0):
+                # Handle both None and empty array cases - still process as valid but with no data
+                logger.warning(f"Multipolygon feature {cellid} has no valid data, but will be included in output")
+                # Create empty stats for consistency
+                if iFlag_discrete_in:
+                    stats = {
+                        'mode': float(np.nan),
+                        'count': 0
+                    }
+                    # Add zero percentages for all unique values
+                    if aUnique_value is not None:
+                        for val in aUnique_value:
+                            stats[f'percentage_{val}'] = 0.0
+                else:
+                    stats = {
+                        'mean': float(np.nan),
+                        'min': float(np.nan),
+                        'max': float(np.nan),
+                        'std': float(np.nan),
+                        'count': 0
+                    }
+                return feature_idx, cellid, True, stats
 
             # Calculate statistics for multipolygon data with improved error handling
             try:
@@ -951,7 +979,7 @@ def run_remap(sFilename_target_mesh,
               sFolder_raster_out_in=None,
               iFlag_discrete_in=False,
               iFlag_verbose_in=False,
-              iFeature_parallel_threshold=5000,
+              iFeature_parallel_threshold=10000,
               sField_unique_id='cellid'):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.

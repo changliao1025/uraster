@@ -23,8 +23,8 @@ from uraster.classes.sraster import sraster
 from uraster import utility
 gdal.UseExceptions()
 
-# Set up logging
-logger = logging.getLogger(__name__)
+from uraster.utility import setup_logger
+logger = setup_logger(__name__.split('.')[-1])
 CRS = "EPSG:4326"
 
 # Constants for visualization
@@ -764,7 +764,6 @@ def _extract_target_mesh_data(sFilename: str, sVariable: str, iFlag_verbose_in: 
             pGeometry = pFeature.GetGeometryRef()
             if pGeometry is not None:
                 sGeometry_type = pGeometry.GetGeometryName()
-
                 if sGeometry_type == 'POLYGON':
                     # Single polygon - add one data value
                     try:

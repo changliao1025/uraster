@@ -1,9 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Pool, cpu_count
 import os
-import logging
 import time
-import traceback
 from typing import Optional, Tuple, List, Dict, Any, Union
 import numpy as np
 from osgeo import gdal, ogr, osr
@@ -22,9 +20,8 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-
-# Set up logging
-logger = logging.getLogger(__name__)
+from uraster.utility import setup_logger
+logger = setup_logger(__name__.split('.')[-1])
 crs = "EPSG:4326"
 
 # Initialize GDAL drivers with error handling

@@ -7,7 +7,7 @@ sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
 
 # Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_10')
+sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_12')
 sFolder_data = os.path.realpath(sFolder_data)
 # Print or use the data folder path
 print(f"Data folder path: {sFolder_data}")
@@ -20,8 +20,10 @@ sFilename_target_mesh = os.path.join(sFolder_data, 'output','mpas_uraster.geojso
 sFilename_mesh_png = os.path.join(sFolder_data, 'output', 'mesh.jpg')
 sFilename_variable_png = os.path.join(sFolder_data, 'output','uraster.png')
 sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'global_uraster.mp4')
+
 from pyearth.toolbox.conversion.convert_vector_format import convert_vector_format
 from uraster.classes.uraster import uraster
+
 
 def main():
     aConfig=dict()
@@ -33,18 +35,21 @@ def main():
     aConfig['sFilename_target_mesh']= sFilename_target_mesh
     pRaster = uraster(aConfig)
 
-    pRaster.setup()
-    pRaster.report_inputs()
+    sFilename_source_mesh_parquet = os.path.join(sFolder_data, 'output','mpas_source.parquet')
+    #convert_vector_format(pRaster.sFilename_source_mesh, sFilename_source_mesh_parquet)
+
+    pRaster.setup(iFlag_verbose_in=True)
+    #pRaster.report_inputs()
     dLongitude_focus_in = -112.033964
     dLatitude_focus_in = 43.491977
     #pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
 
-    pRaster.run_remap(iFlag_verbose_in=True)
+    #pRaster.run_remap(iFlag_verbose_in=True)
     sFilename_mesh_parquet = os.path.join(sFolder_data, 'output','mpas_uraster.parquet')
-    convert_vector_format(pRaster.sFilename_target_mesh, sFilename_mesh_parquet)
+    #convert_vector_format(pRaster.sFilename_target_mesh, sFilename_mesh_parquet)
+
     #pRaster.report_outputs()
     sColormap = 'terrain'
-    exit()
 
     pRaster.visualize_target_mesh(
         sFilename_out=sFilename_variable_png,
@@ -52,14 +57,14 @@ def main():
         dLatitude_focus_in=dLatitude_focus_in,
         sColormap=sColormap)
 
-    pRaster.visualize_target_mesh(
-        sFilename_out=sFilename_variable_animation,
-        sColormap=sColormap,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-        iFlag_create_animation=True,
-        iAnimation_frames=360,       # 1° longitude per frame
-        sAnimation_format='mp4')
+    #pRaster.visualize_target_mesh(
+    #    sFilename_out=sFilename_variable_animation,
+    #    sColormap=sColormap,
+    #    dLongitude_focus_in=dLongitude_focus_in,
+    #    dLatitude_focus_in=dLatitude_focus_in,
+    #    iFlag_create_animation=True,
+    #    iAnimation_frames=360,       # 1° longitude per frame
+    #    sAnimation_format='mp4')
 
     #pRaster.cleanup()
 
