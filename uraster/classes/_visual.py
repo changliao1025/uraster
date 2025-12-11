@@ -529,8 +529,11 @@ def _handle_visualization_output(pPlotter, sFilename: Optional[str], iFlag_verbo
     """
     try:
         if sFilename is not None:
-            # Save screenshot
-            pPlotter.screenshot(sFilename)
+            # Save screenshot with dpi based on format
+            _, ext = os.path.splitext(sFilename)
+            ext = ext.lower()
+            dpi = 600 if ext in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp'] else 100
+            pPlotter.screenshot(sFilename, window_size=[4000,4000])
             if iFlag_verbose_in:
                 logger.info(f'✓ Visualization saved to: {sFilename}')
 

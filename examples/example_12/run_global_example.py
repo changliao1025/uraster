@@ -35,6 +35,10 @@ def main():
     aConfig['sFilename_target_mesh']= sFilename_target_mesh
     pRaster = uraster(aConfig)
 
+    if not os.path.exists(pRaster.sFilename_target_mesh):
+        print(f'Target mesh file does not exist: {pRaster.sFilename_target_mesh}')
+        exit()
+
     sFilename_source_mesh_parquet = os.path.join(sFolder_data, 'output','mpas_source.parquet')
     #convert_vector_format(pRaster.sFilename_source_mesh, sFilename_source_mesh_parquet)
 
