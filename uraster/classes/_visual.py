@@ -298,7 +298,7 @@ def visualize_source_mesh(self,
         aValid_cell_indices = np.where(aValid_data_mask)[0]
         sUnit=''
         map_single_frame(pMesh_source, sScalar, aValid_cell_indices , config,
-                         sUnit=sFilename_out, sFilename_out = sFilename_out)
+                         sUnit=sUnit, sFilename_out = sFilename_out)
 
         # Output or display
         return
@@ -420,7 +420,9 @@ def visualize_target_mesh(self,
     animation_config = AnimationConfig(
         frames=iAnimation_frames,
         speed=dAnimation_speed,
-        format=sAnimation_format
+        format=sAnimation_format,
+        dLongitude_start=dLongitude_focus_in,
+        dLatitude_start=dLatitude_focus_in
     ) if iFlag_create_animation else None
 
     try:
@@ -435,7 +437,6 @@ def visualize_target_mesh(self,
             return False
 
         aData, nFeature = pData_result
-
 
         # Validate data
         aValid_data_mask = np.isfinite(aData)
@@ -463,15 +464,23 @@ def visualize_target_mesh(self,
         if pMesh_result is None:
             return False
 
-        pMesh, sScalars, aValid_cell_indices = pMesh_result
+        pMesh, sScalar, aValid_cell_indices = pMesh_result
         sUnit = sUnit_in if sUnit_in is not None else ""
+
+        # Reset the zoom factor to 1.0 so it won't zoom in too much during the animation
+
 
         # Handle animation vs single frame visualization
         if animation_config is not None:
-            animate_rotating_frames(pMesh, sScalars, aValid_cell_indices, sUnit, config, sFilename_out)
+            animate_rotating_frames(pMesh, aValid_cell_indices, config, animation_config,
+                                    sScalar =sScalar,
+                                    sUnit=sUnit,
+                                    sFilename_out = sFilename_out)
         else:
-
-            map_single_frame(pMesh, sScalars, aValid_cell_indices, sUnit, config, sFilename_out)
+            map_single_frame(pMesh,  aValid_cell_indices, config,
+                              sScalar = sScalar,
+                             sUnit=sUnit,
+                               sFilename_out = sFilename_out)
 
     except ImportError as e:
         logger.error('GeoVista library not available. Install with: pip install geovista')
@@ -686,7 +695,7 @@ def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iF
             logger.info(f'Created mesh with {pMesh.n_cells} cells and {pMesh.n_points} points')
 
         # Attach data to mesh
-        sScalars = sVariable.capitalize()
+        sScalar = sVariable
 
         # Validate data array length matches mesh cells
         if len(aData) != pMesh.n_cells:
@@ -694,23 +703,23 @@ def _create_target_mesh(pUraster_instance, aData: np.ndarray, sVariable: str, iF
             logger.error(f'This indicates a mismatch between mesh topology and extracted data')
             return None
 
-        pMesh.cell_data[sScalars] = aData
+        pMesh.cell_data[sScalar] = aData
 
         # Get valid cell indices (non-NaN values)
         aValid_data_mask = np.isfinite(aData)
         iN_valid = int(np.count_nonzero(aValid_data_mask))
 
         if iN_valid == 0:
-            logger.warning(f'No valid cells to plot for variable "{sScalars}"')
+            logger.warning(f'No valid cells to plot for variable "{sScalar}"')
             return None
 
         aValid_cell_indices = np.where(aValid_data_mask)[0]
 
         if iFlag_verbose_in:
-            logger.info(f'Attached data "{sScalars}" to mesh cells')
+            logger.info(f'Attached data "{sScalar}" to mesh cells')
             logger.info(f'Valid cells for visualization: {iN_valid}/{len(aData)}')
 
-        return pMesh, sScalars, aValid_cell_indices
+        return pMesh, sVariable, aValid_cell_indices
 
     except Exception as e:
         logger.error(f'Error creating target mesh: {e}')

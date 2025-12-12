@@ -1043,6 +1043,15 @@ class uraster:
                 iFlag_verbose_in=iFlag_verbose_in,
                 sField_unique_id=self.sField_unique_id)
 
+    def visualize_raster(self, sFilename_out=None, iFlag_verbose_in=False):
+        """
+        Visualize source raster data using GeoVista.
+
+        Note:
+            Not yet implemented. Placeholder for future raster visualization.
+        """
+        return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose_in=iFlag_verbose_in)
+
     def visualize_source_mesh(self,
                               sFilename_out=None,
                               dLongitude_focus_in=0.0,
@@ -1091,15 +1100,6 @@ class uraster:
             iFlag_verbose_in=iFlag_verbose_in,
             iFlag_wireframe_only=iFlag_wireframe_only
         )
-
-    def visualize_raster(self, sFilename_out=None, iFlag_verbose_in=False):
-        """
-        Visualize source raster data using GeoVista.
-
-        Note:
-            Not yet implemented. Placeholder for future raster visualization.
-        """
-        return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose_in=iFlag_verbose_in)
 
     def visualize_target_mesh(self, sVariable_in=None,
                               sUnit_in=None,
