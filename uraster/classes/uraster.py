@@ -1083,7 +1083,8 @@ class uraster:
             - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         """
         return _visual.visualize_source_mesh(
-            self, sFilename_out, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in,
+            self, sFilename_out, dLongitude_focus_in=dLongitude_focus_in,
+            dLatitude_focus_in=dLatitude_focus_in,
             dZoom_factor=dZoom_factor,
             iFlag_show_coastlines=iFlag_show_coastlines,
             iFlag_show_graticule=iFlag_show_graticule,

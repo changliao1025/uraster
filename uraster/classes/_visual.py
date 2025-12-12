@@ -297,7 +297,8 @@ def visualize_source_mesh(self,
 
         aValid_cell_indices = np.where(aValid_data_mask)[0]
         sUnit=''
-        map_single_frame(pMesh_source, sScalar, aValid_cell_indices ,sUnit, config, sFilename_out)
+        map_single_frame(pMesh_source, sScalar, aValid_cell_indices , config,
+                         sUnit=sFilename_out, sFilename_out = sFilename_out)
 
         # Output or display
         return
