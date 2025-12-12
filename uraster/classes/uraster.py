@@ -578,7 +578,7 @@ class uraster:
 
         #check mesh geometry_validity, if there are invalid range, return None
         #if there are cell cross IDL, need to split the cell into two parts, but it will valid
-        #self.sFilename_source_mesh = self.check_mesh_geometry_validity(iFlag_verbose_in=iFlag_verbose_in)
+        self.sFilename_source_mesh = self.check_mesh_geometry_validity(iFlag_verbose_in=iFlag_verbose_in)
         if not self.sFilename_source_mesh:
             return None
 
