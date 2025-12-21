@@ -22,10 +22,7 @@ from osgeo import gdal, ogr
 gdal.UseExceptions()
 from pyearth.visual.geovista.utility import (
     VisualizationConfig,
-    AnimationConfig,
-    setup_geovista_plotter,
-    configure_camera,
-    add_geographic_context,
+    AnimationConfig
 )
 from pyearth.visual.geovista.map_single_frame import map_single_frame
 from pyearth.visual.geovista.animate_rotating_frames import animate_rotating_frames
@@ -105,10 +102,15 @@ def visualize_raster(self,
                 logger.info(f'Processing raster {idx}/{len(self.aFilename_source_raster)}: {os.path.basename(sFilename)}')
 
             try:
+                #geovista approach
                 pRaster = sraster(sFilename)
                 pRaster.read_metadata()
+
                 pRaster.create_raster_mesh()
                 sFilename_raster_mesh = pRaster.sFilename_mesh
+                aData = pRaster.read_data()
+                #because the mesh starts from left left corner, we need to flip the data array
+                aData = np.flipud(aData)
 
                 if not os.path.exists(sFilename_raster_mesh):
                     logger.warning(f'Raster mesh file not found: {sFilename_raster_mesh}')
@@ -134,14 +136,15 @@ def visualize_raster(self,
                 aVertex_latitude = raster_mesh_info['vertices_latitude']
                 aConnectivity = raster_mesh_info['connectivity']
                 aCellID = raster_mesh_info['cell_ids']
-                mesh = gv.Transform.from_unstructured(
+                pMesh_raster = gv.Transform.from_unstructured(
                     aVertex_longitude,
                     aVertex_latitude,
                     connectivity=aConnectivity,
                     crs=CRS
                 )
-                name = f'Raster {idx} Cell ID'
-                mesh.cell_data[name] = aCellID  # Placeholder for actual raster values
+
+                name = f'Raster {idx} Data'
+                pMesh_raster.cell_data[name] = aData  # Placeholder for actual raster values
                 sargs = {
                     "title": name,
                     "shadow": True,
@@ -150,7 +153,8 @@ def visualize_raster(self,
                     "fmt": "%.0f",
                     "n_labels": 5,
                 }
-                pPlotter.add_mesh(mesh, scalar_bar_args=sargs)
+                aValid_cell_indices = np.where(np.isfinite(aCellID))[0]
+                sScalar = name
 
             except Exception as e:
                 logger.error(f"Error processing raster {sFilename}: {e}")
@@ -159,7 +163,12 @@ def visualize_raster(self,
 
 
         # Handle output
-        map_single_frame(pMesh_raster, sScalar, aValid_cell_indices ,sUnit, config, sFilename_out)
+        sUnit = ''
+        style = 'surface'
+
+        map_single_frame(pMesh_raster, aValid_cell_indices, config,
+                        style=style,
+                        sScalar=sScalar, sUnit=sUnit, sFilename_out = sFilename_out)
 
     except ImportError as e:
         logger.error('GeoVista library not available. Install with: pip install geovista')
@@ -175,7 +184,9 @@ def visualize_source_mesh(self,
                           sFilename_out: Optional[str] = None,
                           dLongitude_focus_in: Optional[float] = 0.0,
                           dLatitude_focus_in: Optional[float] = 0.0,
+                          dImage_scale_in: Optional[float] = 1.0,
                           dZoom_factor: float = 0.7,
+                          window_size_in: Optional[Tuple[int, int]] = (800, 600),
                           iFlag_show_coastlines: bool = True,
                           iFlag_show_graticule: bool = True,
                           sCoastline_color: str = 'black',
@@ -228,6 +239,8 @@ def visualize_source_mesh(self,
     config = VisualizationConfig(
         longitude_focus=dLongitude_focus_in,
         latitude_focus=dLatitude_focus_in,
+        image_scale=dImage_scale_in,
+        window_size=window_size_in,
         zoom_factor=dZoom_factor,
         show_coastlines=iFlag_show_coastlines,
         show_graticule=iFlag_show_graticule,
@@ -297,8 +310,17 @@ def visualize_source_mesh(self,
 
         aValid_cell_indices = np.where(aValid_data_mask)[0]
         sUnit=''
-        map_single_frame(pMesh_source, sScalar, aValid_cell_indices , config,
-                         sUnit=sUnit, sFilename_out = sFilename_out)
+        if iFlag_wireframe_only:
+            style = 'wireframe'
+            if config.verbose:
+                logger.info('Using wireframe-only visualization mode')
+        else:
+            style = 'surface'
+            if config.verbose:
+                logger.info('Using surface visualization mode')
+        map_single_frame(pMesh_source, aValid_cell_indices, config,
+                        style=style,
+                        sScalar=sScalar, sUnit=sUnit, sFilename_out = sFilename_out)
 
         # Output or display
         return
@@ -321,6 +343,8 @@ def visualize_target_mesh(self,
                          dLongitude_focus_in: Optional[float] = 0.0,
                          dLatitude_focus_in: Optional[float] = 0.0,
                          dZoom_factor: Optional[float] = 0.7,
+                         window_size_in: Optional[Tuple[int, int]] = (800, 600),
+                         dImage_scale_in: Optional[float] = 1.0,
                          iFlag_show_coastlines: Optional[bool] = True,
                          iFlag_show_graticule: Optional[bool] = True,
                          sColormap: Optional[str] = 'viridis',
@@ -408,6 +432,8 @@ def visualize_target_mesh(self,
     config = VisualizationConfig(
         longitude_focus=dLongitude_focus_in,
         latitude_focus=dLatitude_focus_in,
+        image_scale=dImage_scale_in,
+        window_size_in=window_size_in,
         zoom_factor=dZoom_factor,
         show_coastlines=iFlag_show_coastlines,
         show_graticule=iFlag_show_graticule,
@@ -421,8 +447,8 @@ def visualize_target_mesh(self,
         frames=iAnimation_frames,
         speed=dAnimation_speed,
         format=sAnimation_format,
-        dLongitude_start=dLongitude_focus_in,
-        dLatitude_start=dLatitude_focus_in
+        longitude_start=dLongitude_focus_in,
+        latitude_start=dLatitude_focus_in
     ) if iFlag_create_animation else None
 
     try:

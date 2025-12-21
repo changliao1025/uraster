@@ -31,7 +31,7 @@ CRS = "EPSG:4326"
 DEFAULT_EARTH_RADIUS = 1.0
 DEFAULT_CAMERA_DISTANCE_MULTIPLIER = 3.0
 DEFAULT_ZOOM_FACTOR = 0.7
-VALID_ANIMATION_FORMATS = ['mp4', 'gif', 'avi']
+VALID_ANIMATION_FORMATS = ['.mp4', '.gif', '.avi']
 VALID_IMAGE_FORMATS = ['.png', '.jpg', '.jpeg', '.svg', '.tif', '.tiff']
 COORDINATE_BOUNDS = {'longitude': (-180, 180), 'latitude': (-90, 90)}
 

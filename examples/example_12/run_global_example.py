@@ -17,8 +17,8 @@ sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson') # use
 sFilename_hydrosheds_dem = os.path.join(sFolder_data, 'input','hyd_glo_dem_15s.tif')
 
 sFilename_target_mesh = os.path.join(sFolder_data, 'output','mpas_uraster.geojson')
-sFilename_mesh_png = os.path.join(sFolder_data, 'output', 'mesh.jpg')
-sFilename_variable_png = os.path.join(sFolder_data, 'output','uraster.png')
+sFilename_mesh_png = os.path.join(sFolder_data, 'output', 'mesh.pdf')
+sFilename_variable_png = os.path.join(sFolder_data, 'output','uraster.pdf')
 sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'global_uraster.mp4')
 
 from pyearth.toolbox.conversion.convert_vector_format import convert_vector_format
@@ -46,7 +46,12 @@ def main():
     #pRaster.report_inputs()
     dLongitude_focus_in = -112.033964
     dLatitude_focus_in = 43.491977
-    #pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
+    pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png,
+                                  dLongitude_focus_in=dLongitude_focus_in,
+                                    dLatitude_focus_in=dLatitude_focus_in,
+                                    dImage_scale_in = 10,
+                                    iFlag_show_graticule = False,
+                                    iFlag_wireframe_only = True)
 
     #pRaster.run_remap(iFlag_verbose_in=True)
     sFilename_mesh_parquet = os.path.join(sFolder_data, 'output','mpas_uraster.parquet')
@@ -59,7 +64,9 @@ def main():
         sFilename_out=sFilename_variable_png,
         dLongitude_focus_in=dLongitude_focus_in,
         dLatitude_focus_in=dLatitude_focus_in,
-        sColormap=sColormap)
+        dImage_scale_in = 10,
+        sColormap=sColormap,
+        iFlag_show_graticule = False)
 
     #pRaster.visualize_target_mesh(
     #    sFilename_out=sFilename_variable_animation,

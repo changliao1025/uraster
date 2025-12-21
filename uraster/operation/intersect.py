@@ -112,7 +112,7 @@ def run_remap(sFilename_target_mesh,
         # remove the file using the vector driver
         pDriver_vector.DeleteDataSource(sFilename_target_mesh)
 
-    sExtension = os.path.splitext(sFilename_source_raster)[1]
+    sExtension = os.path.splitext(sFilename_source_raster)[1].lstrip('.')
     sName = os.path.basename(sFilename_source_raster)
     sRasterName_no_extension = os.path.splitext(sName)[0]
 

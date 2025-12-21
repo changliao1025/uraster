@@ -1052,7 +1052,7 @@ def run_remap(sFilename_target_mesh,
     # get the raster file extension
     # just use the first raster to get the extension
     sFilename_raster = aFilename_source_raster[0]
-    sExtension = os.path.splitext(sFilename_raster)[1]
+    sExtension = os.path.splitext(sFilename_raster)[1].lstrip('.')
     sName = os.path.basename(sFilename_raster)
     sRasterName_no_extension = os.path.splitext(sName)[0]
 

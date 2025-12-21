@@ -218,7 +218,8 @@ def check_mesh_quality(sFilename_mesh_in: str, iFlag_verbose_in: bool = False) -
         # Make the filename adjustment more flexible to handle any format
         # Get the file extension and base name
         file_base, file_ext = os.path.splitext(sFilename_mesh_in)
-        sFilename_source_mesh_fixed = f"{file_base}_fixed{file_ext}"
+        file_ext = file_ext.lstrip('.')
+        sFilename_source_mesh_fixed = f"{file_base}_fixed.{file_ext}"
         fix_mesh_longitude_range_and_idl_crossing(
             sFilename_mesh_in, sFilename_source_mesh_fixed)
         return sFilename_source_mesh_fixed

@@ -269,7 +269,8 @@ class sraster:
 
         # Define a new filename for the converted raster using robust path handling
         base, ext = os.path.splitext(self.sFilename)
-        sFilename_raster_wgs84 = f"{base}_wgs84{ext}"
+        ext = ext.lstrip('.')
+        sFilename_raster_wgs84 = f"{base}_wgs84.{ext}"
 
         # Delete the file if it already exists
         if os.path.isfile(sFilename_raster_wgs84):
