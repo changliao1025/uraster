@@ -23,7 +23,7 @@ sFilename_target_mesh = os.path.join(sFolder_data, 'output',  'uraster.geojson')
 sFilename_mesh_png = os.path.join(sFolder_data, 'output',  'mesh.jpg')
 sFilename_raster_png = os.path.join(sFolder_data, 'output',  'raster.png')
 sFilename_variable_png = os.path.join(sFolder_data, 'output',  'uraster.png')
-sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'uraster.gif')
+sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'uraster.mp4')
 
 
 from uraster.classes.uraster import uraster
@@ -47,7 +47,7 @@ def main():
     pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png,
                                   dLongitude_focus_in=dLongitude_focus_in,
                                   dLatitude_focus_in=dLatitude_focus_in)
-    pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
+    #pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
 
     pRaster.run_remap(iFlag_weighted_average_in=False)
     #pRaster.report_outputs() #not implemented yet
@@ -56,15 +56,18 @@ def main():
     #Optional visualization and animation (disabled by default in this script)
     #pRaster.visualize_target_mesh(
     #    sFilename_out=sFilename_variable_png,
-    #    sColormap=sColormap, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
+    #    sColormap=sColormap,
+    #      dLongitude_focus_in=dLongitude_focus_in,
+    #      dLatitude_focus_in=dLatitude_focus_in)
 
     pRaster.visualize_target_mesh(
         sFilename_out=sFilename_variable_animation,
         sColormap=sColormap,
-        dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in,
+        dLongitude_focus_in=dLongitude_focus_in,
+        dLatitude_focus_in=dLatitude_focus_in,
         iFlag_create_animation=True,
         iAnimation_frames=360,    # 1° longitude per frame
-        sAnimation_format='gif')
+        sAnimation_format='mp4')
 
     pRaster.cleanup()
 

@@ -1052,17 +1052,7 @@ class uraster:
         """
         return _visual.visualize_raster(self, sFilename_out=sFilename_out, iFlag_verbose_in=iFlag_verbose_in)
 
-    def visualize_source_mesh(self,
-                              sFilename_out=None,
-                              dLongitude_focus_in=0.0,
-                              dLatitude_focus_in=0.0,
-                              dImage_scale_in=1.0,
-                              dZoom_factor=0.7,
-                              window_size_in=(800, 600),
-                              iFlag_show_coastlines=True,
-                              iFlag_show_graticule=True,
-                              iFlag_wireframe_only=True,
-                              iFlag_verbose_in=False):
+    def visualize_source_mesh(self, sFilename_out=None, **kwargs):
         """
         Visualize the source mesh topology using GeoVista 3D globe rendering.
 
@@ -1072,55 +1062,61 @@ class uraster:
         Args:
             sFilename_out (str, optional): Output screenshot file path.
                 If None, displays interactive viewer. Supports formats: .png, .jpg, .svg
-            dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
+
+        Keyword Arguments (all optional with sensible defaults):
+            dLongitude_focus_in (float): Camera focal point longitude in degrees.
                 Valid range: -180 to 180. Default is 0.0 (prime meridian).
-            dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
+            dLatitude_focus_in (float): Camera focal point latitude in degrees.
                 Valid range: -90 to 90. Default is 0.0 (equator).
-            dZoom_factor (float, optional): Camera zoom level.
-                Higher values zoom in. Default is 0.7.
-            iFlag_show_coastlines (bool, optional): Show coastline overlay.
-                Default is True.
-            iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
-                Default is True.
-            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
-                If False, only print error messages. Default is False.
+            dImage_scale_in (float): Image scaling factor. Default is 1.0.
+            dZoom_factor (float): Camera zoom level. Higher values zoom in. Default is 0.7.
+            window_size_in (tuple): Window size as (width, height). Default is (800, 600).
+            iFlag_show_coastlines (bool): Show coastline overlay. Default is True.
+            iFlag_show_graticule (bool): Show coordinate grid with labels. Default is True.
+            iFlag_wireframe_only (bool): Show wireframe only. Default is True.
+            iFlag_verbose_in (bool): If True, print detailed progress messages. Default is False.
 
         Returns:
             bool: True if visualization successful, False otherwise
+
+        Example:
+            # Simple call with defaults
+            obj.visualize_source_mesh()
+
+            # Override specific parameters
+            obj.visualize_source_mesh('output.png', dZoom_factor=0.5, iFlag_show_coastlines=False)
+
+            # Customize multiple parameters
+            obj.visualize_source_mesh(sFilename_out='map.png',
+                                      dLongitude_focus_in=120.0,
+                                      dLatitude_focus_in=30.0)
 
         Note:
             - Requires 'geovista' package: pip install geovista
             - Interactive mode requires display environment
             - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         """
+        # Set defaults for all parameters
+        defaults = {
+            'dLongitude_focus_in': 0.0,
+            'dLatitude_focus_in': 0.0,
+            'dImage_scale_in': 1.0,
+            'dZoom_factor': 0.7,
+            'window_size_in': (800, 600),
+            'iFlag_show_coastlines': True,
+            'iFlag_show_graticule': True,
+            'iFlag_wireframe_only': True,
+            'iFlag_verbose_in': False,
+        }
+
+        # Merge defaults with provided kwargs
+        merged_params = {**defaults, **kwargs}
+
         return _visual.visualize_source_mesh(
-            self, sFilename_out, dLongitude_focus_in=dLongitude_focus_in,
-            dLatitude_focus_in=dLatitude_focus_in,
-            window_size_in=window_size_in,
-            dImage_scale_in=dImage_scale_in,
-            dZoom_factor=dZoom_factor,
-            iFlag_show_coastlines=iFlag_show_coastlines,
-            iFlag_show_graticule=iFlag_show_graticule,
-            iFlag_verbose_in=iFlag_verbose_in,
-            iFlag_wireframe_only=iFlag_wireframe_only
+            self, sFilename_out, **merged_params
         )
 
-    def visualize_target_mesh(self, sVariable_in=None,
-                              sUnit_in=None,
-                              sFilename_out=None,
-                              dLongitude_focus_in=0.0,
-                              dLatitude_focus_in=0.0,
-                              dImage_scale_in=1.0,
-                              dZoom_factor=0.7,
-                              window_size_in=(800, 600),
-                              iFlag_show_coastlines=True,
-                              iFlag_show_graticule=True,
-                              sColormap='viridis',
-                              iFlag_create_animation=False,
-                              iAnimation_frames=360,
-                              dAnimation_speed=1.0,
-                              sAnimation_format='mp4',
-                              iFlag_verbose_in=False):
+    def visualize_target_mesh(self, sVariable_in=None, sUnit_in=None, sFilename_out=None, **kwargs):
         """
         Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
@@ -1136,31 +1132,39 @@ class uraster:
             sFilename_out (str, optional): Output screenshot file path.
                 If None, displays interactive viewer. Supports: .png, .jpg, .svg
                 For animations, this becomes the base filename (e.g., 'animation.mp4')
-            dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
+
+        Keyword Arguments (all optional with sensible defaults):
+            dLongitude_focus_in (float): Camera focal point longitude in degrees.
                 Valid range: -180 to 180. Default is 0.0. For animations, this is the starting longitude.
-            dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
+            dLatitude_focus_in (float): Camera focal point latitude in degrees.
                 Valid range: -90 to 90. Default is 0.0.
-            dZoom_factor (float, optional): Camera zoom level.
-                Higher values zoom in. Default is 0.75.
-            iFlag_show_coastlines (bool, optional): Show coastline overlay.
-                Default is True.
-            iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
-                Default is True.
-            sColormap (str, optional): Matplotlib colormap name.
-                Default is 'viridis'. Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
-            iFlag_create_animation (bool, optional): Create rotating animation.
-                Default is False. When True, generates frames for 360° rotation.
-            iAnimation_frames (int, optional): Number of frames for 360° rotation.
-                Default is 36 (10° per frame). More frames = smoother animation.
-            dAnimation_speed (float, optional): Animation speed in degrees per frame.
-                Default is 10.0. Calculated as 360 / iAnimation_frames if not specified.
-            sAnimation_format (str, optional): Animation output format.
-                Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
-            iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
-                If False, only print error messages. Default is False.
+            dImage_scale_in (float): Image scaling factor. Default is 1.0.
+            dZoom_factor (float): Camera zoom level. Higher values zoom in. Default is 0.7.
+            window_size_in (tuple): Window size as (width, height). Default is (800, 600).
+            iFlag_show_coastlines (bool): Show coastline overlay. Default is True.
+            iFlag_show_graticule (bool): Show coordinate grid with labels. Default is True.
+            sColormap (str): Matplotlib colormap name. Default is 'viridis'.
+                Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
+            iFlag_create_animation (bool): Create rotating animation. Default is False.
+            iAnimation_frames (int): Number of frames for 360° rotation. Default is 360.
+            dAnimation_speed (float): Animation speed in degrees per frame. Default is 1.0.
+            sAnimation_format (str): Animation output format. Default is 'mp4'.
+                Supports: 'mp4', 'gif', 'avi'
+            iFlag_verbose_in (bool): If True, print detailed progress messages. Default is False.
 
         Returns:
             bool: True if visualization successful, False otherwise
+
+        Example:
+            # Simple visualization
+            obj.visualize_target_mesh('mean')
+
+            # Save to file with custom colormap
+            obj.visualize_target_mesh('mean', sFilename_out='output.png', sColormap='coolwarm')
+
+            # Create animation
+            obj.visualize_target_mesh('mean', sFilename_out='animation.mp4',
+                                      iFlag_create_animation=True, iAnimation_frames=120)
 
         Raises:
             ImportError: If geovista package is not installed
@@ -1173,21 +1177,29 @@ class uraster:
             - Interactive mode requires display environment
             - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
         """
+        # Set defaults for all parameters
+        defaults = {
+            'dLongitude_focus_in': 0.0,
+            'dLatitude_focus_in': 0.0,
+            'dImage_scale_in': 1.0,
+            'dZoom_factor': 0.7,
+            'window_size_in': (800, 600),
+            'iFlag_show_coastlines': True,
+            'iFlag_show_graticule': True,
+            'sColormap': 'viridis',
+            'iFlag_create_animation': False,
+            'iAnimation_frames': 360,
+            'dAnimation_speed': 1.0,
+            'sAnimation_format': 'mp4',
+            'iFlag_verbose_in': False,
+        }
+
+        # Merge defaults with provided kwargs
+        merged_params = {**defaults, **kwargs}
+
         return _visual.visualize_target_mesh(
             self, sVariable_in, sUnit_in, sFilename_out,
-            dLongitude_focus_in=dLongitude_focus_in,
-            dLatitude_focus_in=dLatitude_focus_in,
-            dImage_scale_in=dImage_scale_in,
-            window_size_in=window_size_in,
-            dZoom_factor=dZoom_factor,
-            iFlag_show_coastlines=iFlag_show_coastlines,
-            iFlag_show_graticule=iFlag_show_graticule,
-            sColormap=sColormap,
-            iFlag_create_animation=iFlag_create_animation,
-            iAnimation_frames=iAnimation_frames,
-            dAnimation_speed=dAnimation_speed,
-            sAnimation_format=sAnimation_format,
-            iFlag_verbose_in=iFlag_verbose_in
+            **merged_params
         )
 
     def _create_rotation_animation(self, plotter, sFilename_out, dLongitude_start, dLatitude_focus,

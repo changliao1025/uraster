@@ -19,6 +19,10 @@ authors:
    orcid: 0000-0001-6310-4964
    affiliation: 2
 
+ - name: Bill Little
+   orcid: 0000-0002-1345-9465
+   affiliation: 3
+
 
 
 
@@ -30,6 +34,9 @@ affiliations:
  - name: University of Calgary, Calgary, Canada
    index: 2
 
+ - name: Met Office, Exeter, UK
+   index: 3
+
 date: 13 Nov 2025
 
 
@@ -40,7 +47,7 @@ bibliography: paper.bib
 # Summary
 
 
-Converting **structured raster datasets** into **unstructured meshes** is a common prerequisite for configuring numerical models that require spatially varying inputs and parameters. This repository offers the Python package, **`uraster`**, to facilitate this conversion. The package is highly flexible, designed to support both continuous and categorical raster data, and provides configurable options for **mass conservation** and multiple **interpolation methods** to ensure the resulting unstructured mesh accurately represents the original data. Furthermore, `uraster` integrates the industrial-standard 3D visualization library, **`GeoVista`**, enabling intuitive 3D visualization of mesh-based data on a sphere. These capabilities make `uraster` well-suited for regional to global scale applications and for variable resolution unstructured mesh-based hydrologic and land surface modeling.
+Converting **structured raster datasets** into **unstructured meshes** is a common prerequisite for configuring numerical models that require spatially varying inputs and parameters. This repository offers the Python package, **`uraster`**, to facilitate this conversion. The package is highly flexible, designed to support both continuous and categorical raster data, and provides configurable options for **mass conservation** and multiple **interpolation methods** to ensure the resulting unstructured mesh accurately represents the original data. Furthermore, `uraster` integrates the industrial-standard 3D visualization library, **`GeoVista`**, enabling intuitive and interactive 3D visualization of mesh-based data on a sphere. These capabilities make `uraster` well-suited for regional to global scale applications and for variable resolution unstructured mesh-based hydrologic and land surface modeling.
 
 
 # Statement of need
@@ -72,7 +79,7 @@ All the operations are implemented using the standard GDAL/OGR APIs, ensuring ro
 - **Projection-Aware Operations**: Handles differences in map projections between raster datasets and mesh geometries, ensuring accurate aggregation of raster values within each mesh cell polygon.
 
 
-- **Interactive GeoVista API**: Offers essential functions to visualize the input and output vector layers on a 3D sphere, including support for mesh cells that cross the antimeridian.
+- **Interactive GeoVista API**: Offers essential functions to visualize the input and output vector layers on a 3D sphere, including support for mesh cells that cross the antimeridian and projecting an unstructured mesh to a planar coordinate reference system.
 
 
 # State of the field

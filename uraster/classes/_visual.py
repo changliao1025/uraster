@@ -182,19 +182,7 @@ def visualize_raster(self,
 
 def visualize_source_mesh(self,
                           sFilename_out: Optional[str] = None,
-                          dLongitude_focus_in: Optional[float] = 0.0,
-                          dLatitude_focus_in: Optional[float] = 0.0,
-                          dImage_scale_in: Optional[float] = 1.0,
-                          dZoom_factor: float = 0.7,
-                          window_size_in: Optional[Tuple[int, int]] = (800, 600),
-                          iFlag_show_coastlines: bool = True,
-                          iFlag_show_graticule: bool = True,
-                          sCoastline_color: str = 'black',
-                          dCoastline_width: float = 1.0,
-                          iFlag_wireframe_only: bool = False,
-                          dEdge_width: float = 1.0,
-                          sEdge_color: str = 'black',
-                          iFlag_verbose_in: bool = False) -> bool:
+                          **kwargs) -> bool:
     """
     Visualize the source mesh topology using GeoVista 3D globe rendering.
 
@@ -204,22 +192,22 @@ def visualize_source_mesh(self,
     Args:
         sFilename_out: Output screenshot file path. If None, displays interactive viewer.
             Supports formats: .png, .jpg, .svg
+
+    Keyword Arguments (all optional with sensible defaults):
         dLongitude_focus_in: Camera focal point longitude in degrees (-180 to 180).
             Default is 0.0 (prime meridian).
         dLatitude_focus_in: Camera focal point latitude in degrees (-90 to 90).
             Default is 0.0 (equator).
+        dImage_scale_in: Image scaling factor. Default is 1.0.
         dZoom_factor: Camera zoom level. Higher values zoom in. Default is 0.7.
+        window_size_in: Window size as (width, height). Default is (800, 600).
         iFlag_show_coastlines: Show coastline overlay. Default is True.
         iFlag_show_graticule: Show coordinate grid with labels. Default is True.
         sCoastline_color: Color for coastlines. Default is 'black'.
-            Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
         dCoastline_width: Line width for coastlines. Default is 1.0.
-        iFlag_wireframe_only: If True, show only mesh edges without cell filling.
-            Default is False (shows filled cells).
-        dEdge_width: Line width for mesh edges when wireframe mode is enabled.
-            Default is 1.0.
+        iFlag_wireframe_only: Show only mesh edges without cell filling. Default is False.
+        dEdge_width: Line width for mesh edges in wireframe mode. Default is 1.0.
         sEdge_color: Color for mesh edges in wireframe mode. Default is 'black'.
-            Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
         iFlag_verbose_in: If True, print detailed progress messages. Default is False.
 
     Returns:
@@ -231,12 +219,47 @@ def visualize_source_mesh(self,
         - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         - Wireframe mode is useful for examining mesh structure and topology
     """
+    # Set defaults for all optional parameters
+    defaults = {
+        'dLongitude_focus_in': 0.0,
+        'dLatitude_focus_in': 0.0,
+        'dImage_scale_in': 1.0,
+        'dZoom_factor': 0.7,
+        'window_size_in': (800, 600),
+        'iFlag_show_coastlines': True,
+        'iFlag_show_graticule': True,
+        'sCoastline_color': 'black',
+        'dCoastline_width': 1.0,
+        'iFlag_wireframe_only': False,
+        'dEdge_width': 1.0,
+        'sEdge_color': 'black',
+        'iFlag_verbose_in': False,
+    }
+
+    # Merge defaults with provided kwargs
+    merged_params = {**defaults, **kwargs}
+
+    # Extract parameters
+    dLongitude_focus_in = merged_params['dLongitude_focus_in']
+    dLatitude_focus_in = merged_params['dLatitude_focus_in']
+    dImage_scale_in = merged_params['dImage_scale_in']
+    dZoom_factor = merged_params['dZoom_factor']
+    window_size_in = merged_params['window_size_in']
+    iFlag_show_coastlines = merged_params['iFlag_show_coastlines']
+    iFlag_show_graticule = merged_params['iFlag_show_graticule']
+    sCoastline_color = merged_params['sCoastline_color']
+    dCoastline_width = merged_params['dCoastline_width']
+    iFlag_wireframe_only = merged_params['iFlag_wireframe_only']
+    dEdge_width = merged_params['dEdge_width']
+    sEdge_color = merged_params['sEdge_color']
+    iFlag_verbose_in = merged_params['iFlag_verbose_in']
+
     # Validate inputs using new utility functions
     if not _validate_mesh_data(self):
         return False
 
     # Create configuration object
-    config = VisualizationConfig(
+    config_static = VisualizationConfig(
         longitude_focus=dLongitude_focus_in,
         latitude_focus=dLatitude_focus_in,
         image_scale=dImage_scale_in,
@@ -252,12 +275,12 @@ def visualize_source_mesh(self,
     try:
         # Import and setup GeoVista
         import geovista as gv
-        if config.verbose:
+        if config_static.verbose:
             logger.info('Creating mesh visualization...')
             logger.info(f'  - Vertices: {len(self.aVertex_longititude)}')
             logger.info(f'  - Connectivity shape: {self.aConnectivity.shape}')
-            logger.info(f'  - Focus: ({config.longitude_focus:.2f}°, {config.latitude_focus:.2f}°)')
-            logger.info(f'  - Zoom factor: {config.zoom_factor}')
+            logger.info(f'  - Focus: ({config_static.longitude_focus:.2f}°, {config_static.latitude_focus:.2f}°)')
+            logger.info(f'  - Zoom factor: {config_static.zoom_factor}')
 
         # Validate connectivity array structure
         if self.aConnectivity.ndim != 2:
@@ -297,7 +320,7 @@ def visualize_source_mesh(self,
         sScalar = 'Cell ID'
         pMesh_source.cell_data[sScalar] = self.aCellID
 
-        if config.verbose:
+        if config_static.verbose:
             logger.info(f'Created GeoVista mesh with {pMesh_source.n_cells} cells and {pMesh_source.n_points} points')
 
         # Get valid cell indices (non-NaN values)
@@ -312,13 +335,13 @@ def visualize_source_mesh(self,
         sUnit=''
         if iFlag_wireframe_only:
             style = 'wireframe'
-            if config.verbose:
+            if config_static.verbose:
                 logger.info('Using wireframe-only visualization mode')
         else:
             style = 'surface'
-            if config.verbose:
+            if config_static.verbose:
                 logger.info('Using surface visualization mode')
-        map_single_frame(pMesh_source, aValid_cell_indices, config,
+        map_single_frame(pMesh_source, aValid_cell_indices, config_static,
                         style=style,
                         sScalar=sScalar, sUnit=sUnit, sFilename_out = sFilename_out)
 
@@ -340,21 +363,7 @@ def visualize_target_mesh(self,
                          sVariable_in: Optional[str] = None,
                          sUnit_in: Optional[str] = None,
                          sFilename_out: Optional[str] = None,
-                         dLongitude_focus_in: Optional[float] = 0.0,
-                         dLatitude_focus_in: Optional[float] = 0.0,
-                         dZoom_factor: Optional[float] = 0.7,
-                         window_size_in: Optional[Tuple[int, int]] = (800, 600),
-                         dImage_scale_in: Optional[float] = 1.0,
-                         iFlag_show_coastlines: Optional[bool] = True,
-                         iFlag_show_graticule: Optional[bool] = True,
-                         sColormap: Optional[str] = 'viridis',
-                         sCoastline_color: Optional[str] = 'black',
-                         dCoastline_width: Optional[float] = 1.0,
-                         iFlag_create_animation: Optional[bool] = False,
-                         iAnimation_frames: Optional[int] = 36,
-                         dAnimation_speed: Optional[float] = 1.0,
-                         sAnimation_format: Optional[str] = 'mp4',
-                         iFlag_verbose_in: Optional[bool] = False) -> bool:
+                         **kwargs) -> bool:
     """
     Visualize the target mesh with computed zonal statistics using GeoVista 3D rendering.
 
@@ -369,32 +378,25 @@ def visualize_target_mesh(self,
             Default is empty string.
         sFilename_out (str, optional): Output screenshot file path.
             If None, displays interactive viewer. Supports: .png, .jpg, .svg
-            For animations, this becomes the base filename (e.g., 'animation.mp4')
-        dLongitude_focus_in (float, optional): Camera focal point longitude in degrees.
-            Valid range: -180 to 180. Default is 0.0. For animations, this is the starting longitude.
-        dLatitude_focus_in (float, optional): Camera focal point latitude in degrees.
-            Valid range: -90 to 90. Default is 0.0.
-        dZoom_factor (float, optional): Camera zoom level.
-            Higher values zoom in. Default is 0.75.
-        iFlag_show_coastlines (bool, optional): Show coastline overlay.
-            Default is True.
-        iFlag_show_graticule (bool, optional): Show coordinate grid with labels.
-            Default is True.
-        sColormap (str, optional): Matplotlib colormap name.
-            Default is 'viridis'. Examples: 'plasma', 'coolwarm', 'jet', 'RdYlBu'
-        sCoastline_color (str, optional): Color for coastlines. Default is 'black'.
-            Examples: 'white', 'red', 'blue', 'gray', or RGB tuples like (1.0, 0.0, 0.0).
-        dCoastline_width (float, optional): Line width for coastlines. Default is 1.0.
-        iFlag_create_animation (bool, optional): Create rotating animation.
-            Default is False. When True, generates frames for 360° rotation.
-        iAnimation_frames (int, optional): Number of frames for 360° rotation.
-            Default is 36 (10° per frame). More frames = smoother animation.
-        dAnimation_speed (float, optional): Animation speed in degrees per frame.
-            Default is 1.0. Calculated as 360 / iAnimation_frames if not specified.
-        sAnimation_format (str, optional): Animation output format.
-            Default is 'mp4'. Supports: 'mp4', 'gif', 'avi'
-        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
-            If False, only print error messages. Default is False.
+
+    Keyword Arguments (all optional with sensible defaults):
+        dLongitude_focus_in: Camera focal point longitude in degrees (-180 to 180).
+            Default is 0.0. For animations, this is the starting longitude.
+        dLatitude_focus_in: Camera focal point latitude in degrees (-90 to 90).
+            Default is 0.0.
+        dImage_scale_in: Image scaling factor. Default is 1.0.
+        dZoom_factor: Camera zoom level. Higher values zoom in. Default is 0.7.
+        window_size_in: Window size as (width, height). Default is (800, 600).
+        iFlag_show_coastlines: Show coastline overlay. Default is True.
+        iFlag_show_graticule: Show coordinate grid with labels. Default is True.
+        sColormap: Matplotlib colormap name. Default is 'viridis'.
+        sCoastline_color: Color for coastlines. Default is 'black'.
+        dCoastline_width: Line width for coastlines. Default is 1.0.
+        iFlag_create_animation: Create rotating animation. Default is False.
+        iAnimation_frames: Number of frames for 360° rotation. Default is 36.
+        dAnimation_speed: Animation speed in degrees per frame. Default is 1.0.
+        sAnimation_format: Animation output format. Default is 'mp4'.
+        iFlag_verbose_in: If True, print detailed progress messages. Default is False.
 
     Returns:
         bool: True if visualization successful, False otherwise
@@ -410,6 +412,45 @@ def visualize_target_mesh(self,
         - Interactive mode requires display environment
         - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
     """
+    # Set defaults for all optional parameters
+    defaults = {
+        'dLongitude_focus_in': 0.0,
+        'dLatitude_focus_in': 0.0,
+        'dImage_scale_in': 1.0,
+        'dZoom_factor': 0.7,
+        'window_size_in': (800, 600),
+        'iFlag_show_coastlines': True,
+        'iFlag_show_graticule': True,
+        'sColormap': 'viridis',
+        'sCoastline_color': 'black',
+        'dCoastline_width': 1.0,
+        'iFlag_create_animation': False,
+        'iAnimation_frames': 36,
+        'dAnimation_speed': 1.0,
+        'sAnimation_format': 'mp4',
+        'iFlag_verbose_in': False,
+    }
+
+    # Merge defaults with provided kwargs
+    merged_params = {**defaults, **kwargs}
+
+    # Extract parameters
+    dLongitude_focus_in = merged_params['dLongitude_focus_in']
+    dLatitude_focus_in = merged_params['dLatitude_focus_in']
+    dImage_scale_in = merged_params['dImage_scale_in']
+    dZoom_factor = merged_params['dZoom_factor']
+    window_size_in = merged_params['window_size_in']
+    iFlag_show_coastlines = merged_params['iFlag_show_coastlines']
+    iFlag_show_graticule = merged_params['iFlag_show_graticule']
+    sColormap = merged_params['sColormap']
+    sCoastline_color = merged_params['sCoastline_color']
+    dCoastline_width = merged_params['dCoastline_width']
+    iFlag_create_animation = merged_params['iFlag_create_animation']
+    iAnimation_frames = merged_params['iAnimation_frames']
+    dAnimation_speed = merged_params['dAnimation_speed']
+    sAnimation_format = merged_params['sAnimation_format']
+    iFlag_verbose_in = merged_params['iFlag_verbose_in']
+
     # Validate inputs
     if not self.sFilename_target_mesh:
         logger.error('No target mesh filename configured')
@@ -429,11 +470,11 @@ def visualize_target_mesh(self,
         return False
 
     # Create configuration objects
-    config = VisualizationConfig(
+    config_static = VisualizationConfig(
         longitude_focus=dLongitude_focus_in,
         latitude_focus=dLatitude_focus_in,
         image_scale=dImage_scale_in,
-        window_size_in=window_size_in,
+        window_size=window_size_in,
         zoom_factor=dZoom_factor,
         show_coastlines=iFlag_show_coastlines,
         show_graticule=iFlag_show_graticule,
@@ -443,7 +484,7 @@ def visualize_target_mesh(self,
         verbose=iFlag_verbose_in
     )
 
-    animation_config = AnimationConfig(
+    config_anima = AnimationConfig(
         frames=iAnimation_frames,
         speed=dAnimation_speed,
         format=sAnimation_format,
@@ -454,11 +495,11 @@ def visualize_target_mesh(self,
     try:
         import geovista as gv
 
-        if config.verbose:
+        if config_static.verbose:
             logger.info(f'Loading target mesh data from: {self.sFilename_target_mesh}')
 
         # Extract data from target mesh
-        pData_result = _extract_target_mesh_data(self.sFilename_target_mesh, sVariable, config.verbose)
+        pData_result = _extract_target_mesh_data(self.sFilename_target_mesh, sVariable, config_static.verbose)
         if pData_result is None:
             return False
 
@@ -476,7 +517,7 @@ def visualize_target_mesh(self,
             logger.warning(f'{len(aData) - iValid_data_count} of {len(aData)} values are invalid')
 
         # Log data statistics
-        if config.verbose:
+        if config_static.verbose:
             aValid_values = aData[aValid_data_mask]
             logger.info(f'Data statistics for "{sVariable}":')
             logger.info(f'  - Valid values: {iValid_data_count}/{len(aData)}')
@@ -486,7 +527,7 @@ def visualize_target_mesh(self,
             logger.info(f'  - Std: {np.std(aValid_values):.4f}')
 
         # Create and validate mesh
-        pMesh_result = _create_target_mesh(self, aData, sVariable, config.verbose)
+        pMesh_result = _create_target_mesh(self, aData, sVariable, config_static.verbose)
         if pMesh_result is None:
             return False
 
@@ -497,13 +538,13 @@ def visualize_target_mesh(self,
 
 
         # Handle animation vs single frame visualization
-        if animation_config is not None:
-            animate_rotating_frames(pMesh, aValid_cell_indices, config, animation_config,
+        if config_anima is not None:
+            animate_rotating_frames(pMesh, aValid_cell_indices, config_static, config_anima,
                                     sScalar =sScalar,
                                     sUnit=sUnit,
                                     sFilename_out = sFilename_out)
         else:
-            map_single_frame(pMesh,  aValid_cell_indices, config,
+            map_single_frame(pMesh,  aValid_cell_indices, config_static,
                               sScalar = sScalar,
                              sUnit=sUnit,
                                sFilename_out = sFilename_out)
