@@ -81,6 +81,9 @@ All the operations are implemented using the standard GDAL/OGR APIs, ensuring ro
 
 - **Interactive GeoVista API**: Offers essential functions to visualize the input and output vector layers on a 3D sphere, including support for mesh cells that cross the antimeridian and projecting an unstructured mesh to a planar coordinate reference system [@little_2024].
 
+![Unstructured Mesh Visualization](data/example_9/output/mesh.jpg)
+
+![Target Variable Visualization](data/example_9/output/uraster.jpg)
 
 # State of the field
 
