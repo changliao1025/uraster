@@ -1,5 +1,5 @@
 import os, sys, platform
-
+from osgeo import gdal, osr
 from pyearth.toolbox.management.raster.resample import resample_raster
 sPath_current = os.path.dirname(os.path.abspath(__file__))
 sPath_library = os.path.dirname(os.path.dirname(sPath_current))
@@ -32,7 +32,10 @@ def main():
     aConfig['sFilename_source_mesh'] = sFilename_source_mesh  # use the L10-100 test mesh
     aFilename_source_raster = []
     sFilename_source_raster_resample = sFilename_raster.replace('.tif','_resample.tif')
-    resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0)
+    default_srs = osr.SpatialReference()
+    default_srs.ImportFromEPSG(4326)
+    pProjection_target = default_srs.ExportToWkt()
+    resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0, pProjection_target_in=pProjection_target)
     aFilename_source_raster.append(sFilename_source_raster_resample)  #
     aConfig['aFilename_source_raster'] = aFilename_source_raster
     aConfig['sFilename_target_mesh'] = sFilename_target_mesh
