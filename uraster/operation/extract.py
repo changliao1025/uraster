@@ -1124,7 +1124,7 @@ def run_remap(sFilename_target_mesh,
     if iFlag_discrete_in:
         # we might need to get the unique values first to create the fields
         aUnique_value = get_unique_values_from_rasters(
-            aFilename_source_raster, dMissing_value, iFlag_verbose_in)
+            aFilename_source_raster, dMissing_value, band_index = 1, iFlag_verbose_in= iFlag_verbose_in)
         nValues = len(aUnique_value)
         logger.info(f"Found {nValues} unique values in raster")
         pLayer_out.CreateField(ogr.FieldDefn('mode', ogr.OFTInteger))

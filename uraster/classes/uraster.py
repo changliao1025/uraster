@@ -58,6 +58,7 @@ class uraster:
 
         self.iFlag_polar = aConfig.get('iFlag_polar', 0)  # Default to 0 (non-polar)
         self.iFlag_global = aConfig.get('iFlag_global', 1)  # Default to 1 (global)
+        self.iFlag_discrete = aConfig.get('iFlag_discrete', 0)  # Default to 0 (continuous)
 
         # Cell counts
         self.nCell = -1
@@ -389,6 +390,7 @@ class uraster:
                 pSpatialRef_wgs84 = None
 
         # Process each raster file
+        aExtent= list()
         for idx, sFilename_raster_in in enumerate(aFilename_source_raster, 1):
             if iFlag_verbose_in:
                 logger.info(
@@ -419,6 +421,8 @@ class uraster:
                     if iFlag_verbose_in:
                         logger.info(f'  ✓ Already in WGS84 (EPSG:4326)')
                     aFilename_source_raster_out.append(sFilename_raster_in)
+                    pExtent= pRaster.aExtent_wgs84
+                    aExtent.append(pExtent)
                 else:
                     # Convert to WGS84
                     if iFlag_verbose_in:
@@ -442,6 +446,8 @@ class uraster:
                                 f'  ✓ Converted to: {pRaster_wgs84.sFilename}')
                         aFilename_source_raster_out.append(
                             pRaster_wgs84.sFilename)
+                        pExtent= pRaster_wgs84.aExtent_wgs84
+                        aExtent.append(pExtent)
 
                     except Exception as e:
                         logger.error(
@@ -478,6 +484,18 @@ class uraster:
             logger.error(
                 f'Output count mismatch: expected {len(aFilename_source_raster)}, got {len(aFilename_source_raster_out)}')
             return None
+
+        #get overall extent
+        if len(aExtent) >0:
+            xmin = min([extent[0] for extent in aExtent])
+            xmax = max([extent[1] for extent in aExtent])
+            ymin = min([extent[2] for extent in aExtent])
+            ymax = max([extent[3] for extent in aExtent])
+            self.aExtent_rasters= [xmin, xmax, ymin, ymax]
+            if iFlag_verbose_in:
+                logger.info(
+                    f'Overall raster extent (WGS84): [{xmin}, {xmax}, {ymin}, {ymax}]')
+
 
         if iFlag_verbose_in:
             logger.info(
@@ -1004,6 +1022,7 @@ class uraster:
         if iFlag_discrete_in:
             #for discrete, only remap method 1 (nearest neighbor) is allowed
             #can we apply statistics for discrete?
+            self.iFlag_discrete = True
             iFlag_stat_in = False
             if iFlag_remap_method_in != 1:
                 logger.error("For discrete remap, only remap method 1 (nearest neighbor) is allowed.")
@@ -1196,6 +1215,11 @@ class uraster:
 
         # Merge defaults with provided kwargs
         merged_params = {**defaults, **kwargs}
+        if sVariable_in is None:
+            if self.iFlag_discrete:
+                sVariable_in = 'mode'
+            else:
+                sVariable_in = 'mean'
 
         return _visual.visualize_target_mesh(
             self, sVariable_in, sUnit_in, sFilename_out,

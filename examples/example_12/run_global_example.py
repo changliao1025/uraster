@@ -16,10 +16,10 @@ print(f"Data folder path: {sFolder_data}")
 sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson') # use the L10-100 test mesh
 sFilename_hydrosheds_dem = os.path.join(sFolder_data, 'input','hyd_glo_dem_15s.tif')
 
-sFilename_target_mesh = os.path.join(sFolder_data, 'output','mpas_uraster.geojson')
+sFilename_target_mesh = os.path.join(sFolder_data, 'output','uraster.geojson')
 sFilename_mesh_png = os.path.join(sFolder_data, 'output', 'mesh.pdf')
 sFilename_variable_png = os.path.join(sFolder_data, 'output','uraster.pdf')
-sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'global_uraster.mp4')
+sFilename_variable_animation = os.path.join(sFolder_data, 'output', 'uraster.mp4')
 
 from pyearth.toolbox.conversion.convert_vector_format import convert_vector_format
 from uraster.classes.uraster import uraster
