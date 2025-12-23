@@ -1185,7 +1185,7 @@ class uraster:
             'dZoom_factor': 0.7,
             'window_size_in': (800, 600),
             'iFlag_show_coastlines': True,
-            'iFlag_show_graticule': True,
+            'iFlag_show_graticule': False,
             'sColormap': 'viridis',
             'iFlag_create_animation': False,
             'iAnimation_frames': 360,
