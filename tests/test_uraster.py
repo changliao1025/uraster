@@ -34,18 +34,18 @@ class TestUrasterConfiguration(unittest.TestCase):
     def test_custom_configuration(self):
         """Test uraster initialization with custom config"""
         config = {
-            'iFlag_remap_method': 2,
-            'sFilename_source_mesh': 'test_mesh.geojson',
-            'aFilename_source_raster': ['test_raster.tif']
+            "iFlag_remap_method": 2,
+            "sFilename_source_mesh": "test_mesh.geojson",
+            "aFilename_source_raster": ["test_raster.tif"],
         }
         u = uraster(config)
         self.assertEqual(u.iFlag_remap_method, 2)
-        self.assertEqual(u.sFilename_source_mesh, 'test_mesh.geojson')
-        self.assertEqual(u.aFilename_source_raster, ['test_raster.tif'])
+        self.assertEqual(u.sFilename_source_mesh, "test_mesh.geojson")
+        self.assertEqual(u.aFilename_source_raster, ["test_raster.tif"])
 
     def test_invalid_remap_method(self):
         """Test handling of invalid remap method"""
-        config = {'iFlag_remap_method': 99}
+        config = {"iFlag_remap_method": 99}
         u = uraster(config)
         # Should default to 1 for invalid method
         self.assertEqual(u.iFlag_remap_method, 1)
@@ -63,16 +63,16 @@ class TestSrasterConfiguration(unittest.TestCase):
     def test_sraster_initialization_nonexistent_file(self):
         """Test sraster initialization with nonexistent file"""
         with self.assertRaises(FileNotFoundError):
-            sraster('nonexistent_file.tif')
+            sraster("nonexistent_file.tif")
 
     def test_sraster_mesh_filename_generation(self):
         """Test mesh filename generation"""
-        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
             s = sraster(tmp_path)
-            expected_mesh = tmp_path.replace('.tif', '_mesh.geojson')
+            expected_mesh = tmp_path.replace(".tif", "_mesh.geojson")
             self.assertEqual(s.sFilename_mesh, expected_mesh)
         finally:
             os.unlink(tmp_path)
@@ -96,7 +96,7 @@ class TestUrasterValidation(unittest.TestCase):
 
     def test_check_raster_files_nonexistent_file(self):
         """Test raster file validation with nonexistent file"""
-        result = self.uraster_instance.check_raster_files(['nonexistent.tif'])
+        result = self.uraster_instance.check_raster_files(["nonexistent.tif"])
         self.assertIsNone(result)
 
     def test_check_mesh_file_no_filename(self):
@@ -106,7 +106,7 @@ class TestUrasterValidation(unittest.TestCase):
 
     def test_check_mesh_file_nonexistent(self):
         """Test mesh file validation with nonexistent file"""
-        self.uraster_instance.sFilename_source_mesh = 'nonexistent.geojson'
+        self.uraster_instance.sFilename_source_mesh = "nonexistent.geojson"
         result = self.uraster_instance.check_mesh_file()
         self.assertIsNone(result)
 
@@ -120,7 +120,7 @@ class TestUrasterUtilities(unittest.TestCase):
     def test_geometry_type_name_conversion(self):
         """Test geometry type name conversion"""
         # Mock ogr constants for testing
-        with patch('uraster.classes.uraster.ogr') as mock_ogr:
+        with patch("uraster.classes.uraster.ogr") as mock_ogr:
             mock_ogr.wkbPolygon = 3
             mock_ogr.wkbPoint = 1
             mock_ogr.wkbUnknown = 0
@@ -132,12 +132,10 @@ class TestUrasterUtilities(unittest.TestCase):
 
             # Test known geometry types
             self.assertEqual(
-                self.uraster_instance._get_geometry_type_name(3),
-                "wkbPolygon"
+                self.uraster_instance._get_geometry_type_name(3), "wkbPolygon"
             )
             self.assertEqual(
-                self.uraster_instance._get_geometry_type_name(1),
-                "wkbPoint"
+                self.uraster_instance._get_geometry_type_name(1), "wkbPoint"
             )
 
             # Test unknown geometry type
@@ -152,7 +150,7 @@ class TestUrasterUtilities(unittest.TestCase):
     def test_print_methods(self):
         """Test print methods don't crash"""
         # These methods should not crash even with empty data
-        with patch('builtins.print'):
+        with patch("builtins.print"):
             self.uraster_instance.print_mesh_info()
             self.uraster_instance.print_raster_info()
 
@@ -165,19 +163,22 @@ class TestUrasterReporting(unittest.TestCase):
 
     def test_report_inputs(self):
         """Test input reporting"""
-        with patch.object(self.uraster_instance, 'print_raster_info') as mock_raster, \
-             patch.object(self.uraster_instance, 'print_mesh_info') as mock_mesh:
+        with patch.object(
+            self.uraster_instance, "print_raster_info"
+        ) as mock_raster, patch.object(
+            self.uraster_instance, "print_mesh_info"
+        ) as mock_mesh:
             self.uraster_instance.report_inputs()
             mock_raster.assert_called_once()
             mock_mesh.assert_called_once()
 
     def test_report_inputs_with_gpu_info(self):
         """Test input reporting with GPU info"""
-        with patch.object(self.uraster_instance, 'print_raster_info'), \
-             patch.object(self.uraster_instance, 'print_mesh_info'), \
-             patch('builtins.print'):
+        with patch.object(self.uraster_instance, "print_raster_info"), patch.object(
+            self.uraster_instance, "print_mesh_info"
+        ), patch("builtins.print"):
             # Test with geovista available
-            with patch('uraster.classes.uraster.gvreport') as mock_gv:
+            with patch("uraster.classes.uraster.gvreport") as mock_gv:
                 mock_gv.Report.return_value = "GPU Info"
                 self.uraster_instance.report_inputs(iFlag_show_gpu_info=True)
 
@@ -188,7 +189,7 @@ class TestUrasterReporting(unittest.TestCase):
             tmp_path = tmp.name
 
         try:
-            with patch('uraster.classes.uraster.logger') as mock_logger:
+            with patch("uraster.classes.uraster.logger") as mock_logger:
                 self.uraster_instance.report_outputs(tmp_path)
                 mock_logger.info.assert_called()
         finally:
@@ -196,8 +197,8 @@ class TestUrasterReporting(unittest.TestCase):
 
     def test_report_outputs_nonexistent_file(self):
         """Test output reporting with nonexistent file"""
-        with patch('uraster.classes.uraster.logger') as mock_logger:
-            self.uraster_instance.report_outputs('nonexistent.txt')
+        with patch("uraster.classes.uraster.logger") as mock_logger:
+            self.uraster_instance.report_outputs("nonexistent.txt")
             mock_logger.warning.assert_called()
 
 
@@ -207,34 +208,31 @@ class TestUrasterVisualization(unittest.TestCase):
     def setUp(self):
         self.uraster_instance = uraster()
 
-    @patch('uraster.classes.uraster._visual')
+    @patch("uraster.classes.uraster._visual")
     def test_visualize_source_mesh(self, mock_visual):
         """Test source mesh visualization"""
         mock_visual.visualize_source_mesh.return_value = True
 
         result = self.uraster_instance.visualize_source_mesh(
-            sFilename_out='test.png',
-            dLongitude_focus_in=0.0,
-            dLatitude_focus_in=0.0
+            sFilename_out="test.png", dLongitude_focus_in=0.0, dLatitude_focus_in=0.0
         )
 
         mock_visual.visualize_source_mesh.assert_called_once()
         self.assertTrue(result)
 
-    @patch('uraster.classes.uraster._visual')
+    @patch("uraster.classes.uraster._visual")
     def test_visualize_target_mesh(self, mock_visual):
         """Test target mesh visualization"""
         mock_visual.visualize_target_mesh.return_value = True
 
         result = self.uraster_instance.visualize_target_mesh(
-            sVariable_in='mean',
-            sFilename_out='test.png'
+            sVariable_in="mean", sFilename_out="test.png"
         )
 
         mock_visual.visualize_target_mesh.assert_called_once()
         self.assertTrue(result)
 
-    @patch('uraster.classes.uraster._visual')
+    @patch("uraster.classes.uraster._visual")
     def test_visualize_raster(self, mock_visual):
         """Test raster visualization"""
         mock_visual.visualize_raster.return_value = True
@@ -245,5 +243,5 @@ class TestUrasterVisualization(unittest.TestCase):
         self.assertTrue(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
