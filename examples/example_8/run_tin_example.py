@@ -6,18 +6,17 @@ sys.path.append(sPath_library)
 
 # Construct the relative path to the data folder
 sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_8')
-
-# Print or use the data folder path
+sFolder_data = os.path.realpath(sFolder_data)
 print(f"Data folder path: {sFolder_data}")
 
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(sFolder_data,  'input','tin.geojson') # use the L10-100 test mesh
 sFilename_hydrosheds_dem = os.path.join(sFolder_data,  'input', 'hyd_glo_dem_15s.tif')
 
-sFilename_target_mesh = os.path.join(sFolder_data, 'output', 'tin_uraster.geojson')
+sFilename_target_mesh = os.path.join(sFolder_data, 'output', 'uraster.geojson')
 sFilename_mesh_png = os.path.join(sFolder_data,'output', 'mesh.jpg')
 sFilename_variable_png = os.path.join(sFolder_data,'output', 'uraster.png')
-sFilename_variable_animation = os.path.join(sFolder_data,'output', 'global_uraster.mp4')
+sFilename_variable_animation = os.path.join(sFolder_data,'output', 'uraster.mp4')
 
 from uraster.classes.uraster import uraster
 
@@ -33,8 +32,8 @@ def main():
     pRaster.setup()
     pRaster.report_inputs()
     #use delaware area for visualization
-    dLongitude_focus_in = (pRaster.aExtent_rasters[0] + pRaster.aExtent_rasters[1]) / 2
-    dLatitude_focus_in = (pRaster.aExtent_rasters[2] + pRaster.aExtent_rasters[3]) / 2
+    dLongitude_focus_in = -75.0
+    dLatitude_focus_in = 39.0
     pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png,
                                    dLongitude_focus_in=dLongitude_focus_in,
                                      dLatitude_focus_in=dLatitude_focus_in,
@@ -47,7 +46,6 @@ def main():
     pRaster.visualize_target_mesh(
         sFilename_out=sFilename_variable_png,
         dLongitude_focus_in=dLongitude_focus_in,
-        dZoom_factor = 7,
         dLatitude_focus_in=dLatitude_focus_in,
         sColormap=sColormap)
 

@@ -6,7 +6,6 @@ sys.path.append(sPath_library)
 # Construct the relative path to the data folder
 sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_1')
 sFolder_data = os.path.realpath(sFolder_data)
-# Print or use the data folder path
 print(f"Data folder path: {sFolder_data}")
 
 
@@ -37,8 +36,8 @@ def main():
 
     pRaster.report_inputs()
     # visualize source mesh at the Idaho Falls area
-    dLongitude_focus_in = (pRaster.aExtent_rasters[0] + pRaster.aExtent_rasters[1]) / 2
-    dLatitude_focus_in = (pRaster.aExtent_rasters[2] + pRaster.aExtent_rasters[3]) / 2
+    dLongitude_focus_in = (pRaster.aExtent_rasters[0] + pRaster.aExtent_rasters[2]) / 2
+    dLatitude_focus_in = (pRaster.aExtent_rasters[1] + pRaster.aExtent_rasters[3]) / 2
     pRaster.visualize_source_mesh(sFilename_out=sFilename_mesh_png, dLongitude_focus_in=dLongitude_focus_in, dLatitude_focus_in=dLatitude_focus_in)
     #pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
 

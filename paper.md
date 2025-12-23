@@ -47,7 +47,7 @@ bibliography: paper.bib
 # Summary
 
 
-Converting **structured raster datasets** into **unstructured meshes** is a common prerequisite for configuring numerical models that require spatially varying inputs and parameters. This repository offers the Python package, **`uraster`**, to facilitate this conversion. The package is highly flexible, designed to support both continuous and categorical raster data, and provides configurable options for **mass conservation** and multiple **interpolation methods** to ensure the resulting unstructured mesh accurately represents the original data. Furthermore, `uraster` integrates the industrial-standard 3D visualization library, **`GeoVista`**, enabling intuitive and interactive 3D visualization of mesh-based data on a sphere. These capabilities make `uraster` well-suited for regional to global scale applications and for variable resolution unstructured mesh-based hydrologic and land surface modeling.
+Converting **structured raster datasets** into **unstructured meshes** is a common prerequisite for configuring numerical models that require spatially varying inputs and parameters. This repository offers the Python package, **`uraster`**, to facilitate this conversion [@Liao2025uraster]. The package is highly flexible, designed to support both continuous and categorical raster data, and provides configurable options for **mass conservation** and multiple **interpolation methods** to ensure the resulting unstructured mesh accurately represents the original data. Furthermore, `uraster` integrates the industrial-standard 3D visualization library, **`GeoVista`**, enabling intuitive and interactive 3D visualization of mesh-based data on a sphere. These capabilities make `uraster` well-suited for regional to global scale applications and for variable resolution unstructured mesh-based hydrologic and land surface modeling.
 
 
 # Statement of need
@@ -79,7 +79,7 @@ All the operations are implemented using the standard GDAL/OGR APIs, ensuring ro
 - **Projection-Aware Operations**: Handles differences in map projections between raster datasets and mesh geometries, ensuring accurate aggregation of raster values within each mesh cell polygon.
 
 
-- **Interactive GeoVista API**: Offers essential functions to visualize the input and output vector layers on a 3D sphere, including support for mesh cells that cross the antimeridian and projecting an unstructured mesh to a planar coordinate reference system.
+- **Interactive GeoVista API**: Offers essential functions to visualize the input and output vector layers on a 3D sphere, including support for mesh cells that cross the antimeridian and projecting an unstructured mesh to a planar coordinate reference system [@little_2024].
 
 
 # State of the field
@@ -88,9 +88,9 @@ All the operations are implemented using the standard GDAL/OGR APIs, ensuring ro
 There are several existing tools that provide similar functionality, such as `raster2dggs`, `xESMF`, `pyresample`, and `rasterio`. While these packages are widely used and well maintained, they are built around different design assumptions and do not fully address the requirements of hydrologic and land surface modeling workflows that rely on general unstructured meshes. For example:
 
 
-* `raster2dggs` is designed specifically for converting raster data into Discrete Global Grid Systems (DGGS), which does not support other types of unstructured meshes, such as the Model for Prediction Across Scales (MPAS) mesh and Triangulated Irregular Network (TIN) meshes.
-* `xESMF` is primarily focused on regridding and interpolation of climate data that are quadrilateral and does not support non-quadrilateral meshes, such as the MPAS and TIN meshes.
-*  `pyresample` and `rasterio` provide powerful capabilities for raster resampling, reprojection, and data access. However, neither package supports unstructured mesh representations. This limitation is partly due to pyresample's dependence on rasterio, which is primarily designed for handling structured raster data and does not have built-in functionality for unstructured mesh formats.
+* `raster2dggs` is designed specifically for converting raster data into Discrete Global Grid Systems (DGGS), which does not support other types of unstructured meshes, such as the Model for Prediction Across Scales (MPAS) mesh and Triangulated Irregular Network (TIN) meshes [@raster2dggs].
+* `xESMF` is primarily focused on regridding and interpolation of climate data that are quadrilateral [@Zhuang2025xESMF] and does not support non-quadrilateral meshes, such as the MPAS and TIN meshes.
+*  `pyresample` and `rasterio` provide powerful capabilities for raster resampling, reprojection, and data access[@Hoese2020pyresample; @Gillies2013rasterio]. However, neither package supports unstructured mesh representations. This limitation is partly due to pyresample's dependence on rasterio, which is primarily designed for handling structured raster data and does not have built-in functionality for unstructured mesh formats.
 
 
 In contrast to these tools, `uraster`  is designed explicitly to bridge structured raster datasets and general unstructured meshes. By operating directly on vector-based mesh geometries and supporting both continuous and categorical data with optional mass-conserving aggregation, `uraster`  addresses a gap in existing geospatial software ecosystems for unstructured mesh-based environmental modeling.
@@ -118,15 +118,3 @@ PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-7
 
 
 # References
-
-
-Liao, C., & Li, M. (2025). URaster: A Python Package for Converting Structured Raster Data into Unstructured Meshes (v0.1.1). Zenodo. https://doi.org/10.5281/zenodo.17613497
-
-
-
-
-
-
-
-
-

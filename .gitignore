@@ -296,3 +296,4 @@ python_crash_*.txt
 *.nc
 *.gif
 *.parquet
+*.mp4
