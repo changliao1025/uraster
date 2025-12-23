@@ -2,7 +2,7 @@
 [![PyPI version](https://badge.fury.io/py/uraster.svg)](https://badge.fury.io/py/uraster)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-# URaster: A Python Package for Converting Structured Raster Data into Unstructured Meshes
+# URaster: Structured Raster to Unstructured Mesh
 
 ## Overview
 
@@ -43,6 +43,10 @@ conda install -c conda-forge uraster
 ## 🚀 Quick Start
 
 [Quickstart documentation](https://uraster.readthedocs.io/en/latest/quickstart.html)
+
+Example datasets are provided through the Zenodo repository: [URaster Example Data on Zenodo](https://zenodo.org/record/17613497)
+
+```python
 
 ## 📚 Documentation
 
