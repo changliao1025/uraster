@@ -6,17 +6,13 @@ sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
 
 # Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_3')
+sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_5')
 sFolder_data = os.path.realpath(sFolder_data)
-
-# Print or use the data folder path
 print(f"Data folder path: {sFolder_data}")
 
-
 # Convert absolute paths to relative paths
-sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'rhealpix_China_res3.geojson') # use the L10-100 test mesh
-#sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson')
-sFilename_raster = os.path.join(sFolder_data, 'input', 'China_CH4_emission_2020.tif')
+sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'isea7h_bbox_res5.geojson') # use the L10-100 test mesh
+
 
 sFilename_target_mesh = os.path.join(sFolder_data, 'output',  'uraster.geojson')
 sFilename_mesh_png = os.path.join(sFolder_data, 'output',  'mesh.jpg')
@@ -31,12 +27,16 @@ def main():
     aConfig = dict()
     aConfig['sFilename_source_mesh'] = sFilename_source_mesh  # use the L10-100 test mesh
     aFilename_source_raster = []
-    sFilename_source_raster_resample = sFilename_raster.replace('.tif','_resample.tif')
-    #resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0)
-    aFilename_source_raster.append(sFilename_raster)  #
+    sFilename_raster0 = os.path.join(sFolder_data, 'input', 'Hansen_GFC-2019-v1.7_treecover2000_40N_090W.tif')
+    sFilename_raster1 = os.path.join(sFolder_data, 'input', 'Hansen_GFC-2019-v1.7_treecover2000_50N_090W.tif')
+    sFilename_raster2 = os.path.join(sFolder_data, 'input', 'Hansen_GFC-2019-v1.7_treecover2000_40N_100W.tif')
+    sFilename_raster3 = os.path.join(sFolder_data, 'input', 'Hansen_GFC-2019-v1.7_treecover2000_50N_100W.tif')
+    aFilename_source_raster.append(sFilename_raster0)  #
+    aFilename_source_raster.append(sFilename_raster1)  #
+    aFilename_source_raster.append(sFilename_raster2)  #
+    aFilename_source_raster.append(sFilename_raster3)  #
     aConfig['aFilename_source_raster'] = aFilename_source_raster
     aConfig['sFilename_target_mesh'] = sFilename_target_mesh
-    #use weighted average remap method
     pRaster = uraster(aConfig)
     pRaster.setup()
     pRaster.report_inputs()
@@ -49,7 +49,7 @@ def main():
     #pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
 
     pRaster.run_remap(iFlag_weighted_average_in=False)
-    pRaster.report_outputs()
+    pRaster.report_outputs() #not implemented yet
     sColormap = 'terrain'
 
     #Optional visualization and animation (disabled by default in this script)

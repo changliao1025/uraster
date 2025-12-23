@@ -6,16 +6,13 @@ sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
 
 # Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_3')
+sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_4')
 sFolder_data = os.path.realpath(sFolder_data)
-
-# Print or use the data folder path
 print(f"Data folder path: {sFolder_data}")
 
 
 # Convert absolute paths to relative paths
-sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'rhealpix_China_res3.geojson') # use the L10-100 test mesh
-#sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson')
+sFilename_source_mesh = os.path.join(sFolder_data, 'input',  'rhealpix_China_res6.geojson') # use the L10-100 test mesh
 sFilename_raster = os.path.join(sFolder_data, 'input', 'China_CH4_emission_2020.tif')
 
 sFilename_target_mesh = os.path.join(sFolder_data, 'output',  'uraster.geojson')
@@ -36,7 +33,7 @@ def main():
     aFilename_source_raster.append(sFilename_raster)  #
     aConfig['aFilename_source_raster'] = aFilename_source_raster
     aConfig['sFilename_target_mesh'] = sFilename_target_mesh
-    #use weighted average remap method
+
     pRaster = uraster(aConfig)
     pRaster.setup()
     pRaster.report_inputs()

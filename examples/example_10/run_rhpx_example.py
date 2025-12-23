@@ -6,7 +6,7 @@ sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
 
 # Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_3')
+sFolder_data = os.path.join(sPath_current, '..', '..', 'data', 'example_10')
 sFolder_data = os.path.realpath(sFolder_data)
 
 # Print or use the data folder path
@@ -32,8 +32,8 @@ def main():
     aConfig['sFilename_source_mesh'] = sFilename_source_mesh  # use the L10-100 test mesh
     aFilename_source_raster = []
     sFilename_source_raster_resample = sFilename_raster.replace('.tif','_resample.tif')
-    #resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0)
-    aFilename_source_raster.append(sFilename_raster)  #
+    resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0)
+    aFilename_source_raster.append(sFilename_source_raster_resample)  #
     aConfig['aFilename_source_raster'] = aFilename_source_raster
     aConfig['sFilename_target_mesh'] = sFilename_target_mesh
     #use weighted average remap method
@@ -48,7 +48,7 @@ def main():
                                   dLatitude_focus_in=dLatitude_focus_in)
     #pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
 
-    pRaster.run_remap(iFlag_weighted_average_in=False)
+    pRaster.run_remap(iFlag_weighted_average_in=True)
     pRaster.report_outputs()
     sColormap = 'terrain'
 

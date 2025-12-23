@@ -19,10 +19,39 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-# Set up logging
-logger = logging.getLogger(__name__)
+
 crs = "EPSG:4326"
 # Utility functions for common operations
+
+def setup_logger(module_name: str):
+    # Use the module name to create a unique log file
+    log_file = f"{module_name}.log"
+
+    # Create a logger for this module
+    logger = logging.getLogger(module_name)
+    logger.setLevel(logging.INFO)
+
+    # Create a file handler for the log file
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+
+    # Create a console handler (optional)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    # Define the log format
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+
+    # Add the handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+# Set up the logger for this module
+logger = setup_logger(__name__.split('.')[-1])
 
 
 def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
@@ -116,25 +145,7 @@ def check_geometry_validity(sFilename_source_mesh: str, iFlag_verbose_in: bool =
                 continue
 
             # Skip GDAL geometry validation as it cannot handle IDL-crossing cells
-
             sGeometry_type = pGeometry.GetGeometryName()
-
-            aCoord = get_geometry_coordinates(pGeometry)
-            # also check longitude and latitude range -180-180
-            if aCoord is None or len(aCoord) < 3:
-                logger.warning(
-                    f'Feature {iFeature_index}: Invalid or insufficient coordinates')
-                invalid_geometry_count += 1
-                iFeature_index += 1
-                continue
-            if (np.any(aCoord[:, 0] < -180) or np.any(aCoord[:, 0] > 180) or
-                    np.any(aCoord[:, 1] < -90) or np.any(aCoord[:, 1] > 90)):
-                logger.warning(
-                    f'Feature {iFeature_index}: Coordinates out of valid range')
-                invalid_geometry_count += 1
-                iFeature_index += 1
-                continue
-
             if sGeometry_type == 'POLYGON':
                 if not _validate_polygon_geometry(pGeometry, iFeature_index, iFlag_verbose_in):
                     invalid_geometry_count += 1
@@ -207,7 +218,8 @@ def check_mesh_quality(sFilename_mesh_in: str, iFlag_verbose_in: bool = False) -
         # Make the filename adjustment more flexible to handle any format
         # Get the file extension and base name
         file_base, file_ext = os.path.splitext(sFilename_mesh_in)
-        sFilename_source_mesh_fixed = f"{file_base}_fixed{file_ext}"
+        file_ext = file_ext.lstrip('.')
+        sFilename_source_mesh_fixed = f"{file_base}_fixed.{file_ext}"
         fix_mesh_longitude_range_and_idl_crossing(
             sFilename_mesh_in, sFilename_source_mesh_fixed)
         return sFilename_source_mesh_fixed
@@ -255,6 +267,7 @@ def _validate_polygon_geometry(pGeometry: 'ogr.Geometry', feature_id: Union[int,
             if iFlag_verbose_in:
                 logger.info(
                     f'Feature {feature_id}: Polygon crosses International Date Line (valid)')
+            return False
         else:
             # use gdal geometry validity check only when it does not cross IDL
             if not pGeometry.IsValid():
@@ -662,6 +675,7 @@ def rebuild_mesh_topology(sFilename_mesh_in: str, iFlag_verbose_in: bool = False
         iCount_multipolygon_cells = 0
         for pFeature in pLayer:
             if pFeature is None:
+                iFeature_index += 1
                 continue
             pGeometry = pFeature.GetGeometryRef()
             sGeometry_type = pGeometry.GetGeometryName()
@@ -680,7 +694,7 @@ def rebuild_mesh_topology(sFilename_mesh_in: str, iFlag_verbose_in: bool = False
                             aArea_list.append(dArea)
                         except Exception as area_error:
                             logger.warning(
-                                f'Could not calculate area: {area_error}')
+                                f'Could not calculate area for feature {iFeature_index}: {area_error}')
                             aArea_list.append(0.0)
                         # Get field data (always integer since setup_mesh_cellid enforces it)
                         if sVariable:
@@ -690,26 +704,40 @@ def rebuild_mesh_topology(sFilename_mesh_in: str, iFlag_verbose_in: bool = False
                                 aCellID.append(int(field_value))
                             except (ValueError, TypeError, AttributeError) as e:
                                 logger.warning(
-                                    f'Could not read integer field value: {e}')
+                                    f'Could not read integer field value for feature {iFeature_index}: {e}')
                                 aCellID.append(len(aCellID))
                         else:
                             aCellID.append(len(aCellID))
                     else:
                         invalid_geometry_count += 1
                 except Exception as e:
-                    logger.warning(f'Error processing feature: {str(e)}')
+                    logger.warning(f'Error processing feature {iFeature_index}: {str(e)}')
                     invalid_geometry_count += 1
             elif sGeometry_type == 'MULTIPOLYGON':
                 try:
                     # Process multipolygon by extracting each constituent polygon
                     if iFlag_verbose_in:
-                        logger.info('Processing multipolygon feature')
+                        logger.info(f'Processing multipolygon feature {iFeature_index}')
                     multipolygon_processed = False
                     iCount_multipolygon_cells += 1
+
+                    # Get field data for the multipolygon feature (same for all parts)
+                    current_cellid = None
+                    if sVariable:
+                        try:
+                            field_value = pFeature.GetFieldAsInteger(sVariable)
+                            current_cellid = int(field_value)
+                        except (ValueError, TypeError, AttributeError) as e:
+                            logger.warning(
+                                f'Could not read integer field value for multipolygon feature {iFeature_index}: {e}')
+                            current_cellid = len(aCellID)
+                    else:
+                        current_cellid = len(aCellID)
+
                     for iPart in range(pGeometry.GetGeometryCount()):
                         pPolygon_part = pGeometry.GetGeometryRef(iPart)
                         if pPolygon_part is None:
-                            logger.warning('Multipolygon part is None')
+                            logger.warning(f'Multipolygon part {iPart} is None in feature {iFeature_index}')
                             continue
                         # Get coordinates of the polygon part (validation already done by check_geometry_validity)
                         aCoord_part = get_geometry_coordinates(pPolygon_part)
@@ -725,19 +753,21 @@ def rebuild_mesh_topology(sFilename_mesh_in: str, iFlag_verbose_in: bool = False
                                 aArea_list.append(dArea_part)
                             except Exception as area_error:
                                 logger.warning(
-                                    f'Could not calculate area for multipolygon part: {area_error}')
+                                    f'Could not calculate area for multipolygon part {iPart} in feature {iFeature_index}: {area_error}')
                                 aArea_list.append(0.0)
+                            # Add cell ID for this part
+                            aCellID.append(current_cellid)
                             multipolygon_processed = True
                         else:
                             logger.warning(
-                                'Failed to extract coordinates from multipolygon part')
+                                f'Failed to extract coordinates from multipolygon part {iPart} in feature {iFeature_index}')
                     if not multipolygon_processed:
                         logger.warning(
-                            'No valid parts found in multipolygon feature')
+                            f'No valid parts found in multipolygon feature {iFeature_index}')
                         invalid_geometry_count += 1
                 except Exception as e:
                     logger.warning(
-                        f'Error processing multipolygon feature: {str(e)}')
+                        f'Error processing multipolygon feature {iFeature_index}: {str(e)}')
                     invalid_geometry_count += 1
             elif sGeometry_type in ['POINT', 'LINESTRING']:
                 logger.warning(
@@ -747,6 +777,8 @@ def rebuild_mesh_topology(sFilename_mesh_in: str, iFlag_verbose_in: bool = False
                 logger.warning(
                     f'Unknown geometry type {sGeometry_type} in feature {iFeature_index}, skipping')
                 invalid_geometry_count += 1
+
+            iFeature_index += 1
         # Report processing statistics
         valid_mesh_cells = len(lons_list)
         if iFlag_verbose_in:
@@ -1048,8 +1080,11 @@ def fix_longitude_range_gdal(geometry: 'ogr.Geometry', in_place: bool = False) -
                     # Avoid exact +180° by nudging to just under 180°
                     if abs(normalized_x - 180.0) < 1e-10:
                         normalized_x = 180.0 - 1e-8
-                    fixed_geometry.SetPoint(i, normalized_x, y, z)
+                    # Use SetPoint_2D to ensure 2D geometry
+                    fixed_geometry.SetPoint_2D(i, normalized_x, y)
 
+    # Ensure the final geometry is 2D
+    fixed_geometry.FlattenTo2D()
     return fixed_geometry
 
 
@@ -1078,7 +1113,8 @@ def _fix_geometry_coordinates_recursive(geometry: 'ogr.Geometry') -> None:
                 x = -180.0 + 1e-8  # Nudge to just above -180°
             # Normalize longitude using modular arithmetic
             normalized_x = ((x + 180) % 360) - 180
-            geometry.SetPoint(i, normalized_x, y, z)
+            # Use SetPoint_2D to ensure 2D geometry
+            geometry.SetPoint_2D(i, normalized_x, y)
 
 
 def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: str, handle_idl_crossing: bool = True) -> bool:
@@ -1172,6 +1208,9 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                         continue
                     # Fix longitude coordinates using GDAL
                     fixed_geometry = fix_longitude_range_gdal(geometry)
+                    # Ensure the geometry is 2D
+                    if fixed_geometry is not None:
+                        fixed_geometry.FlattenTo2D()
                     # Handle IDL crossing for polygon geometries if requested
                     if handle_idl_crossing and geometry_type in ['POLYGON', 'MULTIPOLYGON']:
                         # Check for IDL crossing after longitude normalization
@@ -1187,7 +1226,7 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                             [eastern_polygon, western_polygon] = split_international_date_line_polygon_coordinates(
                                 aCoord)
 
-                            # Create a multipolygon geometry
+                            # Create a multipolygon geometry (force 2D)
                             pGeometry_multi = ogr.Geometry(ogr.wkbMultiPolygon)
 
                             # Create eastern polygon
@@ -1195,10 +1234,13 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                             pLinearRing_eastern = ogr.Geometry(
                                 ogr.wkbLinearRing)
                             for coord in eastern_polygon:
-                                pLinearRing_eastern.AddPoint(
+                                # Force 2D by only using x,y coordinates
+                                pLinearRing_eastern.AddPoint_2D(
                                     coord[0], coord[1])
                             pLinearRing_eastern.CloseRings()
                             pPolygon_eastern.AddGeometry(pLinearRing_eastern)
+                            # Ensure the polygon is 2D
+                            pPolygon_eastern.FlattenTo2D()
                             pGeometry_multi.AddGeometry(pPolygon_eastern)
 
                             # Create western polygon
@@ -1206,22 +1248,32 @@ def fix_mesh_longitude_range_and_idl_crossing(sFilename_in: str, sFilename_out: 
                             pLinearRing_western = ogr.Geometry(
                                 ogr.wkbLinearRing)
                             for coord in western_polygon:
-                                pLinearRing_western.AddPoint(
+                                # Force 2D by only using x,y coordinates
+                                pLinearRing_western.AddPoint_2D(
                                     coord[0], coord[1])
                             pLinearRing_western.CloseRings()
                             pPolygon_western.AddGeometry(pLinearRing_western)
+                            # Ensure the polygon is 2D
+                            pPolygon_western.FlattenTo2D()
                             pGeometry_multi.AddGeometry(pPolygon_western)
 
+                            # Ensure the entire multipolygon is 2D
+                            pGeometry_multi.FlattenTo2D()
                             final_geometry = pGeometry_multi
                         else:
                             if aCoord_updated is not None:
                                 # Update fixed_geometry with adjusted coordinates to create a polygon, usually because of IDL
                                 fixed_geometry = create_geometry_from_coordinates(
                                     aCoord_updated, geometry_type)
+                                final_geometry = fixed_geometry
                             else:
                                 final_geometry = fixed_geometry
                     else:
                         final_geometry = fixed_geometry
+
+                    # Ensure final geometry is always 2D
+                    if final_geometry is not None:
+                        final_geometry.FlattenTo2D()
 
                     # Create output feature
                     pFeature_out = ogr.Feature(pLayer_out.GetLayerDefn())
@@ -1292,9 +1344,12 @@ def create_geometry_from_coordinates(aCoord: NDArray[np.floating], geometry_type
         pPolygon = ogr.Geometry(ogr.wkbPolygon)
         pLinearRing = ogr.Geometry(ogr.wkbLinearRing)
         for coord in aCoord:
-            pLinearRing.AddPoint(coord[0], coord[1])
+            # Force 2D by only using x,y coordinates
+            pLinearRing.AddPoint_2D(coord[0], coord[1])
         pLinearRing.CloseRings()
         pPolygon.AddGeometry(pLinearRing)
+        # Ensure the polygon is 2D
+        pPolygon.FlattenTo2D()
         return pPolygon
     elif geometry_type == 'LINESTRING':
         pLineString = ogr.Geometry(ogr.wkbLineString)
