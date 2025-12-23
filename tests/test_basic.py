@@ -22,11 +22,13 @@ class TestUrasterImport(unittest.TestCase):
     def test_import_uraster(self):
         """Test that uraster can be imported"""
         from uraster import uraster
+
         self.assertTrue(uraster is not None)
 
     def test_import_sraster(self):
         """Test that sraster can be imported"""
         from uraster import sraster
+
         self.assertTrue(sraster is not None)
 
     def test_uraster_instantiation(self):
@@ -46,5 +48,5 @@ class TestUrasterImport(unittest.TestCase):
             self.fail(f"sraster instantiation failed: {e}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
