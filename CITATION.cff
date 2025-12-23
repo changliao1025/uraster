@@ -9,7 +9,11 @@ authors:
     given-names: Mingke
     orcid: https://orcid.org/0000-0001-6310-4964
 
+  - family-names: Little
+    given-names: Bill
+    orcid: https://orcid.org/0000-0002-1345-9465
+
 title: "uraster: Structured Raster to Unstructured Mesh."
-version: 0.1.0
+version: 0.1.5
 doi:
 date-released: 2025-10-01
