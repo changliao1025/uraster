@@ -20,9 +20,9 @@ sFilename_source_mesh = os.path.join(
 sFilename_hydrosheds_dem = os.path.join(sFolder_data, "input", "hyd_glo_dem_15s.tif")
 
 sFilename_target_mesh = os.path.join(sFolder_data, "output", "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_data, "output", "mesh.pdf")
-sFilename_variable_png = os.path.join(sFolder_data, "output", "uraster.pdf")
-sFilename_variable_animation = os.path.join(sFolder_data, "output", "uraster.mp4")
+sFilename_mesh_png = os.path.join(sFolder_data, "output", "mesh.jpg")
+sFilename_variable_png = os.path.join(sFolder_data, "output", "uraster.jpg")
+sFilename_variable_animation = os.path.join(sFolder_data, "output", "uraster.gif")
 from pyearth.toolbox.conversion.convert_vector_format import convert_vector_format
 from uraster.classes.uraster import uraster
 
@@ -76,7 +76,7 @@ def main():
         dLatitude_focus_in=dLatitude_focus_in,
         iFlag_create_animation=True,
         iAnimation_frames=360,  # 1° longitude per frame
-        sAnimation_format="mp4",
+        sAnimation_format="gif",
     )
 
     pRaster.cleanup()
