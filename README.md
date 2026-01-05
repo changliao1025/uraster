@@ -46,7 +46,6 @@ conda install -c conda-forge uraster
 
 Example datasets are provided through the GitHub repository: [URaster Example Data on GitHub](https://github.com/changliao1025/uraster_data)
 
-```python
 
 ## 📚 Documentation
 
