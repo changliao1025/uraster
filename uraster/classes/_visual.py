@@ -182,6 +182,7 @@ def visualize_raster(
             sUnit=sUnit,
             sFilename_out=sFilename_out,
         )
+        return True
 
     except ImportError as e:
         logger.error(
@@ -353,7 +354,7 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
 
         if iFlag_valid == 0:
             logger.warning(f'No valid cells to plot for variable "{sScalar}"')
-            return None
+            return False
 
         aValid_cell_indices = np.where(aValid_data_mask)[0]
         sUnit = ""
@@ -376,7 +377,7 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
         )
 
         # Output or display
-        return
+        return True
 
     except ImportError as e:
         logger.error(
@@ -601,6 +602,8 @@ def visualize_target_mesh(
                 sUnit=sUnit,
                 sFilename_out=sFilename_out,
             )
+
+        return True
 
     except ImportError as e:
         logger.error(
