@@ -34,9 +34,15 @@ def main():
         sFilename_source_mesh  # use the L10-100 test mesh
     )
     aFilename_source_raster = []
-    sFilename_raster0 = os.path.join(sFolder_data, "input", "ArcticDEM_32_34_1_1_2m_v4.1_dem.tif")
-    sFilename_raster1 = os.path.join(sFolder_data, "input", "ArcticDEM_32_34_1_2_2m_v4.1_dem.tif")
-    sFilename_raster2 = os.path.join(sFolder_data, "input", "ArcticDEM_32_35_1_1_2m_v4.1_dem.tif")
+    sFilename_raster0 = os.path.join(
+        sFolder_data, "input", "ArcticDEM_32_34_1_1_2m_v4.1_dem.tif"
+    )
+    sFilename_raster1 = os.path.join(
+        sFolder_data, "input", "ArcticDEM_32_34_1_2_2m_v4.1_dem.tif"
+    )
+    sFilename_raster2 = os.path.join(
+        sFolder_data, "input", "ArcticDEM_32_35_1_1_2m_v4.1_dem.tif"
+    )
     sFilename_raster3 = os.path.join(sFolder_data, "input", "N79W078_FABDEM_V1-0.tif")
     sFilename_raster4 = os.path.join(sFolder_data, "input", "N79W079_FABDEM_V1-0.tif")
     sFilename_raster5 = os.path.join(sFolder_data, "input", "N79W080_FABDEM_V1-0.tif")

@@ -44,7 +44,7 @@ conda install -c conda-forge uraster
 
 [Quickstart documentation](https://uraster.readthedocs.io/en/latest/quickstart.html)
 
-Example datasets are provided through the Zenodo repository: [URaster Example Data on Zenodo](https://zenodo.org/record/17613497)
+Example datasets are provided through the GitHub repository: [URaster Example Data on GitHub](https://github.com/changliao1025/uraster_data)
 
 ```python
 
