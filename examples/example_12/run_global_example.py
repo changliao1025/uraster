@@ -6,26 +6,32 @@ sPlatform_os = platform.system()
 sPath_current = os.path.dirname(os.path.abspath(__file__))
 sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
+from uraster.classes.uraster import uraster
+# Download input data using Pooch (downloads to system cache)
+from uraster.utility import get_example_paths
 
-# Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, "..", "..", "data", "example_12")
-sFolder_data = os.path.realpath(sFolder_data)
-# Print or use the data folder path
-print(f"Data folder path: {sFolder_data}")
+print("Downloading example 12 input data...")
+paths = get_example_paths(example_number=12)
+sFolder_input = paths['input']
+print(f"Input data cached at: {sFolder_input}")
+
+# Set up output directory relative to current working directory
+sFolder_output = os.path.join("data", "example_12", "output")
+os.makedirs(sFolder_output, exist_ok=True)
+print(f"Output directory: {sFolder_output}")
 
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(
-    sFolder_data, "input", "mpas.geojson"
+    sFolder_input, "mpas.geojson"
 )  # use the L10-100 test mesh
-sFilename_hydrosheds_dem = os.path.join(sFolder_data, "input", "hyd_glo_dem_15s.tif")
+sFilename_hydrosheds_dem = os.path.join(sFolder_input, "hyd_glo_dem_15s.tif")
 
-sFilename_target_mesh = os.path.join(sFolder_data, "output", "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_data, "output", "mesh.pdf")
-sFilename_variable_png = os.path.join(sFolder_data, "output", "uraster.pdf")
-sFilename_variable_animation = os.path.join(sFolder_data, "output", "uraster.mp4")
+sFilename_target_mesh = os.path.join(sFolder_output, "uraster.geojson")
+sFilename_mesh_png = os.path.join(sFolder_output, "mesh.pdf")
+sFilename_variable_png = os.path.join(sFolder_output, "uraster.pdf")
+sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
 
-from pyearth.toolbox.conversion.convert_vector_format import convert_vector_format
-from uraster.classes.uraster import uraster
+
 
 
 def main():
@@ -44,8 +50,7 @@ def main():
         print(f"Target mesh file does not exist: {pRaster.sFilename_target_mesh}")
         exit()
 
-    sFilename_source_mesh_parquet = os.path.join(
-        sFolder_data, "output", "mpas_source.parquet"
+    sFilename_source_mesh_parquet = os.path.join(sFolder_output, "mpas_source.parquet"
     )
     # convert_vector_format(pRaster.sFilename_source_mesh, sFilename_source_mesh_parquet)
 
@@ -63,8 +68,7 @@ def main():
     )
 
     # pRaster.run_remap(iFlag_verbose_in=True)
-    sFilename_mesh_parquet = os.path.join(
-        sFolder_data, "output", "mpas_uraster.parquet"
+    sFilename_mesh_parquet = os.path.join(sFolder_output, "mpas_uraster.parquet"
     )
     # convert_vector_format(pRaster.sFilename_target_mesh, sFilename_mesh_parquet)
 

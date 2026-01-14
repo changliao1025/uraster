@@ -3,28 +3,35 @@ import os, sys, platform
 sPath_current = os.path.dirname(os.path.abspath(__file__))
 sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
-
-# Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, "..", "..", "data", "example_2")
-sFolder_data = os.path.realpath(sFolder_data)
-# Print or use the data folder path
-print(f"Data folder path: {sFolder_data}")
-
-
-# Convert absolute paths to relative paths
-sFilename_source_mesh = os.path.join(
-    sFolder_data, "input", "isea3h_bbox_res15.geojson"
-)  # use the L10-100 test mesh
-sFilename_raster = os.path.join(sFolder_data, "input", "WSF2015_v2_-80_42.tif")
-
-sFilename_target_mesh = os.path.join(sFolder_data, "output", "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_data, "output", "mesh.jpg")
-sFilename_raster_png = os.path.join(sFolder_data, "output", "raster.png")
-sFilename_variable_png = os.path.join(sFolder_data, "output", "uraster.png")
-sFilename_variable_animation = os.path.join(sFolder_data, "output", "uraster.gif")
-
-
 from uraster.classes.uraster import uraster
+# Download input data using Pooch (downloads to system cache)
+from uraster.utility import get_example_paths
+
+print("Downloading example 2 input data...")
+paths = get_example_paths(example_number=2)
+sFolder_input = paths['input']
+print(f"Input data cached at: {sFolder_input}")
+
+# Set up output directory relative to current working directory
+sFolder_output = os.path.join("data", "example_2", "output")
+os.makedirs(sFolder_output, exist_ok=True)
+print(f"Output directory: {sFolder_output}")
+
+# Input file paths (from Pooch cache)
+sFilename_source_mesh = os.path.join(
+    sFolder_input, "isea3h_bbox_res15.geojson"
+)  # use the L10-100 test mesh
+sFilename_raster = os.path.join(sFolder_input, "WSF2015_v2_-80_42.tif")
+
+# Output file paths (relative to working directory)
+sFilename_target_mesh = os.path.join(sFolder_output, "uraster.geojson")
+sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
+sFilename_raster_png = os.path.join(sFolder_output, "raster.png")
+sFilename_variable_png = os.path.join(sFolder_output, "uraster.png")
+sFilename_variable_animation = os.path.join(sFolder_output, "uraster.gif")
+
+
+
 
 
 def main():

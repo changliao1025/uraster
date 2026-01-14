@@ -5,26 +5,33 @@ from pyearth.toolbox.management.raster.resample import resample_raster
 sPath_current = os.path.dirname(os.path.abspath(__file__))
 sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
+from uraster.classes.uraster import uraster
+# Download input data using Pooch (downloads to system cache)
+from uraster.utility import get_example_paths
 
-# Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, "..", "..", "data", "example_5")
-sFolder_data = os.path.realpath(sFolder_data)
-print(f"Data folder path: {sFolder_data}")
+print("Downloading example 5 input data...")
+paths = get_example_paths(example_number=5)
+sFolder_input = paths['input']
+print(f"Input data cached at: {sFolder_input}")
+
+# Set up output directory relative to current working directory
+sFolder_output = os.path.join("data", "example_5", "output")
+os.makedirs(sFolder_output, exist_ok=True)
+print(f"Output directory: {sFolder_output}")
 
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(
-    sFolder_data, "input", "isea7h_bbox_res5.geojson"
+    sFolder_input, "isea7h_bbox_res5.geojson"
 )  # use the L10-100 test mesh
 
 
-sFilename_target_mesh = os.path.join(sFolder_data, "output", "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_data, "output", "mesh.jpg")
-sFilename_raster_png = os.path.join(sFolder_data, "output", "raster.png")
-sFilename_variable_png = os.path.join(sFolder_data, "output", "uraster.png")
-sFilename_variable_animation = os.path.join(sFolder_data, "output", "uraster.mp4")
+sFilename_target_mesh = os.path.join(sFolder_output, "uraster.geojson")
+sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
+sFilename_raster_png = os.path.join(sFolder_output, "raster.png")
+sFilename_variable_png = os.path.join(sFolder_output, "uraster.png")
+sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
 
 
-from uraster.classes.uraster import uraster
 
 
 def main():
@@ -34,16 +41,16 @@ def main():
     )
     aFilename_source_raster = []
     sFilename_raster0 = os.path.join(
-        sFolder_data, "input", "Hansen_GFC-2019-v1.7_treecover2000_40N_090W.tif"
+        sFolder_input, "Hansen_GFC-2019-v1.7_treecover2000_40N_090W.tif"
     )
     sFilename_raster1 = os.path.join(
-        sFolder_data, "input", "Hansen_GFC-2019-v1.7_treecover2000_50N_090W.tif"
+        sFolder_input, "Hansen_GFC-2019-v1.7_treecover2000_50N_090W.tif"
     )
     sFilename_raster2 = os.path.join(
-        sFolder_data, "input", "Hansen_GFC-2019-v1.7_treecover2000_40N_100W.tif"
+        sFolder_input, "Hansen_GFC-2019-v1.7_treecover2000_40N_100W.tif"
     )
     sFilename_raster3 = os.path.join(
-        sFolder_data, "input", "Hansen_GFC-2019-v1.7_treecover2000_50N_100W.tif"
+        sFolder_input, "Hansen_GFC-2019-v1.7_treecover2000_50N_100W.tif"
     )
     aFilename_source_raster.append(sFilename_raster0)  #
     aFilename_source_raster.append(sFilename_raster1)  #

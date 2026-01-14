@@ -6,26 +6,31 @@ sPath_current = os.path.dirname(os.path.abspath(__file__))
 sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
 
-# Construct the relative path to the data folder
-sFolder_data = os.path.join(sPath_current, "..", "..", "data", "example_7")
-sFolder_data = os.path.realpath(sFolder_data)
+# Download input data using Pooch (downloads to system cache)
+from uraster.utility import get_example_paths
 
-# Print or use the data folder path
-print(f"Data folder path: {sFolder_data}")
+print("Downloading example 7 input data...")
+paths = get_example_paths(example_number=7)
+sFolder_input = paths['input']
+print(f"Input data cached at: {sFolder_input}")
 
+# Set up output directory relative to current working directory
+sFolder_output = os.path.join("data", "example_7", "output")
+os.makedirs(sFolder_output, exist_ok=True)
+print(f"Output directory: {sFolder_output}")
+from uraster.classes.uraster import uraster
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(
-    sFolder_data, "input", "isea3h_bbox_res12.geojson"
+    sFolder_input, "isea3h_bbox_res12.geojson"
 )  # use the L10-100 test mesh
 
-sFilename_target_mesh = os.path.join(sFolder_data, "output", "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_data, "output", "mesh.jpg")
-sFilename_raster_png = os.path.join(sFolder_data, "output", "raster.png")
-sFilename_variable_png = os.path.join(sFolder_data, "output", "uraster.png")
-sFilename_variable_animation = os.path.join(sFolder_data, "output", "uraster.mp4")
+sFilename_target_mesh = os.path.join(sFolder_output, "uraster.geojson")
+sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
+sFilename_raster_png = os.path.join(sFolder_output, "raster.png")
+sFilename_variable_png = os.path.join(sFolder_output, "uraster.png")
+sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
 
 
-from uraster.classes.uraster import uraster
 
 
 def main():
@@ -34,10 +39,10 @@ def main():
         sFilename_source_mesh  # use the L10-100 test mesh
     )
     aFilename_source_raster = []
-    sFilename_raster0 = os.path.join(sFolder_data, "input", "11T_20240101-20241231.tif")
-    sFilename_raster1 = os.path.join(sFolder_data, "input", "11U_20240101-20241231.tif")
-    sFilename_raster2 = os.path.join(sFolder_data, "input", "12T_20240101-20241231.tif")
-    sFilename_raster3 = os.path.join(sFolder_data, "input", "12U_20240101-20241231.tif")
+    sFilename_raster0 = os.path.join(sFolder_input, "11T_20240101-20241231.tif")
+    sFilename_raster1 = os.path.join(sFolder_input, "11U_20240101-20241231.tif")
+    sFilename_raster2 = os.path.join(sFolder_input, "12T_20240101-20241231.tif")
+    sFilename_raster3 = os.path.join(sFolder_input, "12U_20240101-20241231.tif")
     aFilename_source_raster.append(sFilename_raster0)  #
     aFilename_source_raster.append(sFilename_raster1)  #
     aFilename_source_raster.append(sFilename_raster2)  #
