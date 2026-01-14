@@ -1,6 +1,7 @@
 # Extract module for uraster - contains remap workflow functions
 import os
 import time
+import sys, platform
 import traceback
 from typing import Optional, Tuple, List, Dict, Any, Union
 import numpy as np
@@ -1345,6 +1346,67 @@ def run_remap(
             gdal_warp_options_serial["dstSRS"] = str(gdal_warp_options_serial["dstSRS"])
 
     n_features = len(aPolygon)
+
+    # Detect if running in Jupyter/IPython notebook environment
+    import sys
+    in_notebook = False
+    try:
+        # Check for IPython/Jupyter kernel
+        in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
+        if in_notebook:
+            # Additional check: verify we're actually in a notebook, not just IPython
+            try:
+                from IPython import get_ipython
+                ipython = get_ipython()
+                in_notebook = ipython is not None and 'IPKernelApp' in str(type(ipython))
+            except (ImportError, AttributeError):
+                in_notebook = False
+    except Exception:
+        in_notebook = False
+
+    # Handle notebook environment multiprocessing limitations
+    if in_notebook:
+        logger.info("Detected Jupyter notebook environment")
+        import multiprocessing
+        current_method = multiprocessing.get_start_method(allow_none=True)
+
+        if current_method == 'spawn' or (current_method is None and platform.system() in ['Darwin', 'Windows']):
+            # 'spawn' method doesn't work well in notebooks
+            logger.warning(
+                f"Current multiprocessing start method is '{current_method or 'spawn (default)'}' "
+                "which is incompatible with Jupyter notebooks"
+            )
+            logger.warning(
+                "Attempting to switch to 'fork' method for notebook compatibility "
+                "(Note: 'fork' has known limitations with GDAL)"
+            )
+
+            try:
+                # Try to set fork method
+                multiprocessing.set_start_method('fork', force=True)
+                logger.info("Successfully set multiprocessing method to 'fork'")
+                logger.warning(
+                    "Using 'fork' method: be aware of potential GDAL thread-safety issues. "
+                    "For production use, consider running as a standalone script with 'spawn' method."
+                )
+            except RuntimeError as e:
+                # Cannot change start method (already set)
+                logger.warning(f"Could not change multiprocessing start method: {e}")
+                logger.warning(
+                    f"Forcing serial processing for notebook safety. "
+                    f"To enable parallel processing, restart the kernel and set multiprocessing "
+                    f"start method to 'fork' before importing uraster."
+                )
+                # Force serial processing by making threshold very high
+                iFeature_parallel_threshold = n_features + 1
+        elif current_method == 'fork':
+            logger.info(
+                f"Multiprocessing start method is 'fork' - compatible with notebooks but "
+                f"has known thread-safety limitations with GDAL"
+            )
+        else:
+            logger.info(f"Multiprocessing start method: {current_method}")
+
     max_workers = min(cpu_count(), max(1, n_features))
     logger.info(
         f"Preparing to process {n_features} features (parallel threshold={iFeature_parallel_threshold})"
