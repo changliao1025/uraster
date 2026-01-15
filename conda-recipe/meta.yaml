@@ -1,0 +1,53 @@
+{% set name = "uraster" %}
+{% set version = "0.1.6" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.org/packages/source/{{ name[0] }}/{{ name }}/uraster-{{ version }}.tar.gz
+  sha256: 02ea4a3e97cb7825c661ba9050f51beccc2d9305b7bcb9541074660f5bd3595b
+
+build:
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  number: 0
+
+requirements:
+  host:
+    - python >=3.8
+    - setuptools >=61.0
+    - wheel
+    - pip
+  run:
+    - python >=3.8
+    - numpy >=1.19.0
+    - gdal >=3.0.0
+    - pyearth >=0.1.29
+    - psutil >=5.0.0
+    - pooch >=1.6.0
+    - tqdm >=4.0.0
+    - trame >=2.0.0
+    - trame-vtk >=2.0.0
+    - trame-vuetify >=2.0.0
+    - ipywidgets >=7.0.0
+    - geovista >=0.3.0
+    - vtk ==9.3.0
+
+test:
+  imports:
+    - uraster
+  commands:
+    - pip check
+  requires:
+    - pip
+
+about:
+  summary: A Python package for unstructured raster processing and remapping
+  license: BSD-3-Clause
+  license_file: LICENSE
+
+extra:
+  recipe-maintainers:
+    - changliao1025
