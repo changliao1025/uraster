@@ -1,6 +1,13 @@
 import os, sys, platform
 
 sPlatform_os = platform.system()
+sPath_pyearth = "/Users/liao313/workspace/python/pyearth"
+if sPath_pyearth not in sys.path:
+    sys.path.append(sPath_pyearth)
+
+sPath_pyearthviz3d = "/Users/liao313/workspace/python/pyearthviz3d"
+if sPath_pyearthviz3d not in sys.path:
+    sys.path.append(sPath_pyearthviz3d)
 
 # Get the directory of the current script
 sPath_current = os.path.dirname(os.path.abspath(__file__))
