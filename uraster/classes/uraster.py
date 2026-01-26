@@ -471,48 +471,134 @@ class uraster:
                     )
                     return None
 
-                # Check if coordinate system matches WGS84
-                if pRaster.pSpatialRef_wkt == wkt_wgs84:
-                    if iFlag_verbose_in:
-                        logger.info(f"  ✓ Already in WGS84 (EPSG:4326)")
-                    aFilename_source_raster_out.append(sFilename_raster_in)
-                    pExtent = pRaster.aExtent_wgs84
-                    aExtent.append(pExtent)
-                else:
-                    # Convert to WGS84
+                # Determine if raster is high latitude and set polar flag
+                is_high_lat = pRaster.is_high_latitude(latitude_threshold=60.0)
+                if is_high_lat and self.iFlag_polar == 0:
+                    # Auto-detect and enable polar mode for high latitude data
+                    self.iFlag_polar = 1
                     if iFlag_verbose_in:
                         logger.info(
-                            f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}'
+                            f"  ⚠ High latitude data detected (lat range: {pRaster.dLatitude_bottom:.2f}° to {pRaster.dLatitude_top:.2f}°)"
                         )
-                    try:
-                        pRaster_wgs84 = pRaster.convert_to_wgs84()
+                        logger.info("  → Enabling polar projection mode")
 
-                        if pRaster_wgs84 is None or not hasattr(
-                            pRaster_wgs84, "sFilename"
-                        ):
-                            logger.error(
-                                f"Conversion to WGS84 failed: {sFilename_raster_in}"
-                            )
-                            return None
-
-                        if not os.path.exists(pRaster_wgs84.sFilename):
-                            logger.error(
-                                f"Converted WGS84 file not found: {pRaster_wgs84.sFilename}"
-                            )
-                            return None
-
+                # Check if coordinate system matches WGS84
+                if pRaster.pSpatialRef_wkt == wkt_wgs84:
+                    # Already in WGS84 - check if we need polar projection instead
+                    if self.iFlag_polar == 1 and is_high_lat:
+                        # Convert WGS84 high-latitude data to polar projection
                         if iFlag_verbose_in:
-                            logger.info(f"  ✓ Converted to: {pRaster_wgs84.sFilename}")
-                        aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
-                        pExtent = pRaster_wgs84.aExtent_wgs84
-                        aExtent.append(pExtent)
+                            logger.info(
+                                f"  → Converting to Polar Stereographic (EPSG:3413) for high latitude"
+                            )
+                        try:
+                            pRaster_polar = pRaster.convert_to_polar_projection(epsg_code=3413)
 
-                    except Exception as e:
-                        logger.error(
-                            f"Error during WGS84 conversion: {sFilename_raster_in}: {e}"
-                        )
-                        logger.error(f"Traceback: {traceback.format_exc()}")
-                        return None
+                            if pRaster_polar is None or not hasattr(
+                                pRaster_polar, "sFilename"
+                            ):
+                                logger.error(
+                                    f"Conversion to polar projection failed: {sFilename_raster_in}"
+                                )
+                                return None
+
+                            if not os.path.exists(pRaster_polar.sFilename):
+                                logger.error(
+                                    f"Converted polar file not found: {pRaster_polar.sFilename}"
+                                )
+                                return None
+
+                            if iFlag_verbose_in:
+                                logger.info(f"  ✓ Converted to: {pRaster_polar.sFilename}")
+                            aFilename_source_raster_out.append(pRaster_polar.sFilename)
+                            pExtent = pRaster.aExtent_wgs84  # Keep WGS84 extent for consistency
+                            aExtent.append(pExtent)
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error during polar projection conversion: {sFilename_raster_in}: {e}"
+                            )
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                            return None
+                    else:
+                        # Use WGS84 as-is for non-polar data
+                        if iFlag_verbose_in:
+                            logger.info(f"  ✓ Already in WGS84 (EPSG:4326)")
+                        aFilename_source_raster_out.append(sFilename_raster_in)
+                        pExtent = pRaster.aExtent_wgs84
+                        aExtent.append(pExtent)
+                else:
+                    # Not in WGS84 - convert to appropriate projection
+                    if self.iFlag_polar == 1 and is_high_lat:
+                        # Convert to polar projection for high latitude
+                        if iFlag_verbose_in:
+                            logger.info(
+                                f'  → Converting to Polar Stereographic (EPSG:3413) from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}'
+                            )
+                        try:
+                            pRaster_polar = pRaster.convert_to_polar_projection(epsg_code=3413)
+
+                            if pRaster_polar is None or not hasattr(
+                                pRaster_polar, "sFilename"
+                            ):
+                                logger.error(
+                                    f"Conversion to polar projection failed: {sFilename_raster_in}"
+                                )
+                                return None
+
+                            if not os.path.exists(pRaster_polar.sFilename):
+                                logger.error(
+                                    f"Converted polar file not found: {pRaster_polar.sFilename}"
+                                )
+                                return None
+
+                            if iFlag_verbose_in:
+                                logger.info(f"  ✓ Converted to: {pRaster_polar.sFilename}")
+                            aFilename_source_raster_out.append(pRaster_polar.sFilename)
+                            pExtent = pRaster.aExtent_wgs84  # Keep WGS84 extent for consistency
+                            aExtent.append(pExtent)
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error during polar projection conversion: {sFilename_raster_in}: {e}"
+                            )
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                            return None
+                    else:
+                        # Convert to WGS84 for non-polar data
+                        if iFlag_verbose_in:
+                            logger.info(
+                                f'  → Converting to WGS84 from {pRaster.pSpatialRef.GetName() if pRaster.pSpatialRef else "unknown CRS"}'
+                            )
+                        try:
+                            pRaster_wgs84 = pRaster.convert_to_wgs84()
+
+                            if pRaster_wgs84 is None or not hasattr(
+                                pRaster_wgs84, "sFilename"
+                            ):
+                                logger.error(
+                                    f"Conversion to WGS84 failed: {sFilename_raster_in}"
+                                )
+                                return None
+
+                            if not os.path.exists(pRaster_wgs84.sFilename):
+                                logger.error(
+                                    f"Converted WGS84 file not found: {pRaster_wgs84.sFilename}"
+                                )
+                                return None
+
+                            if iFlag_verbose_in:
+                                logger.info(f"  ✓ Converted to: {pRaster_wgs84.sFilename}")
+                            aFilename_source_raster_out.append(pRaster_wgs84.sFilename)
+                            pExtent = pRaster_wgs84.aExtent_wgs84
+                            aExtent.append(pExtent)
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error during WGS84 conversion: {sFilename_raster_in}: {e}"
+                            )
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                            return None
 
                 # Log raster summary
                 if iFlag_verbose_in:

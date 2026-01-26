@@ -276,6 +276,72 @@ class sraster:
 
         return self.sFilename_mesh
 
+    def is_high_latitude(self, latitude_threshold=60.0):
+        """
+        Determine if raster contains high latitude data.
+        
+        Args:
+            latitude_threshold (float): Latitude threshold in degrees. 
+                Data above this absolute latitude is considered high latitude.
+                Default is 60.0 degrees.
+        
+        Returns:
+            bool: True if raster extent includes high latitude regions
+        """
+        if self.dLatitude_top is None or self.dLatitude_bottom is None:
+            return False
+        
+        # Check if any part of the raster is beyond the threshold
+        max_abs_lat = max(abs(self.dLatitude_top), abs(self.dLatitude_bottom))
+        return max_abs_lat >= latitude_threshold
+
+    def convert_to_polar_projection(self, epsg_code=3413):
+        """
+        Convert raster to polar stereographic projection.
+        
+        Args:
+            epsg_code (int): EPSG code for polar projection.
+                Default is 3413 (NSIDC Sea Ice Polar Stereographic North).
+                Use 3031 for Antarctic Polar Stereographic.
+        
+        Returns:
+            sraster: New sraster instance with reprojected file.
+        """
+        pSpatialRef_polar = osr.SpatialReference()
+        pSpatialRef_polar.ImportFromEPSG(epsg_code)
+        wkt_polar = pSpatialRef_polar.ExportToWkt()
+        pSpatialRef_polar = None  # Clean up
+        
+        # Check if already in target projection
+        if self.pSpatialRef_wkt == wkt_polar:
+            print(f"Raster is already in EPSG:{epsg_code} projection.")
+            return self
+
+        # Define new filename for converted raster
+        base, ext = os.path.splitext(self.sFilename)
+        ext = ext.lstrip(".")
+        sFilename_raster_polar = f"{base}_epsg{epsg_code}.{ext}"
+
+        # Delete file if it already exists
+        if os.path.isfile(sFilename_raster_polar):
+            os.remove(sFilename_raster_polar)
+
+        # Reproject to polar projection
+        reproject_raster(
+            self.sFilename,
+            sFilename_raster_polar,
+            wkt_polar,
+            xRes=None,
+            yRes=None,
+            sResampleAlg="near",
+            iFlag_force_resolution_in=0,
+        )
+
+        # Create and return new sraster instance
+        pRaster_polar = sraster(sFilename_in=sFilename_raster_polar)
+        pRaster_polar.read_metadata()
+        return pRaster_polar
+
     def convert_to_wgs84(self):
         """
         Convert the raster to WGS84 coordinate system.
