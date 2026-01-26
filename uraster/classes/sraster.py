@@ -314,7 +314,7 @@ class sraster:
         
         # Check if already in target projection
         if self.pSpatialRef_wkt == wkt_polar:
-            print(f"Raster is already in EPSG:{epsg_code} projection.")
+            # Already in target projection, return self
             return self
 
         # Define new filename for converted raster

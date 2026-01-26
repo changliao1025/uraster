@@ -39,6 +39,8 @@ class uraster:
                 - sFilename_source_mesh (str): Source mesh file path
                 - sFilename_target_mesh (str): Target mesh file path
                 - aFilename_source_raster (list): List of source raster file paths
+                - iFlag_polar (int): Flag for polar projection (0=auto-detect, 1=force polar)
+                - dLatitude_polar_threshold (float): Latitude threshold for polar projection (default: 60.0)
         """
         # Default configuration
         if aConfig is None:
@@ -66,6 +68,11 @@ class uraster:
         self.iFlag_discrete = aConfig.get(
             "iFlag_discrete", 0
         )  # Default to 0 (continuous)
+        
+        # Polar projection threshold - latitude beyond which to use polar projection
+        self.dLatitude_polar_threshold = aConfig.get(
+            "dLatitude_polar_threshold", 60.0
+        )  # Default to 60 degrees
 
         # Cell counts
         self.nCell = -1
@@ -472,7 +479,7 @@ class uraster:
                     return None
 
                 # Determine if raster is high latitude and set polar flag
-                is_high_lat = pRaster.is_high_latitude(latitude_threshold=60.0)
+                is_high_lat = pRaster.is_high_latitude(latitude_threshold=self.dLatitude_polar_threshold)
                 if is_high_lat and self.iFlag_polar == 0:
                     # Auto-detect and enable polar mode for high latitude data
                     self.iFlag_polar = 1
@@ -511,7 +518,8 @@ class uraster:
                             if iFlag_verbose_in:
                                 logger.info(f"  ✓ Converted to: {pRaster_polar.sFilename}")
                             aFilename_source_raster_out.append(pRaster_polar.sFilename)
-                            pExtent = pRaster.aExtent_wgs84  # Keep WGS84 extent for consistency
+                            # Use WGS84 extent from original raster for global extent tracking
+                            pExtent = pRaster.aExtent_wgs84
                             aExtent.append(pExtent)
 
                         except Exception as e:
@@ -555,7 +563,8 @@ class uraster:
                             if iFlag_verbose_in:
                                 logger.info(f"  ✓ Converted to: {pRaster_polar.sFilename}")
                             aFilename_source_raster_out.append(pRaster_polar.sFilename)
-                            pExtent = pRaster.aExtent_wgs84  # Keep WGS84 extent for consistency
+                            # Use WGS84 extent from original raster for global extent tracking
+                            pExtent = pRaster.aExtent_wgs84
                             aExtent.append(pExtent)
 
                         except Exception as e:
