@@ -318,6 +318,9 @@ class sraster:
     def get_unique_values(self, band_index=1, dMissing_value=None, iFlag_verbose_in=0):
         """
         Get unique values from the specified band of the raster.
+
+        Performance note: For large rasters, this method uses a set-based approach
+        which is much faster than np.unique() because it avoids sorting overhead.
         """
         # Check if file exists
         if not os.path.isfile(self.sFilename):
@@ -336,18 +339,18 @@ class sraster:
             pBand = pDataset.GetRasterBand(band_index)
             array = pBand.ReadAsArray()
 
-            # Get unique values using numpy
-            unique_array = np.unique(array)
+            # Use set() directly on flattened array - much faster than np.unique()
+            # This avoids the O(n log n) sorting overhead
+            # Convert to Python set via flat iterator
+            unique_values = set(array.flat)
 
             # Filter out missing value if specified
-            for value in unique_array:
-                if dMissing_value is not None and value == dMissing_value:
-                    continue
-                unique_values.add(value)
+            if dMissing_value is not None:
+                unique_values.discard(dMissing_value)
 
         finally:
             # Ensure dataset is properly closed
             if pDataset is not None:
                 pDataset = None
 
-        return list(unique_values)
+        return sorted(list(unique_values))

@@ -1212,7 +1212,13 @@ def run_remap(
 
     if os.path.exists(sFilename_target_mesh):
         # remove the file using the vector driver
-        pDriver_vector.DeleteDataSource(sFilename_target_mesh)
+        #use os to delete first
+        try:
+            os.remove(sFilename_target_mesh)
+        except OSError as e:
+            logger.error(f"Error deleting file {sFilename_target_mesh}: {e}")
+            #fall back to driver delete if os remove fails
+            pDriver_vector.DeleteDataSource(sFilename_target_mesh)
 
     # get the raster file extension
     # just use the first raster to get the extension
@@ -1458,7 +1464,12 @@ def run_remap(
                 pFeature_out.SetField("area", aArea[feature_idx])
                 if iFlag_discrete_in:
                     # Populate the 'mode' field with the mode (most frequent value)
-                    pFeature_out.SetField("mode", int(stats.get("mode", -1)))
+                    mode_val = stats.get("mode", -1)
+                    # Handle NaN values - cannot convert NaN to integer
+                    if isinstance(mode_val, float) and np.isnan(mode_val):
+                        pFeature_out.SetField("mode", -1)
+                    else:
+                        pFeature_out.SetField("mode", int(mode_val))
                     pFeature_out.SetField("count", int(stats.get("count", 0)))
                     # Populate the percentage fields for each unique value
                     for val in aUnique_value:
@@ -1509,7 +1520,12 @@ def run_remap(
                     pFeature_out.SetField("area", aArea[feature_idx])
                     if iFlag_discrete_in:
                         # Populate the 'mode' field with the mode (most frequent value)
-                        pFeature_out.SetField("mode", int(stats.get("mode", -1)))
+                        mode_val = stats.get("mode", -1)
+                        # Handle NaN values - cannot convert NaN to integer
+                        if isinstance(mode_val, float) and np.isnan(mode_val):
+                            pFeature_out.SetField("mode", -1)
+                        else:
+                            pFeature_out.SetField("mode", int(mode_val))
                         pFeature_out.SetField("count", int(stats.get("count", 0)))
                         # Populate the percentage fields for each unique value
                         for val in aUnique_value:
