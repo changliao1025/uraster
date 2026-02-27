@@ -1205,6 +1205,7 @@ class uraster:
             Not yet implemented. Placeholder for future raster visualization.
         """
         from uraster.classes import _visual
+
         return _visual.visualize_raster(
             self, sFilename_out=sFilename_out, iFlag_verbose_in=iFlag_verbose_in
         )
@@ -1254,6 +1255,7 @@ class uraster:
             - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         """
         from uraster.classes import _visual
+
         # Set defaults for all parameters
         defaults = {
             "dLongitude_focus_in": 0.0,
@@ -1336,6 +1338,7 @@ class uraster:
             - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
         """
         from uraster.classes import _visual
+
         # Set defaults for all parameters
         defaults = {
             "dLongitude_focus_in": 0.0,
@@ -1384,6 +1387,7 @@ class uraster:
         This method delegates to the _visual module for implementation.
         """
         from uraster.classes import _visual
+
         return _visual._create_rotation_animation(
             self,
             plotter,

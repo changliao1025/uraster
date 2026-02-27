@@ -125,10 +125,10 @@ class sraster:
                     )
 
                     # Transform all 4 corners to handle rotated rasters
-                    (x1, y1, _) = transform.TransformPoint(minX, minY)  # Lower-left
-                    (x2, y2, _) = transform.TransformPoint(maxX, minY)  # Lower-right
-                    (x3, y3, _) = transform.TransformPoint(maxX, maxY)  # Upper-right
-                    (x4, y4, _) = transform.TransformPoint(minX, maxY)  # Upper-left
+                    x1, y1, _ = transform.TransformPoint(minX, minY)  # Lower-left
+                    x2, y2, _ = transform.TransformPoint(maxX, minY)  # Lower-right
+                    x3, y3, _ = transform.TransformPoint(maxX, maxY)  # Upper-right
+                    x4, y4, _ = transform.TransformPoint(minX, maxY)  # Upper-left
 
                     # Get the bounding box of all transformed corners
                     all_x = [x1, x2, x3, x4]

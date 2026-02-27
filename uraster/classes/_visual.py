@@ -18,9 +18,14 @@ import traceback
 from typing import Optional, List, Tuple, Union, Dict, Any
 import numpy as np
 from osgeo import gdal, ogr
+
 gdal.UseExceptions()
 
-from pyearthviz3d.geovista.utility import VisualizationConfig, AnimationConfig, ScalarBarConfig
+from pyearthviz3d.geovista.utility import (
+    VisualizationConfig,
+    AnimationConfig,
+    ScalarBarConfig,
+)
 from pyearthviz3d.geovista.map_single_frame import map_single_frame
 from pyearthviz3d.geovista.animate_rotating_frames import animate_rotating_frames
 from uraster.classes.sraster import sraster
@@ -616,25 +621,25 @@ def visualize_target_mesh(
         else:
             if self.iFlag_discrete == 1:
                 scalar_config = ScalarBarConfig(
-                        title=sScalar,
-                        title_font_size=scaled_font_size,
-                        label_font_size=scaled_font_size,
-                        position_x=0.8,
-                        position_y=0.25,
-                        orientation='vertical',
-                        discrete_labels=aDict_discrete_labels_in,
-                        value_colors=aDict_value_color_in,
-                    )
+                    title=sScalar,
+                    title_font_size=scaled_font_size,
+                    label_font_size=scaled_font_size,
+                    position_x=0.8,
+                    position_y=0.25,
+                    orientation="vertical",
+                    discrete_labels=aDict_discrete_labels_in,
+                    value_colors=aDict_value_color_in,
+                )
             else:
                 scalar_config = ScalarBarConfig(
-                        title=sScalar,
-                        title_font_size=scaled_font_size,
-                        label_font_size=scaled_font_size,
-                        position_x=0.8,
-                        position_y=0.25,
-                        orientation='vertical',
-                        n_labels=5,
-                    )
+                    title=sScalar,
+                    title_font_size=scaled_font_size,
+                    label_font_size=scaled_font_size,
+                    position_x=0.8,
+                    position_y=0.25,
+                    orientation="vertical",
+                    n_labels=5,
+                )
             map_single_frame(
                 pMesh,
                 aValid_cell_indices,
@@ -642,7 +647,7 @@ def visualize_target_mesh(
                 sScalar=sScalar,
                 scalar_config=scalar_config,
                 sUnit=sUnit,
-                show_edges = show_edges,
+                show_edges=show_edges,
                 sFilename_out=sFilename_out,
             )
 

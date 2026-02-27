@@ -1489,6 +1489,7 @@ def create_geometry_from_coordinates(
 try:
     import pooch
     import zipfile
+
     POOCH_AVAILABLE = True
 except ImportError:
     POOCH_AVAILABLE = False
@@ -1533,7 +1534,9 @@ if POOCH_AVAILABLE:
     )
 
 
-def download_multipart_example(example_number: int, num_parts: int, extract_dir: Optional[str] = None) -> str:
+def download_multipart_example(
+    example_number: int, num_parts: int, extract_dir: Optional[str] = None
+) -> str:
     """
     Download and extract multi-part zip files for an example.
 
@@ -1552,9 +1555,13 @@ def download_multipart_example(example_number: int, num_parts: int, extract_dir:
         Path to the extracted example directory
     """
     if not POOCH_AVAILABLE:
-        raise ImportError("Pooch is required for data download. Install it with: pip install pooch")
+        raise ImportError(
+            "Pooch is required for data download. Install it with: pip install pooch"
+        )
 
-    print(f"Downloading example {example_number} data (multi-part archive with {num_parts} parts)...")
+    print(
+        f"Downloading example {example_number} data (multi-part archive with {num_parts} parts)..."
+    )
 
     # Download all parts
     part_files = []
@@ -1564,10 +1571,7 @@ def download_multipart_example(example_number: int, num_parts: int, extract_dir:
 
         try:
             # Download the part (no extraction yet)
-            file_path = DATA_FETCHER.fetch(
-                filename,
-                progressbar=True
-            )
+            file_path = DATA_FETCHER.fetch(filename, progressbar=True)
             part_files.append(file_path)
             print(f"  ✓ Downloaded: {filename}")
         except Exception as e:
@@ -1587,7 +1591,7 @@ def download_multipart_example(example_number: int, num_parts: int, extract_dir:
 
     for part_file in part_files:
         try:
-            with zipfile.ZipFile(part_file, 'r') as zip_ref:
+            with zipfile.ZipFile(part_file, "r") as zip_ref:
                 zip_ref.extractall(extract_dir)
                 all_extracted_files.extend(zip_ref.namelist())
         except Exception as e:
@@ -1595,14 +1599,15 @@ def download_multipart_example(example_number: int, num_parts: int, extract_dir:
             raise
 
     # Organize files into input directory if not already organized
-    input_dir = os.path.join(extract_dir, 'input')
+    input_dir = os.path.join(extract_dir, "input")
     if not os.path.exists(input_dir):
         import shutil
+
         os.makedirs(input_dir, exist_ok=True)
         # Move all extracted files to input directory (excluding directories)
         for item in os.listdir(extract_dir):
             item_path = os.path.join(extract_dir, item)
-            if os.path.isfile(item_path) and item != 'input':
+            if os.path.isfile(item_path) and item != "input":
                 dest_path = os.path.join(input_dir, item)
                 if not os.path.exists(dest_path):
                     shutil.move(item_path, dest_path)
@@ -1612,7 +1617,9 @@ def download_multipart_example(example_number: int, num_parts: int, extract_dir:
     return extract_dir
 
 
-def download_example_data(example_number: int, extract_dir: Optional[str] = None) -> str:
+def download_example_data(
+    example_number: int, extract_dir: Optional[str] = None
+) -> str:
     """
     Download and extract data files for a specific example.
 
@@ -1642,7 +1649,9 @@ def download_example_data(example_number: int, extract_dir: Optional[str] = None
     >>> example_dir = download_example_data(1, extract_dir='./data')
     """
     if not POOCH_AVAILABLE:
-        raise ImportError("Pooch is required for data download. Install it with: pip install pooch")
+        raise ImportError(
+            "Pooch is required for data download. Install it with: pip install pooch"
+        )
 
     # Check if this is a multi-part example
     if example_number in MULTIPART_EXAMPLES:
@@ -1658,9 +1667,7 @@ def download_example_data(example_number: int, extract_dir: Optional[str] = None
     try:
         # Fetch and extract the zip file
         extracted_files = DATA_FETCHER.fetch(
-            filename,
-            progressbar=True,
-            processor=pooch.Unzip(extract_dir=extract_dir)
+            filename, progressbar=True, processor=pooch.Unzip(extract_dir=extract_dir)
         )
 
         # The processor returns a list of extracted files
@@ -1669,9 +1676,10 @@ def download_example_data(example_number: int, extract_dir: Optional[str] = None
             example_dir = os.path.dirname(extracted_files[0])
 
             # Organize files into input directory if not already organized
-            input_dir = os.path.join(example_dir, 'input')
+            input_dir = os.path.join(example_dir, "input")
             if not os.path.exists(input_dir):
                 import shutil
+
                 os.makedirs(input_dir, exist_ok=True)
                 # Move all extracted files to input directory
                 for file_path in extracted_files:
@@ -1694,7 +1702,9 @@ def download_example_data(example_number: int, extract_dir: Optional[str] = None
         raise
 
 
-def get_example_paths(example_number: int, extract_dir: Optional[str] = None) -> Dict[str, str]:
+def get_example_paths(
+    example_number: int, extract_dir: Optional[str] = None
+) -> Dict[str, str]:
     """
     Get paths to example data directories, downloading if necessary.
 
@@ -1729,20 +1739,18 @@ def get_example_paths(example_number: int, extract_dir: Optional[str] = None) ->
     example_dir = download_example_data(example_number, extract_dir=extract_dir)
 
     # Construct paths
-    input_dir = os.path.join(example_dir, 'input')
-    output_dir = os.path.join(example_dir, 'output')
+    input_dir = os.path.join(example_dir, "input")
+    output_dir = os.path.join(example_dir, "output")
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    return {
-        'base': example_dir,
-        'input': input_dir,
-        'output': output_dir
-    }
+    return {"base": example_dir, "input": input_dir, "output": output_dir}
 
 
-def list_example_files(example_number: int, extract_dir: Optional[str] = None) -> Dict[str, List[str]]:
+def list_example_files(
+    example_number: int, extract_dir: Optional[str] = None
+) -> Dict[str, List[str]]:
     """
     List all files in the downloaded example.
 
@@ -1760,16 +1768,13 @@ def list_example_files(example_number: int, extract_dir: Optional[str] = None) -
     """
     paths = get_example_paths(example_number, extract_dir=extract_dir)
 
-    result = {
-        'input': [],
-        'output': []
-    }
+    result = {"input": [], "output": []}
 
-    if os.path.exists(paths['input']):
-        result['input'] = os.listdir(paths['input'])
+    if os.path.exists(paths["input"]):
+        result["input"] = os.listdir(paths["input"])
 
-    if os.path.exists(paths['output']):
-        result['output'] = os.listdir(paths['output'])
+    if os.path.exists(paths["output"]):
+        result["output"] = os.listdir(paths["output"])
 
     return result
 
@@ -1784,7 +1789,9 @@ def get_cache_location() -> str:
         Path to cache directory
     """
     if not POOCH_AVAILABLE:
-        raise ImportError("Pooch is required for data download. Install it with: pip install pooch")
+        raise ImportError(
+            "Pooch is required for data download. Install it with: pip install pooch"
+        )
     return DATA_FETCHER.path
 
 
@@ -1795,9 +1802,12 @@ def clear_cache() -> None:
     This removes all downloaded files and forces fresh downloads.
     """
     if not POOCH_AVAILABLE:
-        raise ImportError("Pooch is required for data download. Install it with: pip install pooch")
+        raise ImportError(
+            "Pooch is required for data download. Install it with: pip install pooch"
+        )
 
     import shutil
+
     cache_dir = get_cache_location()
     if os.path.exists(cache_dir):
         shutil.rmtree(cache_dir)

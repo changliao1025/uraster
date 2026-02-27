@@ -1212,12 +1212,12 @@ def run_remap(
 
     if os.path.exists(sFilename_target_mesh):
         # remove the file using the vector driver
-        #use os to delete first
+        # use os to delete first
         try:
             os.remove(sFilename_target_mesh)
         except OSError as e:
             logger.error(f"Error deleting file {sFilename_target_mesh}: {e}")
-            #fall back to driver delete if os remove fails
+            # fall back to driver delete if os remove fails
             pDriver_vector.DeleteDataSource(sFilename_target_mesh)
 
     # get the raster file extension
@@ -1355,16 +1355,20 @@ def run_remap(
 
     # Detect if running in Jupyter/IPython notebook environment
     import sys
+
     in_notebook = False
     try:
         # Check for IPython/Jupyter kernel
-        in_notebook = 'ipykernel' in sys.modules or 'IPython' in sys.modules
+        in_notebook = "ipykernel" in sys.modules or "IPython" in sys.modules
         if in_notebook:
             # Additional check: verify we're actually in a notebook, not just IPython
             try:
                 from IPython import get_ipython
+
                 ipython = get_ipython()
-                in_notebook = ipython is not None and 'IPKernelApp' in str(type(ipython))
+                in_notebook = ipython is not None and "IPKernelApp" in str(
+                    type(ipython)
+                )
             except (ImportError, AttributeError):
                 in_notebook = False
     except Exception:
@@ -1374,9 +1378,12 @@ def run_remap(
     if in_notebook:
         logger.info("Detected Jupyter notebook environment")
         import multiprocessing
+
         current_method = multiprocessing.get_start_method(allow_none=True)
 
-        if current_method == 'spawn' or (current_method is None and platform.system() in ['Darwin', 'Windows']):
+        if current_method == "spawn" or (
+            current_method is None and platform.system() in ["Darwin", "Windows"]
+        ):
             # 'spawn' method doesn't work well in notebooks
             logger.warning(
                 f"Current multiprocessing start method is '{current_method or 'spawn (default)'}' "
@@ -1389,7 +1396,7 @@ def run_remap(
 
             try:
                 # Try to set fork method
-                multiprocessing.set_start_method('fork', force=True)
+                multiprocessing.set_start_method("fork", force=True)
                 logger.info("Successfully set multiprocessing method to 'fork'")
                 logger.warning(
                     "Using 'fork' method: be aware of potential GDAL thread-safety issues. "
@@ -1405,7 +1412,7 @@ def run_remap(
                 )
                 # Force serial processing by making threshold very high
                 iFeature_parallel_threshold = n_features + 1
-        elif current_method == 'fork':
+        elif current_method == "fork":
             logger.info(
                 f"Multiprocessing start method is 'fork' - compatible with notebooks but "
                 f"has known thread-safety limitations with GDAL"

@@ -6,12 +6,13 @@ sPath_current = os.path.dirname(os.path.abspath(__file__))
 sPath_library = os.path.dirname(os.path.dirname(sPath_current))
 sys.path.append(sPath_library)
 from uraster.classes.uraster import uraster
+
 # Download input data using Pooch (downloads to system cache)
 from uraster.utility import get_example_paths
 
 print("Downloading example 4 input data...")
 paths = get_example_paths(example_number=4)
-sFolder_input = paths['input']
+sFolder_input = paths["input"]
 print(f"Input data cached at: {sFolder_input}")
 
 # Set up output directory relative to current working directory
@@ -31,8 +32,6 @@ sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
 sFilename_raster_png = os.path.join(sFolder_output, "raster.png")
 sFilename_variable_png = os.path.join(sFolder_output, "uraster.png")
 sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
-
-
 
 
 def main():
