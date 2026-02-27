@@ -2,7 +2,7 @@
 uraster - A Python package for unstructured raster processing and remapping
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.7"
 __author__ = "Chang Liao"
 __email__ = "changliao.climate@gmail.com"
 
