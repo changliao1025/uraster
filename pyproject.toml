@@ -37,7 +37,6 @@ dependencies = [
     "pooch",
     "tqdm",
     "trame",
-    "trame",
     "trame-vuetify",
     "ipywidgets",
 ]
