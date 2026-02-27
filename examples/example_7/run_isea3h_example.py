@@ -11,7 +11,7 @@ from uraster.utility import get_example_paths
 
 print("Downloading example 7 input data...")
 paths = get_example_paths(example_number=7)
-sFolder_input = paths['input']
+sFolder_input = paths["input"]
 print(f"Input data cached at: {sFolder_input}")
 
 # Set up output directory relative to current working directory
@@ -19,6 +19,7 @@ sFolder_output = os.path.join("data", "example_7", "output")
 os.makedirs(sFolder_output, exist_ok=True)
 print(f"Output directory: {sFolder_output}")
 from uraster.classes.uraster import uraster
+
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(
     sFolder_input, "isea3h_bbox_res12.geojson"
@@ -29,8 +30,6 @@ sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
 sFilename_raster_png = os.path.join(sFolder_output, "raster.png")
 sFilename_variable_png = os.path.join(sFolder_output, "uraster.png")
 sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
-
-
 
 
 def main():

@@ -12,18 +12,22 @@ Features:
 - Support for multiple output formats
 """
 
-import os
+import os, sys
 import logging
 import traceback
-import math
 from typing import Optional, List, Tuple, Union, Dict, Any
 import numpy as np
 from osgeo import gdal, ogr
 
 gdal.UseExceptions()
-from pyearth.visual.geovista.utility import VisualizationConfig, AnimationConfig
-from pyearth.visual.geovista.map_single_frame import map_single_frame
-from pyearth.visual.geovista.animate_rotating_frames import animate_rotating_frames
+
+from pyearthviz3d.geovista.utility import (
+    VisualizationConfig,
+    AnimationConfig,
+    ScalarBarConfig,
+)
+from pyearthviz3d.geovista.map_single_frame import map_single_frame
+from pyearthviz3d.geovista.animate_rotating_frames import animate_rotating_frames
 from uraster.classes.sraster import sraster
 from uraster import utility
 from uraster.utility import setup_logger
@@ -465,6 +469,10 @@ def visualize_target_mesh(
         "dAnimation_speed": 1.0,
         "sAnimation_format": "mp4",
         "iFlag_verbose_in": False,
+        "show_edges": False,
+        "edge_color": "black",
+        "aDict_discrete_labels_in": None,
+        "aDict_value_color_in": None,
     }
 
     # Merge defaults with provided kwargs
@@ -487,6 +495,11 @@ def visualize_target_mesh(
     sAnimation_format = merged_params["sAnimation_format"]
     iFlag_verbose_in = merged_params["iFlag_verbose_in"]
 
+    show_edges = merged_params["show_edges"]
+    edge_color = merged_params["edge_color"]
+    aDict_discrete_labels_in = merged_params["aDict_discrete_labels_in"]
+    aDict_value_color_in = merged_params["aDict_value_color_in"]
+
     # Validate inputs
     if not self.sFilename_target_mesh:
         logger.error("No target mesh filename configured")
@@ -504,6 +517,18 @@ def visualize_target_mesh(
     if not isinstance(sVariable, str):
         logger.error(f"Variable name must be a string, got {type(sVariable).__name__}")
         return False
+
+    # Define a base window size and font size
+    base_window_size = 1200
+    base_font_size = 8
+    base_line_width = 0.1
+
+    # Calculate scaling factor
+    scaling_factor = max(window_size_in) / base_window_size
+
+    # Adjust font size
+    scaled_font_size = int(base_font_size * scaling_factor)
+    scaled_line_width = base_line_width * scaling_factor
 
     # Create configuration objects
     config_static = VisualizationConfig(
@@ -594,12 +619,35 @@ def visualize_target_mesh(
                 sFilename_out=sFilename_out,
             )
         else:
+            if self.iFlag_discrete == 1:
+                scalar_config = ScalarBarConfig(
+                    title=sScalar,
+                    title_font_size=scaled_font_size,
+                    label_font_size=scaled_font_size,
+                    position_x=0.8,
+                    position_y=0.25,
+                    orientation="vertical",
+                    discrete_labels=aDict_discrete_labels_in,
+                    value_colors=aDict_value_color_in,
+                )
+            else:
+                scalar_config = ScalarBarConfig(
+                    title=sScalar,
+                    title_font_size=scaled_font_size,
+                    label_font_size=scaled_font_size,
+                    position_x=0.8,
+                    position_y=0.25,
+                    orientation="vertical",
+                    n_labels=5,
+                )
             map_single_frame(
                 pMesh,
                 aValid_cell_indices,
                 config_static,
                 sScalar=sScalar,
+                scalar_config=scalar_config,
                 sUnit=sUnit,
+                show_edges=show_edges,
                 sFilename_out=sFilename_out,
             )
 

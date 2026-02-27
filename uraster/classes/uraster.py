@@ -7,7 +7,7 @@ from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from uraster.operation import extract, intersect
-from uraster.classes import _visual
+
 from uraster.classes.sraster import sraster
 from uraster import utility
 from uraster.utility import setup_logger
@@ -1156,6 +1156,7 @@ class uraster:
                 return None
         else:
             # for continuous, all remap methods are allowed
+            iFlag_discrete_in = self.iFlag_discrete
             pass
 
         # the model should suport weighted average and discrete remap
@@ -1203,6 +1204,8 @@ class uraster:
         Note:
             Not yet implemented. Placeholder for future raster visualization.
         """
+        from uraster.classes import _visual
+
         return _visual.visualize_raster(
             self, sFilename_out=sFilename_out, iFlag_verbose_in=iFlag_verbose_in
         )
@@ -1251,6 +1254,8 @@ class uraster:
             - Interactive mode requires display environment
             - Mesh topology must be built before visualization (call rebuild_mesh_topology first)
         """
+        from uraster.classes import _visual
+
         # Set defaults for all parameters
         defaults = {
             "dLongitude_focus_in": 0.0,
@@ -1332,6 +1337,8 @@ class uraster:
             - Interactive mode requires display environment
             - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
         """
+        from uraster.classes import _visual
+
         # Set defaults for all parameters
         defaults = {
             "dLongitude_focus_in": 0.0,
@@ -1347,6 +1354,8 @@ class uraster:
             "dAnimation_speed": 1.0,
             "sAnimation_format": "mp4",
             "iFlag_verbose_in": False,
+            "show_edges": False,
+            "edge_color": "black",
         }
 
         # Merge defaults with provided kwargs
@@ -1377,6 +1386,8 @@ class uraster:
 
         This method delegates to the _visual module for implementation.
         """
+        from uraster.classes import _visual
+
         return _visual._create_rotation_animation(
             self,
             plotter,
