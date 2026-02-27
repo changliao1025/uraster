@@ -32,7 +32,7 @@ dependencies = [
     "numpy",
     "gdal>=3.0.0",
     "pyearth>=0.2.1",
-    "pyearthviz3d",
+    "pyearthviz3d>=0.1.1",
     "psutil",
     "pooch",
     "tqdm",
