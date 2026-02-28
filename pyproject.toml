@@ -29,14 +29,10 @@ requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "gdal>=3.0.0",
-    "pyearth>=0.2.1",
+    "pyearth>=0.2.2",
     "pyearthviz3d>=0.1.1",
     "psutil",
     "pooch",
-    "tqdm",
-    "trame",
-    "trame-vuetify",
-    "ipywidgets",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +46,13 @@ dev = [
 docs = [
     "sphinx",
     "sphinx-rtd-theme",
+]
+notebook = [
+    "tqdm>=4.0.0",
+    "ipywidgets>=7.0.0",
+    "trame>=2.0.0",
+    "trame-vtk>=2.0.0",
+    "trame-vuetify>=2.0.0",
 ]
 
 [project.urls]
