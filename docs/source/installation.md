@@ -21,11 +21,12 @@ pip install -e .
 - numpy >= 1.19.0
 - GDAL >= 3.0.0
 - osgeo (GDAL Python bindings)
-- pyearth >= 0.1.0
+- pyearth >= 0.2.1
 
 ### Optional Dependencies
 - psutil >= 5.0.0 (for memory monitoring)
-- geovista >= 0.1.0 (for 3D visualization)
+- pyearth >= 0.1.1 (for Earth data handling)
+- geovista (for 3D visualization)
 - imageio[ffmpeg] (for animation creation)
 
 ### Installing Optional Dependencies
