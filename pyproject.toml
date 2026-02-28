@@ -20,11 +20,12 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: GIS",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "gdal>=3.0.0",
@@ -64,7 +65,7 @@ exclude = ["tests*"]
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py39']
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
