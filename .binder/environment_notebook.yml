@@ -1,4 +1,4 @@
-name: uraster
+name: uraster_env
 channels:
   - conda-forge
 dependencies:
