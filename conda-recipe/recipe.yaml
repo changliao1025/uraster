@@ -38,15 +38,10 @@ requirements:
     - python >=3.8
     - numpy >=1.19.0
     - gdal >=3.0.0
-    - pyearthviz3d
+    - pyearth >=0.2.2
+    - pyearthviz3d >=0.1.1
     - psutil >=5.0.0
     - pooch >=1.6.0
-    - tqdm >=4.0.0
-    - trame >=2.0.0
-    - trame-vtk >=2.0.0
-    - trame-vuetify >=2.0.0
-    - ipywidgets >=7.0.0
-
 
 tests:
   - python:

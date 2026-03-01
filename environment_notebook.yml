@@ -7,5 +7,10 @@ dependencies:
   - gdal>=3.0.0
   - psutil
   - pooch
+  - tqdm
+  - ipywidgets
+  - trame
+  - trame-vtk
+  - trame-vuetify
   - pyearth>=0.2.1
   - pyearthviz3d
