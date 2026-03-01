@@ -1,9 +1,22 @@
 #!/bin/bash
 set -e
 
-echo "Installing uraster package using conda develop..."
-# Use conda develop to install package in development mode
-# This avoids pip trying to build GDAL from source
-conda develop .
+echo "Installing conda packages (prefer mamba, fallback to conda)..."
+CONDA_INSTALL_CMD=""
+if command -v mamba >/dev/null 2>&1; then
+	CONDA_INSTALL_CMD="mamba install -y -c conda-forge"
+elif command -v conda >/dev/null 2>&1; then
+	CONDA_INSTALL_CMD="conda install -y -c conda-forge"
+fi
+
+if [ -n "${CONDA_INSTALL_CMD}" ]; then
+	# Install key binary / geospatial packages via conda to avoid build issues
+	${CONDA_INSTALL_CMD} gdal pyearth pyearthviz3d psutil pooch tqdm ipywidgets trame trame-vuetify || true
+else
+	echo "Warning: neither mamba nor conda is available; skipping conda installs"
+fi
+
+echo "Installing uraster package in editable mode (pip)..."
+python -m pip install -e .
 
 echo "uraster has been installed successfully!"
