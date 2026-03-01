@@ -1,7 +1,7 @@
 [![DOI](https://zenodo.org/badge/1060295281.svg)](https://doi.org/10.5281/zenodo.17613497)
-[![PyPI version](https://badge.fury.io/py/uraster.svg)](https://badge.fury.io/py/uraster)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![geovista](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bjlittle/geovista/main/docs/assets/badge/v0.json)](https://geovista.readthedocs.io/)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/changliao1025/uraster/main?urlpath=%2Fdoc%2Ftree%2Fnotebooks%2Fexample_1%2Frun_rhpx_example.ipynb)
 
 # URaster: Structured Raster to Unstructured Mesh
 
