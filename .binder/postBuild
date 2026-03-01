@@ -1,7 +1,9 @@
 #!/bin/bash
 set -e
 
-echo "Installing uraster package in editable mode..."
-python -m pip install -e .
+echo "Installing uraster package using conda develop..."
+# Use conda develop to install package in development mode
+# This avoids pip trying to build GDAL from source
+conda develop .
 
 echo "uraster has been installed successfully!"
