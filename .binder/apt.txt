@@ -1,2 +1,4 @@
-xvfb
+libgl1-mesa-glx
 libgl1-mesa-dev
+libosmesa6
+xvfb
