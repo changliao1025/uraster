@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+echo "Installing uraster package in editable mode..."
+python -m pip install -e .
+
+echo "uraster has been installed successfully!"
