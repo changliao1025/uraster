@@ -12,6 +12,8 @@ fi
 if [ -n "${CONDA_INSTALL_CMD}" ]; then
 	# Install key binary / geospatial packages via conda to avoid build issues
 	${CONDA_INSTALL_CMD} gdal pyearth pyearthviz3d psutil pooch tqdm ipywidgets trame trame-vuetify || true
+	# Install xvfb and mesa for PyVista 3D visualization in headless environment
+	${CONDA_INSTALL_CMD} xorg-libx11 mesalib xvfb-run || true
 else
 	echo "Warning: neither mamba nor conda is available; skipping conda installs"
 fi
