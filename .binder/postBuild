@@ -1,7 +1,4 @@
 #!/bin/bash
 set -e
 
-echo "Installing uraster package in editable mode without dependency checking..."
-python -m pip install -e . --no-deps
-
 echo "uraster has been installed successfully!"
