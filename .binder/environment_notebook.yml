@@ -5,7 +5,6 @@ dependencies:
   - python>=3.10
   - numpy
   - gdal>=3.0.0
-  - libgdal
   - pyearth>=0.2.2
   - pyearthviz3d>=0.1.1
   - psutil
