@@ -5,6 +5,8 @@ dependencies:
   - python>=3.10
   - numpy
   - gdal>=3.0.0
+  - pyearth>=0.2.2
+  - pyearthviz3d>=0.1.1
   - psutil
   - pooch
   - tqdm
@@ -12,5 +14,4 @@ dependencies:
   - trame
   - trame-vtk
   - trame-vuetify
-  - pyearth>=0.2.1
-  - pyearthviz3d
+
