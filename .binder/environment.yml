@@ -15,4 +15,5 @@ dependencies:
   - trame
   - trame-vtk
   - trame-vuetify
+  - nest-asyncio
 
