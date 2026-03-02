@@ -10,6 +10,7 @@ dependencies:
   - uraster
   - psutil
   - pooch
+  - ipykernel
   - tqdm
   - ipywidgets
   - trame
