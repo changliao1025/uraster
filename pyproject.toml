@@ -28,8 +28,8 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "gdal>=3.0.0",
-    "pyearth>=0.2.2",
-    "pyearthviz3d>=0.1.1",
+    "pyearth>=0.2.3",
+    "pyearthviz3d>=0.1.2",
     "psutil",
     "pooch",
 ]
