@@ -45,8 +45,11 @@ conda install -c conda-forge uraster
 
 [Quickstart documentation](https://uraster.readthedocs.io/en/latest/quickstart.html)
 
-Example datasets are provided through the GitHub repository: [URaster Example Data on GitHub](https://github.com/changliao1025/uraster_data)
+Example datasets are provided through the GitHub repository: [URaster Example Data on GitHub](https://github.com/changliao1025/uraster_data). Please refer to the README in the data repository for details on the datasets and how to use them.
 
+If you want to run the example notebook in this repository, the input data will be automatically downloaded from the data repository when you run the notebook.
+
+If you want to run the example Python code in this repository, you then need to download the input data from the data repository and update the file paths in the code accordingly.
 
 ## 📚 Documentation
 
