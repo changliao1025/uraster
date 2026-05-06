@@ -14,6 +14,6 @@ authors:
     orcid: https://orcid.org/0000-0002-1345-9465
 
 title: "uraster: Structured Raster to Unstructured Mesh."
-version: 0.1.7
+version: 0.1.8
 doi:
 date-released: 2025-10-01

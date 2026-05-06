@@ -18,13 +18,6 @@ from osgeo import gdal, ogr
 from uraster.classes.sraster import sraster
 
 gdal.UseExceptions()
-# Try to import psutil for memory monitoring (optional)
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
 
 
 crs = "EPSG:4326"
@@ -63,26 +56,6 @@ def setup_logger(module_name: str):
 
 # Set up the logger for this module
 logger = setup_logger(__name__.split(".")[-1])
-
-
-def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
-    """
-    Log current memory usage if psutil is available.
-
-    Args:
-        stage: Description of the current processing stage
-        iFlag_verbose_in: Whether to log memory information
-    """
-    if not PSUTIL_AVAILABLE or not iFlag_verbose_in:
-        return
-
-    try:
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        memory_mb = memory_info.rss / (1024 * 1024)
-        logger.info(f"Memory usage at {stage}: {memory_mb:.1f} MB")
-    except Exception as e:
-        logger.debug(f"Could not get memory usage: {e}")
 
 
 def check_geometry_validity(
@@ -1499,7 +1472,7 @@ if POOCH_AVAILABLE:
     # GitHub release information
     GITHUB_ORG = "changliao1025"
     GITHUB_REPO = "uraster_data"
-    RELEASE_TAG = "v0.1.5"
+    RELEASE_TAG = "v0.1.6"
     BASE_URL = f"https://github.com/{GITHUB_ORG}/{GITHUB_REPO}/releases/download/{RELEASE_TAG}/"
 
     # Define which examples have multi-part archives
@@ -1523,13 +1496,10 @@ if POOCH_AVAILABLE:
             "example_7.zip": None,
             "example_8.zip": None,
             "example_9.zip": None,
-            "example_10.zip": None,
-            "example_12.zip": None,
             # Multi-part archives
             "example_6_part_1.zip": None,
             "example_6_part_2.zip": None,
             "example_6_part_3.zip": None,
-            "example_6_part_4.zip": None,
         },
     )
 
@@ -1702,14 +1672,174 @@ def download_example_data(
         raise
 
 
+def create_resource_symlinks(
+    source_example: int,
+    target_example: int,
+    target_dir: str,
+    filenames: Optional[Union[str, List[str]]],
+    file_patterns: List[str],
+    resource_type: str,
+    extract_dir: Optional[str] = None,
+    iFlag_clean_existing: bool = True,
+) -> None:
+    """
+    Create symbolic links to resource files from another example.
+
+    Parameters
+    ----------
+    source_example : int
+        Example number to get resources from
+    target_example : int
+        Example number where symlinks will be created (used to derive source path)
+    target_dir : str
+        Target directory where symlinks will be created
+    filenames : str, list of str, or None
+        Specific filename(s) to link. If None, links all files matching patterns.
+    file_patterns : list of str
+        File patterns to match (e.g., ['*.tif', '*.tiff'])
+    resource_type : str
+        Type of resource for logging ('mesh' or 'raster')
+    extract_dir : str, optional
+        Directory where files are extracted
+    iFlag_clean_existing : bool, optional
+        If True, removes existing symlinks for this resource type before creating new ones.
+        Default is True.
+    """
+    import glob
+
+    # Try to derive source path from target path to avoid unnecessary downloads
+    # Replace target example number with source example number in the path
+    source_input_dir = None
+
+    # Check if we can derive the source path from target_dir
+    if f"example_{target_example}" in target_dir:
+        potential_source_dir = target_dir.replace(
+            f"example_{target_example}", f"example_{source_example}"
+        )
+        if os.path.exists(potential_source_dir):
+            source_input_dir = potential_source_dir
+            logger.info(
+                f"Found existing source data for example {source_example}, skipping download"
+            )
+
+    # If source not found locally, download it
+    if source_input_dir is None:
+        logger.info(f"Downloading source data for example {source_example}...")
+        source_paths = download_example_data(source_example, extract_dir=extract_dir)
+        source_input_dir = os.path.join(source_paths, "input")
+
+    if not os.path.exists(source_input_dir):
+        logger.warning(
+            f"Source input directory not found for example {source_example}: {source_input_dir}"
+        )
+        return
+
+    # Ensure target directory exists
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Clean existing symlinks for this resource type if requested
+    if iFlag_clean_existing:
+        cleaned_count = 0
+        for pattern in file_patterns:
+            pattern_path = os.path.join(target_dir, pattern)
+            for target_file in glob.glob(pattern_path):
+                if os.path.islink(target_file):
+                    try:
+                        os.remove(target_file)
+                        cleaned_count += 1
+                        logger.info(
+                            f"Removed existing symlink: {os.path.basename(target_file)}"
+                        )
+                    except OSError as e:
+                        logger.warning(f"Failed to remove symlink {target_file}: {e}")
+
+        if cleaned_count > 0:
+            logger.info(f"Cleaned {cleaned_count} existing {resource_type} symlink(s)")
+
+    # Determine which files to link
+    files_to_link = []
+
+    if filenames is not None:
+        # Specific files requested
+        if isinstance(filenames, str):
+            filenames = [filenames]
+
+        for filename in filenames:
+            source_file = os.path.join(source_input_dir, filename)
+            if os.path.exists(source_file):
+                files_to_link.append((filename, source_file))
+            else:
+                logger.warning(
+                    f"Requested {resource_type} file not found: {filename} in example {source_example}"
+                )
+    else:
+        # Link all files matching patterns
+        for pattern in file_patterns:
+            pattern_path = os.path.join(source_input_dir, pattern)
+            matched_files = glob.glob(pattern_path)
+            for source_file in matched_files:
+                filename = os.path.basename(source_file)
+                files_to_link.append((filename, source_file))
+
+    if not files_to_link:
+        logger.warning(
+            f"No {resource_type} files found to link from example {source_example}"
+        )
+        return
+
+    # Create symbolic links
+    linked_count = 0
+    for filename, source_file in files_to_link:
+        target_file = os.path.join(target_dir, filename)
+
+        # Skip if target already exists and points to the same source
+        if os.path.islink(target_file):
+            if os.readlink(target_file) == source_file:
+                logger.info(f"Symlink already exists and is correct: {filename}")
+                linked_count += 1
+                continue
+            else:
+                # Remove old symlink pointing to different source
+                os.remove(target_file)
+                logger.info(f"Removed outdated symlink: {filename}")
+        elif os.path.exists(target_file):
+            # Regular file exists - skip to avoid overwriting user data
+            logger.warning(
+                f"Regular file already exists (not a symlink), skipping: {filename}"
+            )
+            continue
+
+        try:
+            # Create symbolic link
+            os.symlink(source_file, target_file)
+            linked_count += 1
+            logger.info(f"Created symlink: {filename} -> example {source_example}")
+        except OSError as e:
+            logger.warning(f"Failed to create symlink for {filename}: {e}")
+
+    if linked_count > 0:
+        logger.info(
+            f"Successfully linked {linked_count} {resource_type} file(s) from example {source_example}"
+        )
+
+
 def get_example_paths(
-    example_number: int, extract_dir: Optional[str] = None
+    example_number: int,
+    extract_dir: Optional[str] = None,
+    iUse_other_example_mesh: Optional[int] = None,
+    iUse_other_example_raster: Optional[int] = None,
+    mesh_filename: Optional[str] = None,
+    raster_filenames: Optional[Union[str, List[str]]] = None,
 ) -> Dict[str, str]:
     """
     Get paths to example data directories, downloading if necessary.
 
+    Optionally create symbolic links to reuse mesh or raster files from other examples,
+    avoiding redundant data downloads and storage.
+
     This is a convenience function that downloads the example data and
-    returns the input and output directory paths.
+    returns the input and output directory paths. It can also create symbolic links
+    to mesh and raster files from other examples for efficient resource sharing.
 
     Parameters
     ----------
@@ -1717,6 +1847,16 @@ def get_example_paths(
         The example number (e.g., 1, 2, 3, etc.)
     extract_dir : str, optional
         Directory where files should be extracted
+    iUse_other_example_mesh : int, optional
+        Example number to reuse mesh from. If specified, creates symbolic links
+        to mesh files from that example's input directory.
+    iUse_other_example_raster : int, optional
+        Example number to reuse raster from. If specified, creates symbolic links
+        to raster files from that example's input directory.
+    mesh_filename : str, optional
+        Specific mesh filename to link. If None, links all mesh files (*.geojson, *.shp, etc.)
+    raster_filenames : str or list of str, optional
+        Specific raster filename(s) to link. If None, links all raster files (*.tif, *.tiff, etc.)
 
     Returns
     -------
@@ -1728,9 +1868,22 @@ def get_example_paths(
 
     Examples
     --------
+    >>> # Basic usage - download example 1 data
     >>> paths = get_example_paths(1)
     >>> input_dir = paths['input']
     >>> output_dir = paths['output']
+
+    >>> # Reuse mesh from example 1 and raster from example 4 in example 10
+    >>> paths = get_example_paths(10,
+    ...                           iUse_other_example_mesh=1,
+    ...                           iUse_other_example_raster=4)
+
+    >>> # Reuse specific files
+    >>> paths = get_example_paths(10,
+    ...                           iUse_other_example_mesh=1,
+    ...                           mesh_filename='rhealpix_China_res6.geojson',
+    ...                           iUse_other_example_raster=4,
+    ...                           raster_filenames='China_CH4_emission_2020.tif')
 
     >>> # Use in your code
     >>> mesh_file = os.path.join(paths['input'], 'rhealpix_global_res3.geojson')
@@ -1744,6 +1897,30 @@ def get_example_paths(
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
+
+    # Create symbolic links for mesh files from another example
+    if iUse_other_example_mesh is not None:
+        create_resource_symlinks(
+            source_example=iUse_other_example_mesh,
+            target_example=example_number,
+            target_dir=input_dir,
+            filenames=mesh_filename,
+            file_patterns=["*.geojson", "*.shp", "*.gpkg", "*.json"],
+            resource_type="mesh",
+            extract_dir=extract_dir,
+        )
+
+    # Create symbolic links for raster files from another example
+    if iUse_other_example_raster is not None:
+        create_resource_symlinks(
+            source_example=iUse_other_example_raster,
+            target_example=example_number,
+            target_dir=input_dir,
+            filenames=raster_filenames,
+            file_patterns=["*.tif", "*.tiff", "*.nc", "*.hdf"],
+            resource_type="raster",
+            extract_dir=extract_dir,
+        )
 
     return {"base": example_dir, "input": input_dir, "output": output_dir}
 

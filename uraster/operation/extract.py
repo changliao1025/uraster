@@ -11,19 +11,12 @@ from osgeo import gdal, ogr, osr
 
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
+from pyearthviz3d.geovista.utility import is_running_in_notebook
 from uraster.utility import get_polygon_list, get_unique_values_from_rasters
 from uraster.classes.sraster import sraster
 from uraster.utility import setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])
-# Try to import psutil for memory monitoring (optional)
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-
 crs = "EPSG:4326"
 
 # Initialize GDAL drivers with error handling
@@ -1354,25 +1347,7 @@ def run_remap(
     n_features = len(aPolygon)
 
     # Detect if running in Jupyter/IPython notebook environment
-    import sys
-
-    in_notebook = False
-    try:
-        # Check for IPython/Jupyter kernel
-        in_notebook = "ipykernel" in sys.modules or "IPython" in sys.modules
-        if in_notebook:
-            # Additional check: verify we're actually in a notebook, not just IPython
-            try:
-                from IPython import get_ipython
-
-                ipython = get_ipython()
-                in_notebook = ipython is not None and "IPKernelApp" in str(
-                    type(ipython)
-                )
-            except (ImportError, AttributeError):
-                in_notebook = False
-    except Exception:
-        in_notebook = False
+    in_notebook = is_running_in_notebook()
 
     # Handle notebook environment multiprocessing limitations
     if in_notebook:

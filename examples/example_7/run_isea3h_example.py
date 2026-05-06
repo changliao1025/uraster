@@ -1,10 +1,4 @@
-import os, sys, platform
-
-from pyearth.toolbox.management.raster.resample import resample_raster
-
-sPath_current = os.path.dirname(os.path.abspath(__file__))
-sPath_library = os.path.dirname(os.path.dirname(sPath_current))
-sys.path.append(sPath_library)
+import os
 
 # Download input data using Pooch (downloads to system cache)
 from uraster.utility import get_example_paths

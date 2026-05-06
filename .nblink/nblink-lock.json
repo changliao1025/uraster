@@ -8,7 +8,6 @@
     "python": "3.10",
     "numpy": "1.25.3",
     "gdal": "3.6.4",
-    "psutil": "5.9.5",
     "pooch": "1.7.1",
     "tqdm": "4.66.1",
     "ipywidgets": "8.0.6",
