@@ -1707,7 +1707,7 @@ def create_resource_symlinks(
     file_patterns: List[str],
     resource_type: str,
     extract_dir: Optional[str] = None,
-    iFlag_clean_existing: bool = True
+    iFlag_clean_existing: bool = True,
 ) -> None:
     """
     Create symbolic links to resource files from another example.
@@ -1741,8 +1741,7 @@ def create_resource_symlinks(
     # Check if we can derive the source path from target_dir
     if f"example_{target_example}" in target_dir:
         potential_source_dir = target_dir.replace(
-            f"example_{target_example}",
-            f"example_{source_example}"
+            f"example_{target_example}", f"example_{source_example}"
         )
         if os.path.exists(potential_source_dir):
             source_input_dir = potential_source_dir
@@ -1775,7 +1774,9 @@ def create_resource_symlinks(
                     try:
                         os.remove(target_file)
                         cleaned_count += 1
-                        logger.info(f"Removed existing symlink: {os.path.basename(target_file)}")
+                        logger.info(
+                            f"Removed existing symlink: {os.path.basename(target_file)}"
+                        )
                     except OSError as e:
                         logger.warning(f"Failed to remove symlink {target_file}: {e}")
 
@@ -1839,13 +1840,9 @@ def create_resource_symlinks(
             # Create symbolic link
             os.symlink(source_file, target_file)
             linked_count += 1
-            logger.info(
-                f"Created symlink: {filename} -> example {source_example}"
-            )
+            logger.info(f"Created symlink: {filename} -> example {source_example}")
         except OSError as e:
-            logger.warning(
-                f"Failed to create symlink for {filename}: {e}"
-            )
+            logger.warning(f"Failed to create symlink for {filename}: {e}")
 
     if linked_count > 0:
         logger.info(
@@ -1859,7 +1856,7 @@ def get_example_paths(
     iUse_other_example_mesh: Optional[int] = None,
     iUse_other_example_raster: Optional[int] = None,
     mesh_filename: Optional[str] = None,
-    raster_filenames: Optional[Union[str, List[str]]] = None
+    raster_filenames: Optional[Union[str, List[str]]] = None,
 ) -> Dict[str, str]:
     """
     Get paths to example data directories, downloading if necessary.
@@ -1935,9 +1932,9 @@ def get_example_paths(
             target_example=example_number,
             target_dir=input_dir,
             filenames=mesh_filename,
-            file_patterns=['*.geojson', '*.shp', '*.gpkg', '*.json'],
-            resource_type='mesh',
-            extract_dir=extract_dir
+            file_patterns=["*.geojson", "*.shp", "*.gpkg", "*.json"],
+            resource_type="mesh",
+            extract_dir=extract_dir,
         )
 
     # Create symbolic links for raster files from another example
@@ -1947,9 +1944,9 @@ def get_example_paths(
             target_example=example_number,
             target_dir=input_dir,
             filenames=raster_filenames,
-            file_patterns=['*.tif', '*.tiff', '*.nc', '*.hdf'],
-            resource_type='raster',
-            extract_dir=extract_dir
+            file_patterns=["*.tif", "*.tiff", "*.nc", "*.hdf"],
+            resource_type="raster",
+            extract_dir=extract_dir,
         )
 
     return {"base": example_dir, "input": input_dir, "output": output_dir}

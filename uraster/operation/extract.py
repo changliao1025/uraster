@@ -46,9 +46,6 @@ MAX_CONSECUTIVE_FAILURES = 10  # Maximum consecutive failures before stopping
 HEARTBEAT_INTERVAL = 5  # Seconds between heartbeat logs during long operations
 
 
-
-
-
 # Define a custom error handler
 def custom_error_handler(err_class, err_num, err_msg):
     if "NaN or Infinity value found" in err_msg:
