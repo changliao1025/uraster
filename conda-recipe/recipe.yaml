@@ -13,7 +13,7 @@
 # Define variables in this section that you can use in other parts.
 context:
   name: uraster
-  version: "0.1.7"
+  version: "0.1.8"
 
 package:
   name: ${{ name|lower }}

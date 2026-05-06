@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "uraster"
 copyright = "2025, Chang Liao"
 author = "Chang Liao"
-release = "0.1.7"
+release = "0.1.8"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
