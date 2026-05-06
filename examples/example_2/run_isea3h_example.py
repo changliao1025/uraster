@@ -1,8 +1,4 @@
-import os, sys, platform
-
-sPath_current = os.path.dirname(os.path.abspath(__file__))
-sPath_library = os.path.dirname(os.path.dirname(sPath_current))
-sys.path.append(sPath_library)
+import os
 from uraster.classes.uraster import uraster
 
 # Download input data using Pooch (downloads to system cache)
