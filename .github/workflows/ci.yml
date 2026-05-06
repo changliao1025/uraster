@@ -37,7 +37,7 @@ jobs:
     - name: Install dependencies
       shell: bash -l {0}
       run: |
-        conda install -c conda-forge numpy gdal psutil pooch pyearth pyearthviz3d
+        conda install -c conda-forge pip numpy gdal psutil pooch pyearth pyearthviz3d
         conda install -c conda-forge pytest pytest-cov black flake8
 
     - name: Install package
