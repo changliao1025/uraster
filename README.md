@@ -33,13 +33,12 @@ URaster requires GDAL for vector handling and GeoVista (which relies on PyVista/
 
 ### Install via Conda (Recommended)
 ```bash
-# Create a new conda environment (recommended)
-conda create -n uraster-env python=3.10
-conda activate uraster-env
-
-# Install uraster and all dependencies via conda
-conda install -c conda-forge uraster
+# Create a new conda environment with uraster and all dependencies
+conda create -n uraster_env uraster vtk=9.3.0 -c conda-forge
+conda activate uraster_env
 ```
+
+This single command will automatically install uraster and all its dependencies, including GDAL, numpy, pyearth, and VTK 9.3.0 for visualization compatibility.
 
 ## 🚀 Quick Start
 
