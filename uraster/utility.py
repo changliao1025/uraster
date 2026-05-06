@@ -18,13 +18,6 @@ from osgeo import gdal, ogr
 from uraster.classes.sraster import sraster
 
 gdal.UseExceptions()
-# Try to import psutil for memory monitoring (optional)
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
 
 
 crs = "EPSG:4326"
@@ -63,26 +56,6 @@ def setup_logger(module_name: str):
 
 # Set up the logger for this module
 logger = setup_logger(__name__.split(".")[-1])
-
-
-def _log_memory_usage(stage: str, iFlag_verbose_in: bool = False) -> None:
-    """
-    Log current memory usage if psutil is available.
-
-    Args:
-        stage: Description of the current processing stage
-        iFlag_verbose_in: Whether to log memory information
-    """
-    if not PSUTIL_AVAILABLE or not iFlag_verbose_in:
-        return
-
-    try:
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        memory_mb = memory_info.rss / (1024 * 1024)
-        logger.info(f"Memory usage at {stage}: {memory_mb:.1f} MB")
-    except Exception as e:
-        logger.debug(f"Could not get memory usage: {e}")
 
 
 def check_geometry_validity(

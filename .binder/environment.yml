@@ -8,7 +8,6 @@ dependencies:
   - pyearth>=0.2.2
   - pyearthviz3d>=0.1.1
   - uraster
-  - psutil
   - pooch
   - ipykernel
   - jupyter-server-proxy

@@ -12,4 +12,3 @@ sphinxcontrib-programoutput
 
 # uraster dependencies needed for autodoc
 numpy>=1.19.0
-psutil>=5.0.0

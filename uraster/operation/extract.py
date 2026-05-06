@@ -16,16 +16,7 @@ from uraster.utility import get_polygon_list, get_unique_values_from_rasters
 from uraster.classes.sraster import sraster
 from uraster.utility import setup_logger
 
-
 logger = setup_logger(__name__.split(".")[-1])
-# Try to import psutil for memory monitoring (optional)
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-
 crs = "EPSG:4326"
 
 # Initialize GDAL drivers with error handling

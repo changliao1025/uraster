@@ -24,7 +24,6 @@ pip install -e .
 - pyearth >= 0.2.1
 
 ### Optional Dependencies
-- psutil >= 5.0.0 (for memory monitoring)
 - pyearth >= 0.1.1 (for Earth data handling)
 - geovista (for 3D visualization)
 - imageio[ffmpeg] (for animation creation)
@@ -34,13 +33,13 @@ pip install -e .
 For full functionality including 3D visualization and animations:
 
 ```bash
-pip install geovista imageio[ffmpeg] psutil
+pip install geovista imageio[ffmpeg]
 ```
 
 Or install with conda:
 
 ```bash
-conda install -c conda-forge geovista imageio psutil
+conda install -c conda-forge geovista imageio
 ```
 
 ### Installing GDAL

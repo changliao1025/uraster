@@ -15,15 +15,6 @@ from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 gdal.UseExceptions()
 from uraster.classes.sraster import sraster
 from uraster.utility import get_polygon_list
-
-# Try to import psutil for memory monitoring (optional)
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-
 from uraster.utility import setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])

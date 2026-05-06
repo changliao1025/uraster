@@ -30,7 +30,6 @@ dependencies = [
     "gdal>=3.0.0",
     "pyearth>=0.2.3",
     "pyearthviz3d>=0.1.2",
-    "psutil",
     "pooch",
 ]
 

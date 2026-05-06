@@ -63,7 +63,6 @@ autodoc_mock_imports = [
     "pyearth",
     "geovista",
     "vtk",
-    "psutil",
 ]
 
 # Intersphinx mapping

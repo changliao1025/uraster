@@ -46,7 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - numpy>=1.19.0
 - gdal>=3.0.0
 - pyearth>=0.1.0
-- psutil>=5.0.0
 - geovista>=0.3.0
 - vtk==9.3.0
 - imageio[ffmpeg]>=2.0.0
