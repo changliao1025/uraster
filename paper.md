@@ -89,7 +89,7 @@ In contrast to these tools, `uraster`  is designed explicitly to bridge structur
 
 # Software design
 
-We designed `uraster` to be as general and flexible as possible, with the following key design principles: (1) we mainly require two types input of datasets: a vector-based mesh file and one of multiple raster files, which allows users to use tiled raster datasets to cover a large spatial domain; (2) we use standard GDAL APIs to perform all geospatial operations, which not only reduces format, mesh standard, and package dependency issues, but also ensure sufficient performance, which is provided by the powerful GDAL library.
+We designed `uraster` to be as general and flexible as possible, with the following key design principles: (1) we mainly require two types input of datasets: a vector-based mesh file and one or multiple raster files, which allows users to use tiled raster datasets to cover a large spatial domain; (2) we use standard GDAL APIs to perform all geospatial operations, which not only reduces format, mesh standard, and package dependency issues, but also ensure sufficient performance, which is provided by the powerful GDAL library.
 
 Currently, `uraster` requires all the input datasets to be in the WGS84 coordinate reference system (CRS). The package will perform on-the-fly reprojection of the datasets if they are not in WGS84. This design choice is made to streamline the geospatial operations and visualization at the global scale, which is powered by the GeoVista package.
 
@@ -97,7 +97,7 @@ Currently, `uraster` requires all the input datasets to be in the WGS84 coordina
 
 `uraster` was born out of need to support the conversion of structured topographic datasets into unstructured MPAS meshes, which is widely used in Earth system modeling and weather forecasting [@liao2025unstructured]. The package was further extended to support the Hierarchical Equal Area isoLatitude Pixelisation (HEALpix) mesh, which is also commonly used in the DGGS and astronomy communities, to generate kilo-meter scale land surface datasets for the E3SM project.
 
-To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project.
+To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project. It has also been used to generate harmonized global-to-regional gridded methane inventories on rHEALPix [@li_2025_17362125].
 
 
 # AI usage disclosure
