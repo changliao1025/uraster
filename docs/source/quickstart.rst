@@ -8,19 +8,28 @@ Follow these steps to quickly get started with uraster:
 
 **1. Installation**
 
-Install uraster using pip:
+Install uraster using conda (recommended):
 
 .. code-block:: bash
 
-   pip install uraster
+   # Create a new conda environment with uraster and all dependencies
+   conda create -n uraster_env uraster vtk=9.3.0 -c conda-forge
+   conda activate uraster_env
 
-Or install from source:
+Or install from source for development:
 
 .. code-block:: bash
 
+   # Create and activate a new conda environment with dependencies
+   conda create -n uraster_dev python=3.10 gdal numpy pyearth vtk=9.3.0 -c conda-forge
+   conda activate uraster_dev
+
+   # Clone and install uraster in development mode
    git clone https://github.com/changliao1025/uraster.git
    cd uraster
-   pip install -e .
+   pip install -e . --no-deps
+
+For more details, see the :doc:`installation` guide.
 
 **2. Basic Usage**
 
