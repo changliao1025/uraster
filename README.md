@@ -50,6 +50,8 @@ If you want to run the example notebook in this repository, the input data will 
 
 If you want to run the example Python code in this repository, you then need to download the input data from the data repository and update the file paths in the code accordingly.
 
+Tutorials are also provided through the GitHub repository: [URaster Tutorials on GitHub](https://github.com/changliao1025/uraster_tutorials).
+
 ## 📚 Documentation
 
 - [API Reference](https://uraster.readthedocs.io/en/latest/api.html)
