@@ -1228,6 +1228,7 @@ def run_remap(
     # get the highest resolution raster to determine the pixel size
     dPixelWidth = None
     pPixelHeight = None
+    sRaster_source_srs = None
     for sFilename_raster in aFilename_source_raster:
         # use sraster class to read the raster info
         pRaster = sraster(sFilename_in=sFilename_raster)
@@ -1236,7 +1237,12 @@ def run_remap(
             dPixelWidth = pRaster.dResolution_x
         if pPixelHeight is None or abs(pRaster.dResolution_y) < abs(pPixelHeight):
             pPixelHeight = pRaster.dResolution_y
+        if sRaster_source_srs is None and pRaster.pSpatialRef_wkt:
+            sRaster_source_srs = pRaster.pSpatialRef_wkt
         dMissing_value = pRaster.dNoData
+
+    if sRaster_source_srs is None:
+        sRaster_source_srs = "EPSG:4326"
 
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
@@ -1319,10 +1325,11 @@ def run_remap(
         "cropToCutline": True,
         "xRes": dPixelWidth,
         "yRes": abs(pPixelHeight),
-        "dstSRS": pSpatialRef_target,
+        "dstSRS": sRaster_source_srs,
         "format": "MEM",
         "resampleAlg": sRemap_method,
-        "srcSRS": "EPSG:4326",  # Explicitly set source CRS
+        "srcSRS": sRaster_source_srs,
+        "cutlineSRS": pSpatialRef_target.ExportToWkt(),
     }
 
     logger.info("run_remap: Starting main feature processing loop...")
@@ -1332,17 +1339,16 @@ def run_remap(
     successful_features = 0
     failed_features = []
 
-    # Prepare a serializable copy of warp options (convert dstSRS to WKT if needed)
+    # Prepare a serializable copy of warp options (convert CRS objects to WKT if needed)
     gdal_warp_options_serial = gdal_warp_options_base.copy()
-    if "dstSRS" in gdal_warp_options_serial and hasattr(
-        gdal_warp_options_serial["dstSRS"], "ExportToWkt"
-    ):
-        try:
-            gdal_warp_options_serial["dstSRS"] = gdal_warp_options_serial[
-                "dstSRS"
-            ].ExportToWkt()
-        except Exception:
-            gdal_warp_options_serial["dstSRS"] = str(gdal_warp_options_serial["dstSRS"])
+    for key in ["dstSRS", "srcSRS", "cutlineSRS"]:
+        if key in gdal_warp_options_serial and hasattr(
+            gdal_warp_options_serial[key], "ExportToWkt"
+        ):
+            try:
+                gdal_warp_options_serial[key] = gdal_warp_options_serial[key].ExportToWkt()
+            except Exception:
+                gdal_warp_options_serial[key] = str(gdal_warp_options_serial[key])
 
     n_features = len(aPolygon)
 
