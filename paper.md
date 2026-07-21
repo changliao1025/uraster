@@ -122,9 +122,14 @@ The model described in this repository was supported by the following:
 
 * the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project.
 
+* the National Key Research and Development Program of China (2024YFF0809000).
+
 
 A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
 PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
+A portion of this research was performed using ''Earth System
+Numerical Simulation Facility'' Research Computing at National
+Large Scientific and Technological Infrastructure.
 
 
 # References
