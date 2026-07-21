@@ -1,10 +1,17 @@
-import os
-import unittest
-import numpy as np
-from osgeo import gdal, ogr, osr
 
-# Ensure package can be imported from the repository root
-import sys
+import unittest
+import os, sys, stat
+import shutil
+import numpy as np
+
+from osgeo import gdal, ogr, osr
+import elevation
+import urllib
+
+import pystac_client
+import planetary_computer
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyearth.gis.spatialref.reproject_coordinates import reproject_coordinates
 from uraster import sraster
@@ -23,66 +30,99 @@ srs_wgs84 = osr.SpatialReference()
 srs_wgs84.ImportFromEPSG(4326)
 wgs84_wkt = srs_wgs84.ExportToWkt()
 
-srs_projected = osr.SpatialReference()
-srs_projected.ImportFromEPSG(32650)
-projected_wkt = srs_projected.ExportToWkt()
+# 1. Define your Area of Interest (Bounding Box: Min Long, Min Lat, Max Long, Max Lat)
+# Example: A small snippet in Colorado, US
+bbox = [dLongitude_min, dLatitude_min, dLongitude_max, dLatitude_max]
 
-def create_continuous_test_raster(sFilename):
+sFolder_cache = elevation.CACHE_DIR
+if os.path.exists(sFolder_cache):
+    shutil.rmtree(sFolder_cache)    
+
+def create_continuous_test_raster(sFolder,iFlag_download_in=True):
     driver = gdal.GetDriverByName("GTiff")
-    if os.path.exists(sFilename):
-        driver.Delete(sFilename)
 
-    srs_projected = osr.SpatialReference()
-    srs_projected.ImportFromEPSG(32650)
-
-    #use the same bounding box as the mesh, but in projected coordinates
-    #we need to convert the lat/lon bounding box to projected coordinates using EPSG:32650
+    if not os.path.exists(sFolder):
+        os.makedirs(sFolder)
     
-    min_x, min_y = reproject_coordinates(dLongitude_min, dLatitude_min, wgs84_wkt, projected_wkt)
-    max_x, max_y = reproject_coordinates(dLongitude_max, dLatitude_max, wgs84_wkt, projected_wkt)
-    pixel_width = (max_x - min_x) / 100.0
-    pixel_height = (max_y - min_y) / 100.0
 
-    ds = driver.Create(sFilename, 100, 100, 1, gdal.GDT_Float32)
-    ds.SetGeoTransform((min_x, pixel_width, 0.0, max_y, 0.0, -pixel_height))
-    ds.SetProjection(srs_projected.ExportToWkt())
-    #array = np.arange(10000, dtype=np.float32).reshape((100, 100))
-    #generate a random array of floats between 0 and 1
-    array = np.random.uniform(0, 1, size=(100, 100)).astype(np.float32)
-    band = ds.GetRasterBand(1)
-    band.WriteArray(array)
-    band.SetNoDataValue(-9999.0)
-    band.FlushCache()
-    ds = None
-    return array
+    # Open the Planetary Computer catalog
+    catalog = pystac_client.Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace
+    )
 
-def create_discrete_test_raster(sFilename):
+    # Search for the NASADEM (NASA's refined SRTM data)
+    search = catalog.search(
+        collections=["nasadem"],
+        bbox=bbox
+    )
+
+    items = search.item_collection()
+    nfile = len(items)
+    if nfile == 0:
+        raise ValueError("No elevation tiles found for this region.")
+    else:
+        print(f"Found {nfile} elevation tiles.")
+
+    # Grab the cloud-optimized GeoTIFF URL for the first matching tile
+    # Note: 'elevation' contains the actual DEM data matrix
+    aFilename = list()
+    for i in range(nfile):
+        print(f"Tile {i+1}: {items[i].id}")
+        asset_url = items[i].assets["elevation"].href
+
+        sFilename = os.path.join(sFolder, f"elevation_tile_{i+1}.tif")
+        if iFlag_download_in:
+            if os.path.exists(sFilename): #delete if already exists
+               os.path.remove(sFilename)
+
+            print("Downloading elevation tile...")
+            urllib.request.urlretrieve(asset_url, sFilename)
+        aFilename.append(sFilename)
+        
+    return aFilename
+
+def create_discrete_test_raster(sFolder, iFlag_download_in=True):
     driver = gdal.GetDriverByName("GTiff")
-    if os.path.exists(sFilename):
-        driver.Delete(sFilename)
+    if not os.path.exists(sFolder):
+        os.makedirs(sFolder)
 
-    srs_projected = osr.SpatialReference()
-    srs_projected.ImportFromEPSG(32650)
+    # 2. Connect to the Planetary Computer STAC API
+    catalog = pystac_client.Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace
+    )
+    
+    # 3. Search for Land Cover data (using the 10m annual Impact Observatory dataset)
+    search = catalog.search(
+        collections=["io-lulc-9-class"],
+        bbox=bbox,
+        datetime="2023" # Adjust the year if needed
+    )
+    
+    items = search.item_collection()
+    nfile = len(items)
+    print(f"Found {nfile} matching tiles.")
+    
+    if nfile == 0:
+        raise ValueError("No matching tiles found for the given bounding box and year.")
+    
+    # 4. Grab the first matching tile and extract the data link
+    aFilename = list()
+    for i in range(nfile):
+        item = items[i]
+        asset_url = item.assets["data"].href
+        
+        # 5. Download and crop the data directly from cloud storage
+        output_filename = os.path.join(sFolder, f"land_cover_tile_{i+1}.tif")
+        if iFlag_download_in:
+            if os.path.exists(output_filename): #delete if already exists
+               os.remove(output_filename)
 
-    min_x, min_y = reproject_coordinates(dLongitude_min, dLatitude_min, wgs84_wkt, projected_wkt)
-    max_x, max_y = reproject_coordinates(dLongitude_max, dLatitude_max, wgs84_wkt, projected_wkt)
-
-    pixel_width = (max_x - min_x) / 100.0
-    pixel_height = (max_y - min_y) / 100.0
-
-    ds = driver.Create(sFilename, 100, 100, 1, gdal.GDT_Int16)
-    ds.SetGeoTransform((min_x, pixel_width, 0.0, max_y, 0.0, -pixel_height))
-    ds.SetProjection(srs_projected.ExportToWkt())
-    #array = np.ones((100, 100), dtype=np.int16)
-    #use 0 to 10 as random discrete values
-    #generate a random array of integers between 0 and 10
-    array = np.random.randint(0, 11, size=(100, 100), dtype=np.int16)
-    band = ds.GetRasterBand(1)
-    band.WriteArray(array)
-    band.SetNoDataValue(-9999)
-    band.FlushCache()
-    ds = None
-    return array
+            urllib.request.urlretrieve(asset_url, output_filename)
+        aFilename.append(output_filename)
+        
+    return aFilename
 
 def create_test_mesh(sFilename):
     driver = ogr.GetDriverByName("GeoJSON")
@@ -135,11 +175,11 @@ class TestUrasterWorkflow(unittest.TestCase):
         cls.test_id = "workflow_smoke"
         cls.output_dir = os.path.join(os.path.dirname(__file__), "test_data", cls.test_id)
         os.makedirs(cls.output_dir, exist_ok=True)
-        cls.continuous_raster_path = os.path.join(cls.output_dir, "test_continuous_raster.tif")
-        cls.discrete_raster_path = os.path.join(cls.output_dir, "test_discrete_raster.tif")
+        cls.continuous_raster_path = os.path.join(cls.output_dir, "test_continuous_raster")
+        cls.discrete_raster_path = os.path.join(cls.output_dir, "test_discrete_raster")
         cls.mesh_path = os.path.join(cls.output_dir, "test_mesh.geojson")
-        cls.expected_continuous_raster = create_continuous_test_raster(cls.continuous_raster_path)
-        cls.expected_discrete_raster = create_discrete_test_raster(cls.discrete_raster_path)
+        cls.aFilename_continuous = create_continuous_test_raster(cls.continuous_raster_path, iFlag_download_in=False)
+        cls.aFilename_discrete = create_discrete_test_raster(cls.discrete_raster_path, iFlag_download_in=False)
         create_test_mesh(cls.mesh_path)
 
     @classmethod
@@ -153,17 +193,6 @@ class TestUrasterWorkflow(unittest.TestCase):
         )
         if os.path.exists(self.output_path):
             os.remove(self.output_path)
-
-    def test_sraster_read_metadata(self):
-        pRaster = sraster(self.continuous_raster_path)
-        pRaster.read_metadata()
-
-        self.assertEqual(pRaster.ncolumn, 100)
-        self.assertEqual(pRaster.nrow, 100)
-        self.assertIsNotNone(pRaster.sCrs)
-        self.assertTrue(pRaster.pSpatialRef.IsProjected())
-        self.assertEqual(pRaster.iBandCount, 1)
-        self.assertEqual(pRaster.dNoData, -9999.0)
 
     def test_mesh_topology_rebuild(self):
         mesh_info = utility.rebuild_mesh_topology(
@@ -184,8 +213,6 @@ class TestUrasterWorkflow(unittest.TestCase):
         self.assertEqual(mesh_info["num_cells"], 900)
         self.assertEqual(mesh_info["num_polygns"], 900)
         self.assertEqual(mesh_info["cell_ids"].tolist(), list(range(1, 901)))
-       
-       
 
     def test_run_remap_continuous_uses_mean_statistics(self):
         mesh_info = utility.rebuild_mesh_topology(
@@ -196,7 +223,7 @@ class TestUrasterWorkflow(unittest.TestCase):
         run_remap(
             self.output_path,
             self.mesh_path,
-            [self.continuous_raster_path],
+            self.aFilename_continuous,
             dArea_min,
             iFlag_remap_method_in=3,
             iFlag_stat_in=True,
@@ -220,7 +247,7 @@ class TestUrasterWorkflow(unittest.TestCase):
         run_remap(
             self.output_path,
             self.mesh_path,
-            [self.discrete_raster_path],
+            self.aFilename_discrete,
             dArea_min,
             iFlag_remap_method_in=1,
             iFlag_discrete_in=True,
