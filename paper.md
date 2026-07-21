@@ -12,30 +12,33 @@ tags:
 authors:
  - name: Chang Liao
    orcid: 0000-0002-7348-8858
-   affiliation: 1
+   affiliation: 1 
+   affiliation: 2
 
 
  - name: Mingke Li
    orcid: 0000-0001-6310-4964
-   affiliation: 2
+   affiliation: 3
 
  - name: Bill Little
    orcid: 0000-0002-1345-9465
-   affiliation: 3
+   affiliation: 4
 
 
 
 
 affiliations:
- - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
+ - name: Earth System Numerical Simulation Science Center, Institute of Atmospheric Physics, Chinese Academy of Sciences, Beijing, China
    index: 1
 
-
- - name: University of Calgary, Calgary, Canada
+ - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
    index: 2
 
- - name: Met Office, Exeter, UK
+ - name: University of Calgary, Calgary, Canada
    index: 3
+
+ - name: Met Office, Exeter, UK
+   index: 4
 
 date: 13 Nov 2025
 
