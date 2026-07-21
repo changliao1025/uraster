@@ -110,15 +110,11 @@ The generative AI tool, claude code, was used in the development of this softwar
 
 # Acknowledgment
 
-
 The model described in this repository was supported by the following:
-
 
 * the U.S. Department of Energy Office of Science Biological and Environmental Research through the Earth System Development program as part of the Energy Exascale Earth System Model (E3SM) project.
 
-
 * the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Integrated Coastal Modeling (ICoM) project.
-
 
 * the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project.
 
@@ -127,9 +123,7 @@ The model described in this repository was supported by the following:
 
 A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
 PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
-A portion of this research was performed using ''Earth System
-Numerical Simulation Facility'' Research Computing at National
-Large Scientific and Technological Infrastructure.
+A portion of this research was performed using `Earth System Numerical Simulation Facility` Research Computing at Institute of Atmospheric Physics, Chinese Academy of Sciences.
 
 
 # References
