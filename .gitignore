@@ -299,3 +299,5 @@ python_crash_*.txt
 *.parquet
 *.mp4
 *.zip
+# Superpowers working files (specs/plans) - local only
+docs/superpowers/
