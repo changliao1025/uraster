@@ -1,6 +1,5 @@
 import unittest
 import os, sys, stat
-import shutil
 import numpy as np
 import pytest
 
