@@ -19,11 +19,13 @@ authors:
 
  - name: Mingke Li
    orcid: 0000-0001-6310-4964
-   affiliation: 3
+   affiliation: 
+    - 3
+    - 4
 
  - name: Bill Little
    orcid: 0000-0002-1345-9465
-   affiliation: 4
+   affiliation: 5
 
 
 
@@ -35,11 +37,14 @@ affiliations:
  - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
    index: 2
 
- - name: University of Calgary, Calgary, Canada
+ - name: Department of Geography, Environment and Geomatics, College of Social and Applied Human Sciences, University of Guelph, Canada
    index: 3
 
- - name: Met Office, Exeter, UK
+ - name: Department of Geomatics Engineering, Schulich School of Engineering, University of Calgary, Canada
    index: 4
+
+ - name: Met Office, Exeter, UK
+   index: 5
 
 date: 13 Nov 2025
 
