@@ -11,7 +11,6 @@ from osgeo import gdal, ogr, osr
 
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from pyearthviz3d.geovista.utility import is_running_in_notebook
 from uraster.utility import get_polygon_list, get_unique_values_from_rasters
 from uraster.classes.sraster import sraster
 from uraster.utility import setup_logger
@@ -1346,14 +1345,23 @@ def run_remap(
             gdal_warp_options_serial[key], "ExportToWkt"
         ):
             try:
-                gdal_warp_options_serial[key] = gdal_warp_options_serial[key].ExportToWkt()
+                gdal_warp_options_serial[key] = gdal_warp_options_serial[
+                    key
+                ].ExportToWkt()
             except Exception:
                 gdal_warp_options_serial[key] = str(gdal_warp_options_serial[key])
 
     n_features = len(aPolygon)
 
-    # Detect if running in Jupyter/IPython notebook environment
-    in_notebook = is_running_in_notebook()
+    # Detect if running in Jupyter/IPython notebook environment.
+    # Import lazily: pyearthviz3d is an optional (3D-visualization) dependency,
+    # so the core remap must not require it. Absent it, assume not-a-notebook.
+    try:
+        from pyearthviz3d.geovista.utility import is_running_in_notebook
+
+        in_notebook = is_running_in_notebook()
+    except Exception:
+        in_notebook = False
 
     # Handle notebook environment multiprocessing limitations
     if in_notebook:

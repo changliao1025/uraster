@@ -1,16 +1,9 @@
-
 import unittest
 import os, sys, stat
-import shutil
 import numpy as np
+import pytest
 
 from osgeo import gdal, ogr, osr
-import elevation
-import urllib
-
-import pystac_client
-import planetary_computer
-
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyearth.gis.spatialref.reproject_coordinates import reproject_coordinates
@@ -18,8 +11,8 @@ from uraster import sraster
 from uraster import utility
 from uraster.operation.extract import run_remap
 
-#define a shared boundary for the test rasters and mesh
-#using Beijing as an example, with a bounding box of (39.7, 116.2) to (40.1, 116.6) 
+# define a shared boundary for the test rasters and mesh
+# using Beijing as an example, with a bounding box of (39.7, 116.2) to (40.1, 116.6)
 
 dLongitude_min = 116.2
 dLongitude_max = 116.6
@@ -34,28 +27,25 @@ wgs84_wkt = srs_wgs84.ExportToWkt()
 # Example: A small snippet in Colorado, US
 bbox = [dLongitude_min, dLatitude_min, dLongitude_max, dLatitude_max]
 
-sFolder_cache = elevation.CACHE_DIR
-if os.path.exists(sFolder_cache):
-    shutil.rmtree(sFolder_cache)    
 
-def create_continuous_test_raster(sFolder,iFlag_download_in=True):
+def create_continuous_test_raster(sFolder, iFlag_download_in=True):
+    import urllib.request
+    import pystac_client
+    import planetary_computer
+
     driver = gdal.GetDriverByName("GTiff")
 
     if not os.path.exists(sFolder):
         os.makedirs(sFolder)
-    
 
     # Open the Planetary Computer catalog
     catalog = pystac_client.Client.open(
         "https://planetarycomputer.microsoft.com/api/stac/v1",
-        modifier=planetary_computer.sign_inplace
+        modifier=planetary_computer.sign_inplace,
     )
 
     # Search for the NASADEM (NASA's refined SRTM data)
-    search = catalog.search(
-        collections=["nasadem"],
-        bbox=bbox
-    )
+    search = catalog.search(collections=["nasadem"], bbox=bbox)
 
     items = search.item_collection()
     nfile = len(items)
@@ -73,16 +63,21 @@ def create_continuous_test_raster(sFolder,iFlag_download_in=True):
 
         sFilename = os.path.join(sFolder, f"elevation_tile_{i+1}.tif")
         if iFlag_download_in:
-            if os.path.exists(sFilename): #delete if already exists
-               os.path.remove(sFilename)
+            if os.path.exists(sFilename):  # delete if already exists
+                os.remove(sFilename)
 
             print("Downloading elevation tile...")
             urllib.request.urlretrieve(asset_url, sFilename)
         aFilename.append(sFilename)
-        
+
     return aFilename
 
+
 def create_discrete_test_raster(sFolder, iFlag_download_in=True):
+    import urllib.request
+    import pystac_client
+    import planetary_computer
+
     driver = gdal.GetDriverByName("GTiff")
     if not os.path.exists(sFolder):
         os.makedirs(sFolder)
@@ -90,39 +85,40 @@ def create_discrete_test_raster(sFolder, iFlag_download_in=True):
     # 2. Connect to the Planetary Computer STAC API
     catalog = pystac_client.Client.open(
         "https://planetarycomputer.microsoft.com/api/stac/v1",
-        modifier=planetary_computer.sign_inplace
+        modifier=planetary_computer.sign_inplace,
     )
-    
+
     # 3. Search for Land Cover data (using the 10m annual Impact Observatory dataset)
     search = catalog.search(
         collections=["io-lulc-9-class"],
         bbox=bbox,
-        datetime="2023" # Adjust the year if needed
+        datetime="2023",  # Adjust the year if needed
     )
-    
+
     items = search.item_collection()
     nfile = len(items)
     print(f"Found {nfile} matching tiles.")
-    
+
     if nfile == 0:
         raise ValueError("No matching tiles found for the given bounding box and year.")
-    
+
     # 4. Grab the first matching tile and extract the data link
     aFilename = list()
     for i in range(nfile):
         item = items[i]
         asset_url = item.assets["data"].href
-        
+
         # 5. Download and crop the data directly from cloud storage
         output_filename = os.path.join(sFolder, f"land_cover_tile_{i+1}.tif")
         if iFlag_download_in:
-            if os.path.exists(output_filename): #delete if already exists
-               os.remove(output_filename)
+            if os.path.exists(output_filename):  # delete if already exists
+                os.remove(output_filename)
 
             urllib.request.urlretrieve(asset_url, output_filename)
         aFilename.append(output_filename)
-        
+
     return aFilename
+
 
 def create_test_mesh(sFilename):
     driver = ogr.GetDriverByName("GeoJSON")
@@ -135,8 +131,8 @@ def create_test_mesh(sFilename):
     field = ogr.FieldDefn("cellid", ogr.OFTInteger)
     layer.CreateField(field)
 
-    #ideally, the mesh should have a coarser resolution than the raster
-    #let's use a 30 by 30 that covers the raster extent
+    # ideally, the mesh should have a coarser resolution than the raster
+    # let's use a 30 by 30 that covers the raster extent
     dLatitude_range = dLatitude_max - dLatitude_min
     dLongitude_range = dLongitude_max - dLongitude_min
     nRow = 30
@@ -168,18 +164,27 @@ def create_test_mesh(sFilename):
     ds = None
 
 
+@pytest.mark.network
 class TestUrasterWorkflow(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.test_id = "workflow_smoke"
-        cls.output_dir = os.path.join(os.path.dirname(__file__), "test_data", cls.test_id)
+        cls.output_dir = os.path.join(
+            os.path.dirname(__file__), "test_data", cls.test_id
+        )
         os.makedirs(cls.output_dir, exist_ok=True)
-        cls.continuous_raster_path = os.path.join(cls.output_dir, "test_continuous_raster")
+        cls.continuous_raster_path = os.path.join(
+            cls.output_dir, "test_continuous_raster"
+        )
         cls.discrete_raster_path = os.path.join(cls.output_dir, "test_discrete_raster")
         cls.mesh_path = os.path.join(cls.output_dir, "test_mesh.geojson")
-        cls.aFilename_continuous = create_continuous_test_raster(cls.continuous_raster_path, iFlag_download_in=False)
-        cls.aFilename_discrete = create_discrete_test_raster(cls.discrete_raster_path, iFlag_download_in=False)
+        cls.aFilename_continuous = create_continuous_test_raster(
+            cls.continuous_raster_path, iFlag_download_in=True
+        )
+        cls.aFilename_discrete = create_discrete_test_raster(
+            cls.discrete_raster_path, iFlag_download_in=True
+        )
         create_test_mesh(cls.mesh_path)
 
     @classmethod
