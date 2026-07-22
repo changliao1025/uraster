@@ -2,13 +2,9 @@ import unittest
 import os, sys, stat
 import shutil
 import numpy as np
+import pytest
 
 from osgeo import gdal, ogr, osr
-import elevation
-import urllib
-
-import pystac_client
-import planetary_computer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyearth.gis.spatialref.reproject_coordinates import reproject_coordinates
@@ -32,12 +28,12 @@ wgs84_wkt = srs_wgs84.ExportToWkt()
 # Example: A small snippet in Colorado, US
 bbox = [dLongitude_min, dLatitude_min, dLongitude_max, dLatitude_max]
 
-sFolder_cache = elevation.CACHE_DIR
-if os.path.exists(sFolder_cache):
-    shutil.rmtree(sFolder_cache)
-
 
 def create_continuous_test_raster(sFolder, iFlag_download_in=True):
+    import urllib.request
+    import pystac_client
+    import planetary_computer
+
     driver = gdal.GetDriverByName("GTiff")
 
     if not os.path.exists(sFolder):
@@ -69,7 +65,7 @@ def create_continuous_test_raster(sFolder, iFlag_download_in=True):
         sFilename = os.path.join(sFolder, f"elevation_tile_{i+1}.tif")
         if iFlag_download_in:
             if os.path.exists(sFilename):  # delete if already exists
-                os.path.remove(sFilename)
+                os.remove(sFilename)
 
             print("Downloading elevation tile...")
             urllib.request.urlretrieve(asset_url, sFilename)
@@ -79,6 +75,10 @@ def create_continuous_test_raster(sFolder, iFlag_download_in=True):
 
 
 def create_discrete_test_raster(sFolder, iFlag_download_in=True):
+    import urllib.request
+    import pystac_client
+    import planetary_computer
+
     driver = gdal.GetDriverByName("GTiff")
     if not os.path.exists(sFolder):
         os.makedirs(sFolder)
@@ -165,6 +165,7 @@ def create_test_mesh(sFilename):
     ds = None
 
 
+@pytest.mark.network
 class TestUrasterWorkflow(unittest.TestCase):
 
     @classmethod
@@ -180,10 +181,10 @@ class TestUrasterWorkflow(unittest.TestCase):
         cls.discrete_raster_path = os.path.join(cls.output_dir, "test_discrete_raster")
         cls.mesh_path = os.path.join(cls.output_dir, "test_mesh.geojson")
         cls.aFilename_continuous = create_continuous_test_raster(
-            cls.continuous_raster_path, iFlag_download_in=False
+            cls.continuous_raster_path, iFlag_download_in=True
         )
         cls.aFilename_discrete = create_discrete_test_raster(
-            cls.discrete_raster_path, iFlag_download_in=False
+            cls.discrete_raster_path, iFlag_download_in=True
         )
         create_test_mesh(cls.mesh_path)
 
