@@ -301,3 +301,6 @@ python_crash_*.txt
 *.zip
 # Superpowers working files (specs/plans) - local only
 docs/superpowers/
+
+# Local Claude working notes
+CLAUDE.md
