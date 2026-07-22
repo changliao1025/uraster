@@ -16,9 +16,7 @@ def test_discrete_dominant_and_fractions(
     # 3 pixels class 1, 1 pixel class 2 -> mode 1, count 4, 75% / 25%
     values = np.array([[1, 1], [1, 2]], dtype=float)
     raster = make_raster(tmp_path / "d.tif", values=values, bbox=(0, 0, 1, 1))
-    mesh = make_grid_mesh(
-        tmp_path / "m.geojson", bbox=(0, 0, 1, 1), nrows=1, ncols=1
-    )
+    mesh = make_grid_mesh(tmp_path / "m.geojson", bbox=(0, 0, 1, 1), nrows=1, ncols=1)
     out = str(tmp_path / "out.geojson")
     extract.run_remap(
         out,

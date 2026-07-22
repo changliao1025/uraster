@@ -48,7 +48,7 @@ def _make_grid_mesh(path, bbox, nrows, ncols, epsg=4326, id_field="cellid"):
             y0 = min_y + i * dy
             y1 = y0 + dy
             ring = ogr.Geometry(ogr.wkbLinearRing)
-            for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]:
+            for x, y in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]:
                 ring.AddPoint(x, y)
             ring.CloseRings()
             poly = ogr.Geometry(ogr.wkbPolygon)
@@ -74,7 +74,7 @@ def _make_polygon_mesh(path, polygons, epsg=4326, id_field="cellid"):
     layer.CreateField(ogr.FieldDefn(id_field, ogr.OFTInteger))
     for idx, coords in enumerate(polygons, start=1):
         ring = ogr.Geometry(ogr.wkbLinearRing)
-        for (x, y) in coords:
+        for x, y in coords:
             ring.AddPoint(float(x), float(y))
         ring.CloseRings()
         poly = ogr.Geometry(ogr.wkbPolygon)

@@ -8,9 +8,7 @@ def test_end_to_end_continuous(make_raster, make_grid_mesh, read_vector, tmp_pat
     raster = make_raster(
         tmp_path / "e.tif", values=np.full((4, 4), 10.0), bbox=(0, 0, 1, 1)
     )
-    mesh = make_grid_mesh(
-        tmp_path / "m.geojson", bbox=(0, 0, 1, 1), nrows=1, ncols=1
-    )
+    mesh = make_grid_mesh(tmp_path / "m.geojson", bbox=(0, 0, 1, 1), nrows=1, ncols=1)
     out = str(tmp_path / "uraster.geojson")
 
     aConfig = {
