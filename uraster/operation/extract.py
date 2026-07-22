@@ -1346,7 +1346,9 @@ def run_remap(
             gdal_warp_options_serial[key], "ExportToWkt"
         ):
             try:
-                gdal_warp_options_serial[key] = gdal_warp_options_serial[key].ExportToWkt()
+                gdal_warp_options_serial[key] = gdal_warp_options_serial[
+                    key
+                ].ExportToWkt()
             except Exception:
                 gdal_warp_options_serial[key] = str(gdal_warp_options_serial[key])
 
