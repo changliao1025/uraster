@@ -32,10 +32,7 @@ wgs84_wkt = srs_wgs84.ExportToWkt()
 # 1. Define your Area of Interest (Bounding Box: Min Long, Min Lat, Max Long, Max Lat)
 # Example: A small snippet in Colorado, US
 bbox = [dLongitude_min, dLatitude_min, dLongitude_max, dLatitude_max]
-
-sFolder_cache = elevation.CACHE_DIR
-if os.path.exists(sFolder_cache):
-    shutil.rmtree(sFolder_cache)    
+  
 
 def create_continuous_test_raster(sFolder,iFlag_download_in=True):
     driver = gdal.GetDriverByName("GTiff")
@@ -177,8 +174,8 @@ class TestUrasterWorkflow(unittest.TestCase):
         cls.continuous_raster_path = os.path.join(cls.output_dir, "test_continuous_raster")
         cls.discrete_raster_path = os.path.join(cls.output_dir, "test_discrete_raster")
         cls.mesh_path = os.path.join(cls.output_dir, "test_mesh.geojson")
-        cls.aFilename_continuous = create_continuous_test_raster(cls.continuous_raster_path, iFlag_download_in=False)
-        cls.aFilename_discrete = create_discrete_test_raster(cls.discrete_raster_path, iFlag_download_in=False)
+        cls.aFilename_continuous = create_continuous_test_raster(cls.continuous_raster_path, iFlag_download_in=True)
+        cls.aFilename_discrete = create_discrete_test_raster(cls.discrete_raster_path, iFlag_download_in=True)
         create_test_mesh(cls.mesh_path)
 
     @classmethod
