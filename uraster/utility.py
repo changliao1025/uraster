@@ -2,10 +2,7 @@ from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import (
     extract_unique_vertices_and_connectivity,
 )
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.international_date_line_utility import (
-    split_international_date_line_polygon_coordinates,
-    check_cross_international_date_line_polygon,
-)
+from pyearth.gis.idl_handler import IdlStrategy, IdlResult, IdlHandler
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 import os
@@ -264,7 +261,11 @@ def _validate_polygon_geometry(
             return False
 
         # Check for International Date Line crossing (this is allowed but logged)
-        iCross_idl, dummy = check_cross_international_date_line_polygon(aCoord)
+        handler = IdlHandler(IdlStrategy.CHECK_ONLY)
+        # Detect crossing
+        result = handler.detect(aCoord)
+        iCross_idl = result.crosses_idl
+        #iCross_idl, dummy = check_cross_international_date_line_polygon(aCoord)
         if iCross_idl:
             if iFlag_verbose_in:
                 logger.info(
@@ -1295,21 +1296,30 @@ def fix_mesh_longitude_range_and_idl_crossing(
                     ]:
                         # Check for IDL crossing after longitude normalization
                         aCoord = get_geometry_coordinates(fixed_geometry)
-                        bCross_idl, aCoord_updated = (
-                            check_cross_international_date_line_polygon(aCoord)
-                        )
+                        handler = IdlHandler(IdlStrategy.CHECK_ONLY)
+                                # Detect crossing
+                        result = handler.detect(aCoord)
+                        bCross_idl = result.crosses_idl
+                        aCoord_updated = result.adjusted_coords
+                        #bCross_idl, aCoord_updated = (
+                        #    check_cross_international_date_line_polygon(aCoord)
+                        #)
 
                         if bCross_idl:
                             idl_crossing_count += 1
                             logger.info(
                                 f"Feature ID {pFeature.GetFID()} crosses the International Date Line. Splitting..."
                             )
+                            handler = IdlHandler(IdlStrategy.SPLIT)
+                                                            # Detect crossing
+                            result = handler.detect(aCoord)
+                            eastern_polygon, western_polygon = result.sub_polygons
 
-                            [eastern_polygon, western_polygon] = (
-                                split_international_date_line_polygon_coordinates(
-                                    aCoord
-                                )
-                            )
+                            #[eastern_polygon, western_polygon] = (
+                            #    split_international_date_line_polygon_coordinates(
+                            #        aCoord
+                            #    )
+                            #)
 
                             # Create a multipolygon geometry (force 2D)
                             pGeometry_multi = ogr.Geometry(ogr.wkbMultiPolygon)

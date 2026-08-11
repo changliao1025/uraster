@@ -5,7 +5,6 @@ import shutil
 import numpy as np
 
 from osgeo import gdal, ogr, osr
-import elevation
 import urllib
 
 import pystac_client
