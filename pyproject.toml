@@ -73,3 +73,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "network: tests that require network access (deselected by default)",
+]
+addopts = "-m 'not network'"
