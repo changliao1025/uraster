@@ -4,6 +4,11 @@ import numpy as np
 import pytest
 
 from osgeo import gdal, ogr, osr
+import urllib
+
+import pystac_client
+import planetary_computer
+
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyearth.gis.spatialref.reproject_coordinates import reproject_coordinates
@@ -27,6 +32,7 @@ wgs84_wkt = srs_wgs84.ExportToWkt()
 # Example: A small snippet in Colorado, US
 bbox = [dLongitude_min, dLatitude_min, dLongitude_max, dLatitude_max]
 
+  
 
 def create_continuous_test_raster(sFolder, iFlag_download_in=True):
     import urllib.request
