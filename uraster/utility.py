@@ -2,10 +2,7 @@ from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import (
     extract_unique_vertices_and_connectivity,
 )
 from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
-from pyearth.gis.geometry.international_date_line_utility import (
-    split_international_date_line_polygon_coordinates,
-    check_cross_international_date_line_polygon,
-)
+from pyearth.gis.idl_handler import IdlStrategy, IdlResult, IdlHandler
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 import os
@@ -264,7 +261,11 @@ def _validate_polygon_geometry(
             return False
 
         # Check for International Date Line crossing (this is allowed but logged)
-        iCross_idl, dummy = check_cross_international_date_line_polygon(aCoord)
+        handler = IdlHandler(IdlStrategy.CHECK_ONLY)
+        # Detect crossing
+        result = handler.detect(aCoord)
+        iCross_idl = result.crosses_idl
+        #iCross_idl, dummy = check_cross_international_date_line_polygon(aCoord)
         if iCross_idl:
             if iFlag_verbose_in:
                 logger.info(
@@ -1116,79 +1117,80 @@ def fix_longitude_range_gdal(
 
     Args:
         geometry (ogr.Geometry): OGR Geometry object to fix
-        in_place (bool, optional): If True, modify geometry in place (faster).
-            Default is False.
+        in_place (bool, optional): Retained for API compatibility. The geometry
+            is always rebuilt and returned as a new object.
 
     Returns:
-        ogr.Geometry: OGR Geometry object with normalized longitude coordinates
+        ogr.Geometry: A new 2D OGR Geometry with normalized longitude coordinates
     """
     if geometry is None:
         return geometry
 
-    # Optionally clone the geometry to avoid modifying the original
-    fixed_geometry = geometry if in_place else geometry.Clone()
-
-    # Get geometry type
-    geom_type = fixed_geometry.GetGeometryName()
-
-    if geom_type in [
-        "POLYGON",
-        "MULTIPOLYGON",
-        "LINESTRING",
-        "MULTILINESTRING",
-        "POINT",
-        "MULTIPOINT",
-    ]:
-        # For complex geometries, iterate through all geometry parts
-        if geom_type.startswith("MULTI") or geom_type == "POLYGON":
-            _fix_geometry_coordinates_recursive(fixed_geometry)
-        else:
-            # For simple geometries, fix coordinates directly using batch processing
-            point_count = fixed_geometry.GetPointCount()
-            if point_count > 0:
-                # Process points in batches for better performance
-                for i in range(point_count):
-                    x, y, z = fixed_geometry.GetPoint(i)
-                    # Normalize longitude using modular arithmetic
-                    normalized_x = ((x + 180) % 360) - 180
-                    # Avoid exact +180° by nudging to just under 180°
-                    if abs(normalized_x - 180.0) < 1e-10:
-                        normalized_x = 180.0 - 1e-8
-                    # Use SetPoint_2D to ensure 2D geometry
-                    fixed_geometry.SetPoint_2D(i, normalized_x, y)
-
-    # Ensure the final geometry is 2D
+    # Rebuild the geometry with normalized longitudes instead of mutating points
+    # in place. On some GDAL builds SetPoint_2D on a ring raises
+    # "OGR Error: Not enough data to deserialize" when Python exceptions are
+    # enabled (gdal.UseExceptions()); AddPoint_2D is reliable across versions.
+    fixed_geometry = _rebuild_geometry_normalized(geometry)
     fixed_geometry.FlattenTo2D()
     return fixed_geometry
 
 
-def _fix_geometry_coordinates_recursive(geometry: "ogr.Geometry") -> None:
-    """
-    Recursively fix coordinates in complex geometries.
+def _normalize_longitude(x: float) -> float:
+    """Normalize a longitude to [-180, 180], nudging exact +/-180 just inside."""
+    if abs(x - 180.0) < 1e-10:
+        x = 180.0 - 1e-8
+    if abs(x + 180.0) < 1e-10:
+        x = -180.0 + 1e-8
+    normalized_x = ((x + 180) % 360) - 180
+    if abs(normalized_x - 180.0) < 1e-10:
+        normalized_x = 180.0 - 1e-8
+    return normalized_x
 
-    Args:
-        geometry (ogr.Geometry): OGR Geometry object to fix in-place
-    """
-    geom_count = geometry.GetGeometryCount()
 
-    if geom_count > 0:
-        # Recurse through sub-geometries
-        for i in range(geom_count):
-            sub_geom = geometry.GetGeometryRef(i)
-            _fix_geometry_coordinates_recursive(sub_geom)
-    else:
-        # Fix coordinates in this geometry
-        point_count = geometry.GetPointCount()
-        for i in range(point_count):
-            x, y, z = geometry.GetPoint(i)
-            if abs(x - 180.0) < 1e-10:
-                x = 180.0 - 1e-8  # Nudge to just under 180°
-            if abs(x + 180.0) < 1e-10:
-                x = -180.0 + 1e-8  # Nudge to just above -180°
-            # Normalize longitude using modular arithmetic
-            normalized_x = ((x + 180) % 360) - 180
-            # Use SetPoint_2D to ensure 2D geometry
-            geometry.SetPoint_2D(i, normalized_x, y)
+def _rebuild_geometry_normalized(geometry: "ogr.Geometry") -> "ogr.Geometry":
+    """
+    Return a new 2D geometry with all longitudes normalized to [-180, 180].
+
+    The geometry is rebuilt with AddPoint_2D rather than mutated in place with
+    SetPoint_2D, which raises "Not enough data to deserialize" on ring
+    geometries under some GDAL builds when exceptions are enabled.
+    """
+    name = geometry.GetGeometryName()
+    if name == "POLYGON":
+        new_geometry = ogr.Geometry(ogr.wkbPolygon)
+        for i in range(geometry.GetGeometryCount()):
+            ring = geometry.GetGeometryRef(i)
+            new_ring = ogr.Geometry(ogr.wkbLinearRing)
+            for j in range(ring.GetPointCount()):
+                x, y = ring.GetPoint_2D(j)
+                new_ring.AddPoint_2D(_normalize_longitude(x), y)
+            new_geometry.AddGeometry(new_ring)
+        return new_geometry
+    if name in ("MULTIPOLYGON", "MULTILINESTRING", "MULTIPOINT", "GEOMETRYCOLLECTION"):
+        new_geometry = ogr.Geometry(geometry.GetGeometryType())
+        for i in range(geometry.GetGeometryCount()):
+            new_geometry.AddGeometry(
+                _rebuild_geometry_normalized(geometry.GetGeometryRef(i))
+            )
+        return new_geometry
+    if name in ("LINESTRING", "LINEARRING"):
+        new_geometry = ogr.Geometry(
+            ogr.wkbLinearRing if name == "LINEARRING" else ogr.wkbLineString
+        )
+        for j in range(geometry.GetPointCount()):
+            x, y = geometry.GetPoint_2D(j)
+            new_geometry.AddPoint_2D(_normalize_longitude(x), y)
+        return new_geometry
+    if name == "POINT":
+        new_geometry = ogr.Geometry(ogr.wkbPoint)
+        if geometry.GetPointCount() > 0:
+            x, y = geometry.GetPoint_2D(0)
+            new_geometry.AddPoint_2D(_normalize_longitude(x), y)
+        return new_geometry
+    # Unsupported geometry type: return a flattened clone unchanged.
+    clone = geometry.Clone()
+    clone.FlattenTo2D()
+    return clone
 
 
 def fix_mesh_longitude_range_and_idl_crossing(
@@ -1295,21 +1297,30 @@ def fix_mesh_longitude_range_and_idl_crossing(
                     ]:
                         # Check for IDL crossing after longitude normalization
                         aCoord = get_geometry_coordinates(fixed_geometry)
-                        bCross_idl, aCoord_updated = (
-                            check_cross_international_date_line_polygon(aCoord)
-                        )
+                        handler = IdlHandler(IdlStrategy.CHECK_ONLY)
+                                # Detect crossing
+                        result = handler.detect(aCoord)
+                        bCross_idl = result.crosses_idl
+                        aCoord_updated = result.adjusted_coords
+                        #bCross_idl, aCoord_updated = (
+                        #    check_cross_international_date_line_polygon(aCoord)
+                        #)
 
                         if bCross_idl:
                             idl_crossing_count += 1
                             logger.info(
                                 f"Feature ID {pFeature.GetFID()} crosses the International Date Line. Splitting..."
                             )
+                            handler = IdlHandler(IdlStrategy.SPLIT)
+                                                            # Detect crossing
+                            result = handler.detect(aCoord)
+                            eastern_polygon, western_polygon = result.sub_polygons
 
-                            [eastern_polygon, western_polygon] = (
-                                split_international_date_line_polygon_coordinates(
-                                    aCoord
-                                )
-                            )
+                            #[eastern_polygon, western_polygon] = (
+                            #    split_international_date_line_polygon_coordinates(
+                            #        aCoord
+                            #    )
+                            #)
 
                             # Create a multipolygon geometry (force 2D)
                             pGeometry_multi = ogr.Geometry(ogr.wkbMultiPolygon)

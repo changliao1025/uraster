@@ -12,30 +12,39 @@ tags:
 authors:
  - name: Chang Liao
    orcid: 0000-0002-7348-8858
-   affiliation: 1
+   affiliation: 
+    - 1 
+    - 2
 
 
  - name: Mingke Li
    orcid: 0000-0001-6310-4964
-   affiliation: 2
+   affiliation: 
+    - 3
+    - 4
 
  - name: Bill Little
    orcid: 0000-0002-1345-9465
-   affiliation: 3
+   affiliation: 5
 
 
 
 
 affiliations:
- - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
+ - name: Earth System Numerical Simulation Science Center, Institute of Atmospheric Physics, Chinese Academy of Sciences, Beijing, China
    index: 1
 
-
- - name: University of Calgary, Calgary, Canada
+ - name: Atmospheric, Climate, and Earth Sciences, Pacific Northwest National Laboratory, Richland, WA, USA
    index: 2
 
- - name: Met Office, Exeter, UK
+ - name: Department of Geography, Environment and Geomatics, College of Social and Applied Human Sciences, University of Guelph, Canada
    index: 3
+
+ - name: Department of Geomatics Engineering, Schulich School of Engineering, University of Calgary, Canada
+   index: 4
+
+ - name: Met Office, Exeter, UK
+   index: 5
 
 date: 13 Nov 2025
 
@@ -95,7 +104,7 @@ Currently, `uraster` requires all the input datasets to be in the WGS84 coordina
 
 # Research impact statement
 
-`uraster` was born out of need to support the conversion of structured topographic datasets into unstructured MPAS meshes, which is widely used in Earth system modeling and weather forecasting [@liao2025unstructured]. The package was further extended to support the Hierarchical Equal Area isoLatitude Pixelisation (HEALpix) mesh, which is also commonly used in the DGGS and astronomy communities, to generate kilo-meter scale land surface datasets for the E3SM project.
+`uraster` was born out of need to support the conversion of structured topographic datasets into unstructured MPAS meshes, which is widely used in Earth system modeling and weather forecasting [@liao2025unstructured]. The package was further extended to support the Hierarchical Equal Area isoLatitude Pixelisation (HEALPix) mesh, which is also commonly used in the DGGS and astronomy communities, to generate kilo-meter scale land surface datasets for the E3SM project.
 
 To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project. It has also been used to generate harmonized global-to-regional gridded methane inventories on rHEALPix [@li_2025_17362125].
 
@@ -106,21 +115,20 @@ The generative AI tool, claude code, was used in the development of this softwar
 
 # Acknowledgment
 
-
 The model described in this repository was supported by the following:
-
 
 * the U.S. Department of Energy Office of Science Biological and Environmental Research through the Earth System Development program as part of the Energy Exascale Earth System Model (E3SM) project.
 
-
 * the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Integrated Coastal Modeling (ICoM) project.
 
-
 * the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project.
+
+* the National Key Research and Development Program of China (2024YFF0809000).
 
 
 A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
 PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
+A portion of this research was performed using `Earth System Numerical Simulation Facility` Research Computing at Institute of Atmospheric Physics, Chinese Academy of Sciences.
 
 
 # References

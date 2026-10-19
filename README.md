@@ -62,6 +62,20 @@ Tutorials are also provided through the GitHub repository: [URaster Tutorials on
 - **Raster formats**: GeoTIFF, NetCDF, HDF5, any GDAL-supported raster format
 - **Output formats**: Vectors (with computed statistics), PNG/JPG (visualizations), MP4/GIF (animations)
 
+## 🧪 Running the tests
+
+The test suite runs fully offline (no data download required):
+
+```bash
+conda env create -f environment.yml
+conda install -n uraster -c conda-forge pytest pytest-cov
+conda run -n uraster pip install -e .
+conda run -n uraster pytest tests/ -v
+```
+
+Network-dependent workflow tests are deselected by default; run them explicitly with
+`pytest tests/ -m network`.
+
 ## 🙏 Acknowledgments
 
 The model described in this repository was supported by the following:
