@@ -1,0 +1,11 @@
+[flake8]
+# Increase the line length to avoid E501
+max-line-length = 150
+
+# Ignore specific error codes:
+# E501: Line too long
+# F401: Module imported but unused
+# F841: Local variable is assigned to but never used
+# E402: Module level import not at top of file
+# F541: f-string is missing placeholders
+extend-ignore = E501, F401, F841, E402, F541
