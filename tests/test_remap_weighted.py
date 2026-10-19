@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
-from uraster.operation import intersect
+
 from uraster.classes.sraster import sraster
+from uraster.operation import intersect
 
 
 def _raster_mesh(raster_path):

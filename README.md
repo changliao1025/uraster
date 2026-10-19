@@ -95,4 +95,3 @@ PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-7
 We welcome contributions! Please open an issue or submit a pull request on the GitHub repository.
 
 **uraster** is distributed under the BSD 3-Clause License.
-

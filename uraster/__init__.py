@@ -6,8 +6,9 @@ __version__ = "0.1.8"
 __author__ = "Chang Liao"
 __email__ = "changliao.climate@gmail.com"
 
+from .classes.sraster import sraster
+
 # Import main classes for easier access
 from .classes.uraster import uraster
-from .classes.sraster import sraster
 
 __all__ = ["uraster", "sraster"]

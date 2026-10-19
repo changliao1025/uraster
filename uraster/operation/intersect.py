@@ -1,21 +1,21 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Pool, cpu_count
 import os
 import time
-from typing import Optional, Tuple, List, Dict, Any, Union
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Pool, cpu_count
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 from osgeo import gdal, ogr, osr
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
+from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
+from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 
 # use rtree for spatial indexing
 from rtree.index import Index as RTreeindex
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
-from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 
 gdal.UseExceptions()
 from uraster.classes.sraster import sraster
-from uraster.utility import get_polygon_list
-from uraster.utility import setup_logger
+from uraster.utility import get_polygon_list, setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])
 crs = "EPSG:4326"
@@ -171,7 +171,7 @@ def run_remap(
     pLayer_out.CreateField(pField)
     # in the future, we will also copy other attributes from the input geojson file
     pLayer_out.CreateField(ogr.FieldDefn("mean", ogr.OFTReal))
-    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reseverd for future use
+    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reserved for future use
     # Pre-compute GDAL options to avoid repeated object creation
     logger.info("run_remap: Starting main feature processing loop...")
     n_raster_features = len(aPolygon)

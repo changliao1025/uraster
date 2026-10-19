@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
-from uraster.operation import extract
+
 from uraster import utility
+from uraster.operation import extract
 
 
 def _area_min(path):

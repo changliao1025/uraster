@@ -1,6 +1,8 @@
 import os
+
 from osgeo import gdal, osr
 from pyearth.toolbox.management.raster.resample import resample_raster
+
 from uraster.classes.uraster import uraster
 
 # Download input data using Pooch (downloads to system cache)

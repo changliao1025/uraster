@@ -1,19 +1,17 @@
+import os
+import stat
+import sys
 import unittest
-import os, sys, stat
-import numpy as np
-import pytest
-
-from osgeo import gdal, ogr, osr
 import urllib
 
-import pystac_client
-import planetary_computer
-
+import numpy as np
+import pytest
+from osgeo import gdal, ogr, osr
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyearth.gis.spatialref.reproject_coordinates import reproject_coordinates
-from uraster import sraster
-from uraster import utility
+
+from uraster import sraster, utility
 from uraster.operation.extract import run_remap
 
 # define a shared boundary for the test rasters and mesh
@@ -32,12 +30,12 @@ wgs84_wkt = srs_wgs84.ExportToWkt()
 # Example: A small snippet in Colorado, US
 bbox = [dLongitude_min, dLatitude_min, dLongitude_max, dLatitude_max]
 
-  
 
 def create_continuous_test_raster(sFolder, iFlag_download_in=True):
     import urllib.request
-    import pystac_client
+
     import planetary_computer
+    import pystac_client
 
     driver = gdal.GetDriverByName("GTiff")
 
@@ -81,8 +79,9 @@ def create_continuous_test_raster(sFolder, iFlag_download_in=True):
 
 def create_discrete_test_raster(sFolder, iFlag_download_in=True):
     import urllib.request
-    import pystac_client
+
     import planetary_computer
+    import pystac_client
 
     driver = gdal.GetDriverByName("GTiff")
     if not os.path.exists(sFolder):

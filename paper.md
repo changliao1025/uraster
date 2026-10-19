@@ -12,14 +12,14 @@ tags:
 authors:
  - name: Chang Liao
    orcid: 0000-0002-7348-8858
-   affiliation: 
-    - 1 
+   affiliation:
+    - 1
     - 2
 
 
  - name: Mingke Li
    orcid: 0000-0001-6310-4964
-   affiliation: 
+   affiliation:
     - 3
     - 4
 

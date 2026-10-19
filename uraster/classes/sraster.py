@@ -1,13 +1,13 @@
 import os
 import platform
+
 import numpy as np
-from osgeo import osr
-from osgeo import gdal
+from osgeo import gdal, osr
 
 gdal.UseExceptions()
 from pyearth.toolbox.management.raster.reproject import reproject_raster
-from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
 from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
+from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
 
 
 class sraster:

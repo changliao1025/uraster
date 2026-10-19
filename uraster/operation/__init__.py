@@ -2,7 +2,6 @@
 Operation modules for uraster - contains remap and processing workflows
 """
 
-from . import extract
-from . import intersect
+from . import extract, intersect
 
 __all__ = ["extract", "intersect"]

@@ -1,15 +1,16 @@
-import os
 import logging
+import os
 import traceback
+
 import numpy as np
 from osgeo import gdal, ogr, osr
 
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from uraster.operation import extract, intersect
 
-from uraster.classes.sraster import sraster
 from uraster import utility
+from uraster.classes.sraster import sraster
+from uraster.operation import extract, intersect
 from uraster.utility import setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])
@@ -1159,7 +1160,7 @@ class uraster:
             iFlag_discrete_in = self.iFlag_discrete
             pass
 
-        # the model should suport weighted average and discrete remap
+        # the model should support weighted average and discrete remap
         if iFlag_weighted_average_in:
             # call the polygon calculation with weighted average
             sFilename_raster = aFilename_source_raster[0]

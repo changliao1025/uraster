@@ -1,6 +1,8 @@
-import numpy as np
 import os
+
+import numpy as np
 import pytest
+
 from uraster.classes.uraster import uraster
 
 

@@ -12,24 +12,27 @@ Features:
 - Support for multiple output formats
 """
 
-import os, sys
 import logging
+import os
+import sys
 import traceback
-from typing import Optional, List, Tuple, Union, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 from osgeo import gdal, ogr
 
 gdal.UseExceptions()
 
+from pyearthviz3d.geovista.animate_rotating_frames import animate_rotating_frames
+from pyearthviz3d.geovista.map_single_frame import map_single_frame
 from pyearthviz3d.geovista.utility import (
-    VisualizationConfig,
     AnimationConfig,
     ScalarBarConfig,
+    VisualizationConfig,
 )
-from pyearthviz3d.geovista.map_single_frame import map_single_frame
-from pyearthviz3d.geovista.animate_rotating_frames import animate_rotating_frames
-from uraster.classes.sraster import sraster
+
 from uraster import utility
+from uraster.classes.sraster import sraster
 from uraster.utility import setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])

@@ -1,19 +1,25 @@
 # Extract module for uraster - contains remap workflow functions
 import os
+import platform
+import sys
 import time
-import sys, platform
 import traceback
-from typing import Optional, Tuple, List, Dict, Any, Union
-import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
 from osgeo import gdal, ogr, osr
 
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from uraster.utility import get_polygon_list, get_unique_values_from_rasters
+
 from uraster.classes.sraster import sraster
-from uraster.utility import setup_logger
+from uraster.utility import (
+    get_polygon_list,
+    get_unique_values_from_rasters,
+    setup_logger,
+)
 
 logger = setup_logger(__name__.split(".")[-1])
 crs = "EPSG:4326"
@@ -681,7 +687,7 @@ def _process_multipolygon_idl(
             )
 
         merged_data_arrays = []
-        merged_transforms = []
+        merged_transforms: List[Optional[Any]] = []
         successful_parts = 0
 
         # Process each polygon part separately
@@ -1316,7 +1322,7 @@ def run_remap(
         else:
             pass
 
-    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reseverd for future use
+    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reserved for future use
 
     # Pre-compute GDAL options to avoid repeated object creation
     # sRemap_method was already determined above based on resolution comparison
