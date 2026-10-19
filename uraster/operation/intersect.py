@@ -368,7 +368,7 @@ def run_remap(
         pFeature_out.SetField("area", dArea_total_source)
         # set the mean field
         if dWeighted_mean is not None:
-            pFeature_out.SetField("mean", dWeighted_mean)
+            pFeature_out.SetField("mean", float(dWeighted_mean))
         else:
             pFeature_out.SetField("mean", None)
         # create the feature in the output layer
