@@ -5,9 +5,53 @@ import numpy as np
 from osgeo import gdal, osr
 
 gdal.UseExceptions()
+from pyearth.gis.gdal.gdal_raster_format_support import (
+    get_available_raster_formats,
+    get_raster_driver_from_filename,
+    get_raster_format_from_filename,
+)
+from pyearth.gis.gdal.gdal_vector_format_support import (
+    get_available_vector_formats,
+    get_vector_driver_from_filename,
+    has_parquet_support,
+)
 from pyearth.toolbox.management.raster.reproject import reproject_raster
-from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
-from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
+from pyearth.toolbox.management.raster.resample import resample_raster
+
+try:
+    from pyearthmesh.meshes.structured.latlon.create_latlon_mesh import (
+        create_latlon_mesh,
+    )
+    from pyearthmesh.meshes.structured.square.create_square_mesh import (
+        create_square_mesh,
+    )
+except ImportError:
+    try:
+        from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
+        from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
+    except ImportError:
+        create_latlon_mesh = None
+        create_square_mesh = None
+
+
+def get_default_mesh_extension() -> str:
+    """
+    Determine the default vector extension for raster mesh based on available OGR drivers.
+    Prioritizes GeoParquet (if Parquet/Arrow driver is available), then FlatGeobuf,
+    then GPKG, and falls back to GeoJSON.
+    """
+    available_vectors = get_available_vector_formats()
+    if has_parquet_support() or ".geoparquet" in available_vectors:
+        return ".geoparquet"
+    elif ".fgb" in available_vectors:
+        return ".fgb"
+    elif ".gpkg" in available_vectors:
+        return ".gpkg"
+    elif ".geojson" in available_vectors:
+        return ".geojson"
+    elif ".shp" in available_vectors:
+        return ".shp"
+    return ".geojson"
 
 
 class sraster:
@@ -23,6 +67,9 @@ class sraster:
         self.iBandCount = None
         # Data type (e.g., uint8, float32)
         self.sDtype = None
+        # Driver names
+        self.sDriver = None
+        self.sDriver_raster = None
         # Coordinate Reference System (CRS)
         self.sCrs = None
         # GDAL Spatial Reference object - initialize to prevent AttributeError
@@ -37,13 +84,16 @@ class sraster:
         # check the file exists
         if sFilename_in is not None:
             if os.path.isfile(sFilename_in):
-                # setup the mesh filename using robust path handling
+                # Verify / detect raster format
+                try:
+                    self.sDriver_raster = get_raster_format_from_filename(sFilename_in)
+                except Exception:
+                    self.sDriver_raster = None
+
+                # setup the mesh filename using dynamic vector format support
                 base, ext = os.path.splitext(sFilename_in)
-                # check platform, as MacOS does not support geoparquet well
-                if platform.system() == "Darwin":
-                    self.sFilename_mesh = f"{base}_mesh.geojson"
-                else:
-                    self.sFilename_mesh = f"{base}_mesh.geoparquet"
+                sMesh_ext = get_default_mesh_extension()
+                self.sFilename_mesh = f"{base}_mesh{sMesh_ext}"
             else:
                 raise FileNotFoundError(f"File does not exist: {sFilename_in}")
         # NoData value
@@ -80,6 +130,10 @@ class sraster:
             pDataset = gdal.Open(sFilename)
             if pDataset is None:
                 raise RuntimeError(f"Unable to open file: {sFilename}")
+
+            pDriver = pDataset.GetDriver()
+            if pDriver is not None:
+                self.sDriver = pDriver.ShortName
 
             self.sCrs = pDataset.GetProjection()
             if self.sCrs:
@@ -209,11 +263,21 @@ class sraster:
         print(f"WGS84 Extent: {self.aExtent_wgs84}")
         return
 
-    def create_raster_mesh(self):
+    def create_raster_mesh(self, sFilename_mesh_out=None):
         """
         Create a raster mesh from the raster file.
         Creates either a square mesh (for projected CRS) or a lat/lon mesh (for WGS84).
         """
+        if sFilename_mesh_out is not None:
+            self.sFilename_mesh = sFilename_mesh_out
+
+        # Verify vector driver is available for output mesh
+        try:
+            get_vector_driver_from_filename(self.sFilename_mesh)
+        except Exception as e:
+            raise RuntimeError(
+                f"No suitable vector driver available for raster mesh '{self.sFilename_mesh}': {e}"
+            )
         pSpatialRef_wgs84 = osr.SpatialReference()
         pSpatialRef_wgs84.ImportFromEPSG(4326)
         wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
@@ -314,6 +378,70 @@ class sraster:
         pRaster_wgs84 = sraster(sFilename_in=sFilename_raster_wgs84)
         pRaster_wgs84.read_metadata()
         return pRaster_wgs84
+
+    def resample(
+        self,
+        dResolution_x,
+        dResolution_y=None,
+        sResampleAlg="near",
+        sFilename_out=None,
+        pProjection_target_in=None,
+        iFlag_verbose_in=False,
+    ):
+        """
+        Resample the raster to a specified target resolution.
+
+        Reuses pyearth.toolbox.management.raster.resample.resample_raster.
+
+        Args:
+            dResolution_x (float): Desired pixel width in target coordinate units.
+            dResolution_y (float, optional): Desired pixel height. Defaults to dResolution_x.
+            sResampleAlg (str, optional): Resampling algorithm ('near', 'bilinear',
+                'cubic', 'average', 'mode'). Defaults to 'near'.
+            sFilename_out (str, optional): Output raster file path. If None,
+                creates a sibling file with '_resampled' suffix.
+            pProjection_target_in (str, optional): Target projection WKT.
+                Defaults to the input raster's spatial reference.
+            iFlag_verbose_in (bool, optional): If True, enable verbose logging.
+
+        Returns:
+            sraster: A new sraster instance for the resampled raster.
+        """
+        if dResolution_y is None:
+            dResolution_y = dResolution_x
+
+        if sFilename_out is None:
+            base, ext = os.path.splitext(self.sFilename)
+            sFilename_out = f"{base}_resampled{ext}"
+
+        # Preserve source data type and NoData value
+        iData_type = self.eType if self.eType is not None else gdal.GDT_Float32
+        dMissing_value_source = self.dNoData if self.dNoData is not None else -9999.0
+        dMissing_value_target = dMissing_value_source
+
+        pTarget_projection = (
+            pProjection_target_in
+            if pProjection_target_in is not None
+            else self.pSpatialRef_wkt
+        )
+
+        resample_raster(
+            self.sFilename,
+            sFilename_out,
+            abs(dResolution_x),
+            abs(dResolution_y),
+            pProjection_target_in=pTarget_projection,
+            iData_type=iData_type,
+            sResampleAlg=sResampleAlg,
+            dMissing_value_source=dMissing_value_source,
+            dMissing_value_target=dMissing_value_target,
+            iFlag_overwrite=True,
+            iFlag_verbose=iFlag_verbose_in,
+        )
+
+        pRaster_resampled = sraster(sFilename_in=sFilename_out)
+        pRaster_resampled.read_metadata()
+        return pRaster_resampled
 
     def get_unique_values(self, band_index=1, dMissing_value=None, iFlag_verbose_in=0):
         """

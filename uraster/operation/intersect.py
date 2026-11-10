@@ -132,9 +132,11 @@ def run_remap(
     if iFlag_verbose_in:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
-    pDateset_source_mesh = pDriver_vector.Open(sFilename_source_mesh, 0)
-    pLayer_source_mesh = pDateset_source_mesh.GetLayer()
-    sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
+    pDataset_source_mesh = ogr.Open(sFilename_source_mesh, 0)
+    if pDataset_source_mesh is None:
+        logger.error(f"Failed to open source mesh: {sFilename_source_mesh}")
+        return
+    pLayer_source_mesh = pDataset_source_mesh.GetLayer(0)
     # build the rtree index for the polygons for the source mesh
     aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
         sFilename_raster_mesh,
@@ -325,11 +327,15 @@ def run_remap(
             # get the raster value
             dRaster_value = pRaster_data[nRow_converted, nCol]
             dArea_mesh_cell = aArea[idx]
-            if dRaster_value == dMissing_value:
+            if np.isnan(dRaster_value) or (
+                dMissing_value is not None
+                and not np.isnan(dMissing_value)
+                and dRaster_value == dMissing_value
+            ):
                 continue
             else:
-                dWeighted_sum += dRaster_value * dArea_mesh_cell
-                dArea_check += dArea_mesh_cell
+                dWeighted_sum += float(dRaster_value) * float(dArea_mesh_cell)
+                dArea_check += float(dArea_mesh_cell)
 
         # then process the intersected cells
         for k, idx in enumerate(aMesh_cell_intersect):
@@ -343,34 +349,37 @@ def run_remap(
             dArea_mesh_cell = aArea[idx]
             dArea_ratio = aArea_ratio[k]
             dArea_intersected = dArea_mesh_cell * dArea_ratio
-            if dRaster_value == dMissing_value:
+            if np.isnan(dRaster_value) or (
+                dMissing_value is not None
+                and not np.isnan(dMissing_value)
+                and dRaster_value == dMissing_value
+            ):
                 continue
             else:
-                dWeighted_sum += dRaster_value * dArea_intersected
-                dArea_check += dArea_intersected
+                dWeighted_sum += float(dRaster_value) * float(dArea_intersected)
+                dArea_check += float(dArea_intersected)
 
-        if dArea_check == 0:
-            dWeighted_mean = None
+        if dArea_check > 0:
+            dWeighted_mean = dWeighted_sum / dArea_check
+            if dArea_total > 0 and abs(dArea_check - dArea_total) / dArea_total > 0.01:
+                if iFlag_verbose_in:
+                    logger.warning(
+                        f"run_remap: Warning - Partial coverage for feature ID {cellid}: "
+                        f"valid area {dArea_check:.4f} vs total area {dArea_total:.4f}"
+                    )
         else:
-            # the difference between dArea_check and dArea_total should be small
-            if abs(dArea_check - dArea_total) / dArea_total > 0.01:
-                logger.warning(
-                    f"run_remap: Warning - Area check failed for feature ID {cellid}..."
-                )
-                if dArea_check == 0:
-                    dWeighted_mean = None
-                else:
-                    dWeighted_mean = dWeighted_sum / dArea_check
-            else:
-                dWeighted_mean = dWeighted_sum / dArea_total
+            dWeighted_mean = None
 
         # set the area field
-        pFeature_out.SetField("area", dArea_total_source)
+        pFeature_out.SetField("area", float(dArea_total_source))
         # set the mean field
-        if dWeighted_mean is not None:
+        if dWeighted_mean is not None and not np.isnan(dWeighted_mean):
             pFeature_out.SetField("mean", float(dWeighted_mean))
         else:
-            pFeature_out.SetField("mean", None)
+            if hasattr(pFeature_out, "SetFieldNull"):
+                pFeature_out.SetFieldNull("mean")
+            else:
+                pFeature_out.SetField("mean", None)
         # create the feature in the output layer
         pLayer_out.CreateFeature(pFeature_out)
         pFeature_out = None  # destroy the feature to free memory
@@ -378,6 +387,7 @@ def run_remap(
     # flush and close output
     pDataset_out.FlushCache()
     pDataset_out = None
+    pDataset_source_mesh = None
 
     # Clean up spatial reference objects to prevent memory leaks
     pSpatialRef_target = None

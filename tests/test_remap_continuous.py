@@ -52,3 +52,46 @@ def test_statistics_match_numpy(make_raster, make_grid_mesh, read_vector, tmp_pa
     assert rows[1]["min"] == pytest.approx(0.0, abs=1e-6)
     assert rows[1]["max"] == pytest.approx(15.0, abs=1e-6)
     assert rows[1]["std"] == pytest.approx(float(values.std()), rel=1e-3)
+
+
+def test_coarse_raster_to_fine_mesh_all_cells_valid(
+    make_raster, make_grid_mesh, read_vector, tmp_path
+):
+    """
+    Test Issue #79: when raster pixels (0.5 deg) are larger than mesh cells (0.1 deg),
+    every mesh cell must receive valid statistics (no NaNs) via auto-resampling.
+    """
+    # 2x2 raster over bbox [0, 1] x [0, 1] -> pixel size = 0.5 deg
+    raster = make_raster(
+        tmp_path / "coarse.tif", values=np.full((2, 2), 42.0), bbox=(0, 0, 1, 1)
+    )
+    # 10x10 mesh over bbox [0, 1] x [0, 1] -> cell size = 0.1 deg (smaller than 0.5 deg)
+    mesh = make_grid_mesh(
+        tmp_path / "fine_mesh.geojson", bbox=(0, 0, 1, 1), nrows=10, ncols=10
+    )
+    out = str(tmp_path / "out_fine.geojson")
+    extract.run_remap(out, mesh, [raster], _area_min(mesh), iFlag_remap_method_in=1)
+    rows = read_vector(out)
+
+    assert len(rows) == 100
+    for cellid, row in rows.items():
+        assert not np.isnan(row["mean"]), f"Cell {cellid} has NaN mean!"
+        assert row["mean"] == pytest.approx(42.0, abs=1e-6)
+
+
+def test_empty_cell_writes_null_not_nan(
+    make_raster, make_grid_mesh, read_vector, tmp_path
+):
+    """Verify that cells with no valid data write explicit NULL (None) rather than NaN."""
+    # Raster with all nodata
+    raster = make_raster(
+        tmp_path / "all_nodata.tif",
+        values=np.full((4, 4), -9999.0),
+        bbox=(0, 0, 1, 1),
+        nodata=-9999.0,
+    )
+    mesh = make_grid_mesh(tmp_path / "m.geojson", bbox=(0, 0, 1, 1), nrows=1, ncols=1)
+    out = str(tmp_path / "out_null.geojson")
+    extract.run_remap(out, mesh, [raster], _area_min(mesh), iFlag_remap_method_in=1)
+    rows = read_vector(out)
+    assert rows[1]["mean"] is None

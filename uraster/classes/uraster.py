@@ -1117,7 +1117,7 @@ class uraster:
         aFilename_source_raster_in=None,
         iFlag_stat_in=True,
         iFlag_weighted_average_in=False,
-        iFlag_remap_method_in=1,
+        iFlag_remap_method_in=None,
         iFlag_save_clipped_raster_in=0,
         sFolder_raster_out_in=None,
         iFlag_discrete_in=False,
@@ -1144,13 +1144,22 @@ class uraster:
             sFilename_target_mesh = sFilename_target_mesh_out
             self.sFilename_target_mesh = sFilename_target_mesh_out
 
+        # Remap method resolution: default to config/instance value if not passed
+        if iFlag_remap_method_in is None:
+            iFlag_remap_method = (
+                self.iFlag_remap_method if self.iFlag_remap_method is not None else 1
+            )
+        else:
+            iFlag_remap_method = iFlag_remap_method_in
+            self.iFlag_remap_method = iFlag_remap_method
+
         # check stat and discrete compatibility
         if iFlag_discrete_in:
             # for discrete, only remap method 1 (nearest neighbor) is allowed
             # can we apply statistics for discrete?
             self.iFlag_discrete = True
             iFlag_stat_in = False
-            if iFlag_remap_method_in != 1:
+            if iFlag_remap_method != 1:
                 logger.error(
                     "For discrete remap, only remap method 1 (nearest neighbor) is allowed."
                 )
@@ -1189,7 +1198,7 @@ class uraster:
                 sFilename_source_mesh,
                 aFilename_source_raster,
                 self.dArea_min,
-                iFlag_remap_method_in=iFlag_remap_method_in,
+                iFlag_remap_method_in=iFlag_remap_method,
                 iFlag_discrete_in=iFlag_discrete_in,
                 iFlag_stat_in=iFlag_stat_in,
                 iFlag_save_clipped_raster_in=iFlag_save_clipped_raster_in,
