@@ -81,6 +81,7 @@ Network-dependent workflow tests are deselected by default; run them explicitly 
 **uraster** has been used in research and related projects:
 
 - Liao, C. et al. [“An Unstructured Voronoi Mesh Framework for Large-Scale Hydrologic and Land Surface Models.”](https://doi.org/10.1029/2025MS005442) *Journal of Advances in Modeling Earth Systems*, 18(11), published November 6, 2026.
+- Li, M.E.; Gao, M.; Liang, S.H.L. [“Harmonized Global-to-Regional Gridded Methane Inventories in a Discrete Global Grid Framework.”](https://doi.org/10.3390/ijgi15100466) *ISPRS International Journal of Geo-Information*, 2026, 15, 466.
 
 ## 🙏 Acknowledgments
 

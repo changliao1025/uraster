@@ -8,4 +8,6 @@ max-line-length = 150
 # F841: Local variable is assigned to but never used
 # E402: Module level import not at top of file
 # F541: f-string is missing placeholders
-extend-ignore = E501, F401, F841, E402, F541
+# E203: Whitespace before ':' (conflicts with black slices)
+extend-ignore = E203, E501, F401, F841, E402, F541
+exclude = .git,__pycache__,build,dist,docs,.venv

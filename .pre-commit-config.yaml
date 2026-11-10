@@ -22,6 +22,7 @@ repos:
     rev: 7.4.1
     hooks:
       - id: flake8
+        exclude: ^docs/
 
   - repo: https://github.com/pycqa/isort
     rev: 10.0.0b1
@@ -33,14 +34,16 @@ repos:
     rev: v2.4.0
     hooks:
       - id: mypy
-        args: [--ignore-missing-imports]
-
+        args: [--ignore-missing-imports, --explicit-package-bases]
+        exclude: ^docs/
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.3
     hooks:
       - id: codespell
-        args: [--write-changes]
+        args:
+          - --ignore-words-list=aline,hav
+          - --ignore-regex=\b[a-z]+[A-Z][a-zA-Z0-9_]*\b
         exclude: ^(.*\.geojson|.*\.tif|.*\.tiff)$
 
   - repo: https://github.com/asottile/pyupgrade
