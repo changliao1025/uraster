@@ -14,8 +14,8 @@
     "trame": "1.5.1",
     "trame-vtk": "1.3.0",
     "trame-vuetify": "1.4.1",
-    "pyearth": "0.2.1",
-    "pyearthviz3d": "0.1.1"
+    "pyearth": "0.2.4",
+    "pyearthviz3d": "0.1.4"
   },
   "notes": "This is a manually-created lock file. For authoritative resolution and checksums, regenerate with mambajs create-lock environment.yml nblink-lock.json."
 }
