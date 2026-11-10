@@ -76,6 +76,12 @@ conda run -n uraster pytest tests/ -v
 Network-dependent workflow tests are deselected by default; run them explicitly with
 `pytest tests/ -m network`.
 
+## 🔬 Research & Applications
+
+**uraster** has been used in research and related projects:
+
+- Liao, C. et al. [“An Unstructured Voronoi Mesh Framework for Large-Scale Hydrologic and Land Surface Models.”](https://doi.org/10.1029/2025MS005442) *Journal of Advances in Modeling Earth Systems*, 18(11), published November 6, 2026.
+
 ## 🙏 Acknowledgments
 
 The model described in this repository was supported by the following:
