@@ -26,12 +26,8 @@ try:
         create_square_mesh,
     )
 except ImportError:
-    try:
-        from pyearth.toolbox.mesh.latlon.create_latlon_mesh import create_latlon_mesh
-        from pyearth.toolbox.mesh.square.create_square_mesh import create_square_mesh
-    except ImportError:
-        create_latlon_mesh = None
-        create_square_mesh = None
+    create_latlon_mesh = None
+    create_square_mesh = None
 
 
 def get_default_mesh_extension() -> str:
