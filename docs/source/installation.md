@@ -30,7 +30,7 @@ pip install -e . --no-deps
 ## Dependencies
 
 ### Core Dependencies
-- Python >= 3.11, < 3.16
+- Python >= 3.11, < 3.15
 - numpy >= 1.19.0
 - GDAL >= 3.0.0
 - osgeo (GDAL Python bindings)
