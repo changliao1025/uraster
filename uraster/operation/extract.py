@@ -15,7 +15,7 @@ gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from pyearth.toolbox.management.raster.resample import resample_raster
 
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 from uraster.utility import (
     get_polygon_list,
     get_unique_values_from_rasters,
@@ -1252,8 +1252,8 @@ def run_remap(
     pPixelHeight = None
     sRaster_source_srs = None
     for sFilename_raster in aFilename_source_raster:
-        # use sraster class to read the raster info
-        pRaster = sraster(sFilename_in=sFilename_raster)
+        # use SRaster class to read the raster info
+        pRaster = SRaster(sFilename_in=sFilename_raster)
         pRaster.read_metadata()
         if dPixelWidth is None or pRaster.dResolution_x < dPixelWidth:
             dPixelWidth = pRaster.dResolution_x
@@ -1346,7 +1346,7 @@ def run_remap(
                 base_dir, f"_temp_resampled_{base_name}_{idx_r}_{os.getpid()}.tif"
             )
 
-            pRaster_src = sraster(sFilename_in=sFilename_r)
+            pRaster_src = SRaster(sFilename_in=sFilename_r)
             pRaster_src.read_metadata()
             iData_type = (
                 pRaster_src.eType if pRaster_src.eType is not None else gdal.GDT_Float32

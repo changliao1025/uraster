@@ -36,7 +36,7 @@ Quick Start
 .. code-block:: python
 
    import uraster
-   from uraster.classes.uraster import uraster
+   from uraster.classes.uraster import URaster
 
    # Configuration
    config = {
@@ -45,8 +45,8 @@ Quick Start
        'sFilename_target_mesh': 'path/to/output/mesh_with_stats.geojson'
    }
 
-   # Create uraster instance
-   processor = uraster(config)
+   # Create URaster instance
+   processor = URaster(config)
 
    # Setup and validate inputs
    processor.setup(iFlag_verbose_in=True)

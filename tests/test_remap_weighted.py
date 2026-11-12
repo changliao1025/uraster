@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 from uraster.operation import intersect
 
 
 def _raster_mesh(raster_path):
-    r = sraster(sFilename_in=raster_path)
+    r = SRaster(sFilename_in=raster_path)
     r.read_metadata()
     return r.create_raster_mesh()
 
@@ -109,7 +109,7 @@ def test_sraster_mesh_driver_availability(make_raster, tmp_path):
     raster = make_raster(
         tmp_path / "drv_test.tif", values=np.full((2, 2), 1.0), bbox=(0, 0, 1, 1)
     )
-    r = sraster(sFilename_in=raster)
+    r = SRaster(sFilename_in=raster)
     mesh_path = r.sFilename_mesh
     ext = mesh_path.split(".")[-1]
     driver_map = {
@@ -124,47 +124,38 @@ def test_sraster_mesh_driver_availability(make_raster, tmp_path):
 
 def test_sraster_mesh_driver_fallback(monkeypatch, make_raster, tmp_path):
     """Test dynamic fallback of mesh vector drivers based on available OGR drivers."""
-    import importlib
-
-    # Resolve the module object directly because uraster.classes.__init__
-    # exports the sraster class as `uraster.classes.sraster`, shadowing the module.
-    sraster_mod = importlib.import_module("uraster.classes.sraster")
-
     raster = make_raster(
         tmp_path / "fallback_test.tif", values=np.full((2, 2), 1.0), bbox=(0, 0, 1, 1)
     )
 
     # 1. Parquet available -> .geoparquet
-    monkeypatch.setattr(sraster_mod, "has_parquet_support", lambda: True)
-    r_pq = sraster(sFilename_in=raster)
+    monkeypatch.setattr("uraster.classes.sraster.has_parquet_support", lambda: True)
+    r_pq = SRaster(sFilename_in=raster)
     assert r_pq.sFilename_mesh.endswith("_mesh.geoparquet")
 
     # 2. No Parquet, but FlatGeobuf available -> .fgb
-    monkeypatch.setattr(sraster_mod, "has_parquet_support", lambda: False)
+    monkeypatch.setattr("uraster.classes.sraster.has_parquet_support", lambda: False)
     monkeypatch.setattr(
-        sraster_mod,
-        "get_available_vector_formats",
+        "uraster.classes.sraster.get_available_vector_formats",
         lambda: {".fgb": "FlatGeobuf", ".gpkg": "GPKG", ".geojson": "GeoJSON"},
     )
-    r_fgb = sraster(sFilename_in=raster)
+    r_fgb = SRaster(sFilename_in=raster)
     assert r_fgb.sFilename_mesh.endswith("_mesh.fgb")
 
     # 3. Only GPKG and GeoJSON available -> .gpkg
     monkeypatch.setattr(
-        sraster_mod,
-        "get_available_vector_formats",
+        "uraster.classes.sraster.get_available_vector_formats",
         lambda: {".gpkg": "GPKG", ".geojson": "GeoJSON"},
     )
-    r_gpkg = sraster(sFilename_in=raster)
+    r_gpkg = SRaster(sFilename_in=raster)
     assert r_gpkg.sFilename_mesh.endswith("_mesh.gpkg")
 
     # 4. Only GeoJSON available -> .geojson
     monkeypatch.setattr(
-        sraster_mod,
-        "get_available_vector_formats",
+        "uraster.classes.sraster.get_available_vector_formats",
         lambda: {".geojson": "GeoJSON"},
     )
-    r_geojson = sraster(sFilename_in=raster)
+    r_geojson = SRaster(sFilename_in=raster)
     assert r_geojson.sFilename_mesh.endswith("_mesh.geojson")
 
 
@@ -173,7 +164,7 @@ def test_sraster_raster_driver_metadata(make_raster, tmp_path):
     raster = make_raster(
         tmp_path / "meta_test.tif", values=np.full((2, 2), 1.0), bbox=(0, 0, 1, 1)
     )
-    r = sraster(sFilename_in=raster)
+    r = SRaster(sFilename_in=raster)
     r.read_metadata()
     assert r.sDriver_raster == "GTiff"
     assert r.sDriver == "GTiff"

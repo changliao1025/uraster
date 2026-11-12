@@ -14,7 +14,7 @@ from pyearth.gis.geometry.extract_unique_vertices_and_connectivity import (
 from pyearth.gis.idl_handler import IdlHandler, IdlResult, IdlStrategy
 from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 
 gdal.UseExceptions()
 
@@ -625,7 +625,7 @@ def get_unique_values_from_rasters(
     """
     aUnique_values = set()
     for sFilename in aFilename_raster:
-        pRaster = sraster(sFilename)
+        pRaster = SRaster(sFilename)
         if pRaster is not None:
             unique_values = pRaster.get_unique_values(
                 band_index, dMissing_value, iFlag_verbose_in

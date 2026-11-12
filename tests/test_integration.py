@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pytest
 
-from uraster.classes.uraster import uraster
+from uraster.classes.uraster import URaster
 
 
 def test_end_to_end_continuous(make_raster, make_grid_mesh, read_vector, tmp_path):
@@ -18,7 +18,7 @@ def test_end_to_end_continuous(make_raster, make_grid_mesh, read_vector, tmp_pat
         "aFilename_source_raster": [raster],
         "sFilename_target_mesh": out,
     }
-    pRaster = uraster(aConfig)
+    pRaster = URaster(aConfig)
     assert pRaster.setup() is True
     pRaster.run_remap()
 
@@ -54,7 +54,7 @@ def test_config_remap_method_respected(
         "sFilename_target_mesh": out,
         "iFlag_remap_method": 3,
     }
-    pRaster = uraster(aConfig)
+    pRaster = URaster(aConfig)
     assert pRaster.setup() is True
     pRaster.run_remap()
 

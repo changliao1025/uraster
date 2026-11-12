@@ -12,7 +12,7 @@ print(f"Input data cached at: {sFolder_input}")
 sFolder_output = os.path.join("data", "example_7", "output")
 os.makedirs(sFolder_output, exist_ok=True)
 print(f"Output directory: {sFolder_output}")
-from uraster.classes.uraster import uraster
+from uraster.classes.uraster import URaster
 
 # Convert absolute paths to relative paths
 sFilename_source_mesh = os.path.join(
@@ -43,7 +43,7 @@ def main():
     aConfig["aFilename_source_raster"] = aFilename_source_raster
     aConfig["sFilename_target_mesh"] = sFilename_target_mesh
     # use weighted average remap method
-    pRaster = uraster(aConfig)
+    pRaster = URaster(aConfig)
     pRaster.setup()
     pRaster.report_inputs()
     # visualize source mesh at the Wuhan City area

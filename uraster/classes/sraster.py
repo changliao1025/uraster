@@ -50,7 +50,7 @@ def get_default_mesh_extension() -> str:
     return ".geojson"
 
 
-class sraster:
+class SRaster:
 
     def __init__(self, sFilename_in=None):
         # File path
@@ -371,7 +371,7 @@ class sraster:
         )
 
         # Create and return a new sraster instance for the reprojected file
-        pRaster_wgs84 = sraster(sFilename_in=sFilename_raster_wgs84)
+        pRaster_wgs84 = SRaster(sFilename_in=sFilename_raster_wgs84)
         pRaster_wgs84.read_metadata()
         return pRaster_wgs84
 
@@ -435,7 +435,7 @@ class sraster:
             iFlag_verbose=iFlag_verbose_in,
         )
 
-        pRaster_resampled = sraster(sFilename_in=sFilename_out)
+        pRaster_resampled = SRaster(sFilename_in=sFilename_out)
         pRaster_resampled.read_metadata()
         return pRaster_resampled
 

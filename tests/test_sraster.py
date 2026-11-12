@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 
 
 def test_metadata_matches_fixture(make_raster, tmp_path):
@@ -12,7 +12,7 @@ def test_metadata_matches_fixture(make_raster, tmp_path):
         epsg=4326,
         nodata=-9999.0,
     )
-    r = sraster(sFilename_in=path)
+    r = SRaster(sFilename_in=path)
     r.read_metadata()
     assert r.ncolumn == 4
     assert r.nrow == 4
@@ -31,7 +31,7 @@ def test_convert_to_wgs84_preserves_constant(make_raster, tmp_path):
         epsg=3857,
         nodata=-9999.0,
     )
-    r = sraster(sFilename_in=path)
+    r = SRaster(sFilename_in=path)
     r.read_metadata()
     r2 = r.convert_to_wgs84()
     assert r2.pSpatialRef.GetAuthorityCode(None) == "4326"
@@ -49,7 +49,7 @@ def test_resample_resolution_and_values(make_raster, tmp_path):
         epsg=4326,
         nodata=-9999.0,
     )
-    r = sraster(sFilename_in=path)
+    r = SRaster(sFilename_in=path)
     r.read_metadata()
     assert r.dResolution_x == pytest.approx(1.0)
 

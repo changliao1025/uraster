@@ -6,18 +6,18 @@ This section provides detailed documentation for all classes and functions in th
 Core Classes
 ------------
 
-uraster
+URaster
 ~~~~~~~
 
-.. autoclass:: uraster.classes.uraster.uraster
+.. autoclass:: uraster.classes.uraster.URaster
    :members:
    :undoc-members:
    :show-inheritance:
 
-sraster
+SRaster
 ~~~~~~~
 
-.. autoclass:: uraster.classes.sraster.sraster
+.. autoclass:: uraster.classes.sraster.SRaster
    :members:
    :undoc-members:
    :show-inheritance:

@@ -11,7 +11,7 @@ from osgeo import gdal, ogr, osr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pyearth.gis.spatialref.reproject_coordinates import reproject_coordinates
 
-from uraster import sraster, utility
+from uraster import SRaster, utility
 from uraster.operation.extract import run_remap
 
 # define a shared boundary for the test rasters and mesh

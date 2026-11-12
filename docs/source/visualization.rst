@@ -29,14 +29,14 @@ Visualize the topology of your input mesh to verify geometry and coverage:
 
 .. code-block:: python
 
-   from uraster.classes.uraster import uraster
+   from uraster.classes.uraster import URaster
 
    config = {
        'sFilename_source_mesh': 'path/to/your/mesh.geojson',
        'aFilename_source_raster': ['path/to/your/raster.tif']
    }
 
-   processor = uraster(config)
+   processor = URaster(config)
    processor.setup(iFlag_verbose_in=True)
 
    # Interactive visualization (opens viewer window)

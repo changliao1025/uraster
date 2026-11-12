@@ -9,7 +9,7 @@ gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 
 from uraster import utility
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 from uraster.operation import extract, intersect
 from uraster.utility import setup_logger
 
@@ -19,7 +19,7 @@ pDriver_geojson = ogr.GetDriverByName("GeoJSON")
 pDriver_shp = ogr.GetDriverByName("ESRI Shapefile")
 
 
-class uraster:
+class URaster:
     """
     Unstructured raster processing class for zonal statistics on mesh geometries.
 
@@ -186,7 +186,7 @@ class uraster:
                 logger.debug(
                     f"Creating transient sraster instance for: {os.path.basename(sFilename)}"
                 )
-            pRaster = sraster(sFilename)
+            pRaster = SRaster(sFilename)
             pRaster.read_metadata()
             return pRaster
 
@@ -211,7 +211,7 @@ class uraster:
                     f"(threshold: {threshold_mb:.0f}MB, will_cache: {should_cache})"
                 )
 
-            pRaster = sraster(sFilename)
+            pRaster = SRaster(sFilename)
             pRaster.read_metadata()
 
             if should_cache and not load_data:
@@ -235,7 +235,7 @@ class uraster:
         except Exception as e:
             logger.warning(f"Error in _get_single_sraster for {sFilename}: {e}")
             # Fallback to simple creation
-            pRaster = sraster(sFilename)
+            pRaster = SRaster(sFilename)
             pRaster.read_metadata()
             return pRaster
 

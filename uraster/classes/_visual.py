@@ -32,7 +32,7 @@ from pyearthviz3d.geovista.utility import (
 )
 
 from uraster import utility
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 from uraster.utility import setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])
@@ -114,7 +114,7 @@ def visualize_raster(
 
             try:
                 # geovista approach
-                pRaster = sraster(sFilename)
+                pRaster = SRaster(sFilename)
                 pRaster.read_metadata()
 
                 pRaster.create_raster_mesh()

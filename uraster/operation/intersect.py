@@ -14,7 +14,7 @@ from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinat
 from rtree.index import Index as RTreeindex
 
 gdal.UseExceptions()
-from uraster.classes.sraster import sraster
+from uraster.classes.sraster import SRaster
 from uraster.utility import get_polygon_list, setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])
@@ -120,8 +120,8 @@ def run_remap(
             "run_remap: Reading raster metadata and determining processing bounds..."
         )
 
-    # use sraster class to read the raster info
-    pRaster = sraster(sFilename_in=sFilename_source_raster)
+    # use SRaster class to read the raster info
+    pRaster = SRaster(sFilename_in=sFilename_source_raster)
     pRaster.read_metadata()
     pRaster_data = pRaster.read_data(iBand=1)
     # Initialize pixel resolution variables
