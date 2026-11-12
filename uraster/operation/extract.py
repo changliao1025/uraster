@@ -1326,10 +1326,8 @@ def run_remap(
         dTarget_res = min(
             abs(dPixelWidth), abs(pPixelHeight), dMesh_characteristic_size / 2.0
         )
-        if iFlag_discrete_in:
-            sResample_alg = "near"
-        else:
-            sResample_alg = "near" if sRemap_method == "near" else "bilinear"
+
+        sResample_alg = "near"
 
         if iFlag_verbose_in:
             logger.info(
