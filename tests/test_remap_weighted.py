@@ -124,19 +124,26 @@ def test_sraster_mesh_driver_availability(make_raster, tmp_path):
 
 def test_sraster_mesh_driver_fallback(monkeypatch, make_raster, tmp_path):
     """Test dynamic fallback of mesh vector drivers based on available OGR drivers."""
+    import importlib
+
+    # Resolve the module object directly because uraster.classes.__init__
+    # exports the sraster class as `uraster.classes.sraster`, shadowing the module.
+    sraster_mod = importlib.import_module("uraster.classes.sraster")
+
     raster = make_raster(
         tmp_path / "fallback_test.tif", values=np.full((2, 2), 1.0), bbox=(0, 0, 1, 1)
     )
 
     # 1. Parquet available -> .geoparquet
-    monkeypatch.setattr("uraster.classes.sraster.has_parquet_support", lambda: True)
+    monkeypatch.setattr(sraster_mod, "has_parquet_support", lambda: True)
     r_pq = sraster(sFilename_in=raster)
     assert r_pq.sFilename_mesh.endswith("_mesh.geoparquet")
 
     # 2. No Parquet, but FlatGeobuf available -> .fgb
-    monkeypatch.setattr("uraster.classes.sraster.has_parquet_support", lambda: False)
+    monkeypatch.setattr(sraster_mod, "has_parquet_support", lambda: False)
     monkeypatch.setattr(
-        "uraster.classes.sraster.get_available_vector_formats",
+        sraster_mod,
+        "get_available_vector_formats",
         lambda: {".fgb": "FlatGeobuf", ".gpkg": "GPKG", ".geojson": "GeoJSON"},
     )
     r_fgb = sraster(sFilename_in=raster)
@@ -144,7 +151,8 @@ def test_sraster_mesh_driver_fallback(monkeypatch, make_raster, tmp_path):
 
     # 3. Only GPKG and GeoJSON available -> .gpkg
     monkeypatch.setattr(
-        "uraster.classes.sraster.get_available_vector_formats",
+        sraster_mod,
+        "get_available_vector_formats",
         lambda: {".gpkg": "GPKG", ".geojson": "GeoJSON"},
     )
     r_gpkg = sraster(sFilename_in=raster)
@@ -152,7 +160,8 @@ def test_sraster_mesh_driver_fallback(monkeypatch, make_raster, tmp_path):
 
     # 4. Only GeoJSON available -> .geojson
     monkeypatch.setattr(
-        "uraster.classes.sraster.get_available_vector_formats",
+        sraster_mod,
+        "get_available_vector_formats",
         lambda: {".geojson": "GeoJSON"},
     )
     r_geojson = sraster(sFilename_in=raster)
