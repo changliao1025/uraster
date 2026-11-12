@@ -30,16 +30,17 @@ build:
 
 requirements:
   host:
-    - python >=3.8
+    - python >=3.11,<3.16
     - pip
     - setuptools >=61.0
     - wheel
   run:
-    - python >=3.8
+    - python >=3.11,<3.16
     - numpy >=1.19.0
     - gdal >=3.0.0
-    - pyearth >=0.2.4
+    - pyearth >=0.2.5
     - pyearthviz3d >=0.1.4
+    - pyearthmesh >=0.1.2
     - pooch >=1.6.0
 
 tests:

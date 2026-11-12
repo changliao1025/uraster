@@ -92,9 +92,7 @@ There are several existing tools that provide similar functionality, such as `ra
 * `xESMF` is primarily focused on regridding and interpolation of climate data that are quadrilateral [@Zhuang2025xESMF] and does not support non-quadrilateral meshes, such as the MPAS and TIN meshes.
 *  `pyresample` and `rasterio` provide powerful capabilities for raster resampling, reprojection, and data access[@Hoese2020pyresample; @Gillies2013rasterio]. However, neither package supports unstructured mesh representations. This limitation is partly due to pyresample's dependence on rasterio, which is primarily designed for handling structured raster data and does not have built-in functionality for unstructured mesh formats.
 
-
 In contrast to these tools, `uraster`  is designed explicitly to bridge structured raster datasets and general unstructured meshes. By operating directly on vector-based mesh geometries and supporting both continuous and categorical data with optional mass-conserving aggregation, `uraster`  addresses a gap in existing geospatial software ecosystems for unstructured mesh-based environmental modeling.
-
 
 # Software design
 
@@ -106,8 +104,7 @@ Currently, `uraster` requires all the input datasets to be in the WGS84 coordina
 
 `uraster` was born out of need to support the conversion of structured topographic datasets into unstructured MPAS meshes, which is widely used in Earth system modeling and weather forecasting [@liao2025unstructured]. The package was further extended to support the Hierarchical Equal Area isoLatitude Pixelisation (HEALPix) mesh, which is also commonly used in the DGGS and astronomy communities, to generate kilo-meter scale land surface datasets for the E3SM project.
 
-To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project. It has also been used to generate harmonized global-to-regional gridded methane inventories on rHEALPix [@li_2025_17362125].
-
+To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project. It has also been used to generate harmonized global-to-regional gridded methane inventories on rHEALPix [@li_2025_17362125; @li2026harmonized; @liao2026unstructured].
 
 # AI usage disclosure
 
@@ -125,10 +122,8 @@ The model described in this repository was supported by the following:
 
 * the National Key Research and Development Program of China (2024YFF0809000).
 
-
 A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
 PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
 A portion of this research was performed using `Earth System Numerical Simulation Facility` Research Computing at Institute of Atmospheric Physics, Chinese Academy of Sciences.
-
 
 # References

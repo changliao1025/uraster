@@ -21,7 +21,7 @@ Or install from source for development:
 .. code-block:: bash
 
    # Create and activate a new conda environment with dependencies
-   conda create -n uraster_dev python=3.10 gdal numpy pyearth vtk=9.3.0 -c conda-forge
+   conda create -n uraster_dev python=3.11 gdal numpy pyearth vtk=9.3.0 -c conda-forge
    conda activate uraster_dev
 
    # Clone and install uraster in development mode

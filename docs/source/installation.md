@@ -18,7 +18,7 @@ If you want to install from source for development:
 
 ```bash
 # Create and activate a new conda environment with dependencies
-conda create -n uraster_dev python=3.10 gdal numpy pyearth vtk=9.3.0 -c conda-forge
+conda create -n uraster_dev python=3.11 gdal numpy pyearth vtk=9.3.0 -c conda-forge
 conda activate uraster_dev
 
 # Clone and install uraster in development mode
@@ -30,11 +30,13 @@ pip install -e . --no-deps
 ## Dependencies
 
 ### Core Dependencies
-- Python >= 3.8
+- Python >= 3.11, < 3.16
 - numpy >= 1.19.0
 - GDAL >= 3.0.0
 - osgeo (GDAL Python bindings)
-- pyearth >= 0.2.1
+- pyearth >= 0.2.5
+- pyearthviz3d >= 0.1.4
+- pyearthmesh >= 0.1.2
 
 ### Optional Dependencies
 - geovista (for 3D visualization)
