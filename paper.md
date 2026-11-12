@@ -102,9 +102,9 @@ Currently, `uraster` requires all the input datasets to be in the WGS84 coordina
 
 # Research impact statement
 
-`uraster` was born out of need to support the conversion of structured topographic datasets into unstructured MPAS meshes, which is widely used in Earth system modeling and weather forecasting [@liao2025unstructured]. The package was further extended to support the Hierarchical Equal Area isoLatitude Pixelisation (HEALPix) mesh, which is also commonly used in the DGGS and astronomy communities, to generate kilo-meter scale land surface datasets for the E3SM project.
+`uraster` was born out of need to support the conversion of structured topographic datasets into unstructured MPAS meshes, which is widely used in Earth system modeling and weather forecasting [@liao2026unstructured]. The package was further extended to support the Hierarchical Equal Area isoLatitude Pixelisation (HEALPix) mesh, which is also commonly used in the DGGS and astronomy communities, to generate kilo-meter scale land surface datasets for the E3SM project.
 
-To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project. It has also been used to generate harmonized global-to-regional gridded methane inventories on rHEALPix [@li_2025_17362125; @li2026harmonized; @liao2026unstructured].
+To date, `uraster` has been successfully applied in multiple research projects, including the Energy Exascale Earth System Model (E3SM) project, the Integrated Coastal Modeling (ICoM) project, and the Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project [@liao2026unstructured]. It has also been used to generate harmonized global-to-regional gridded methane inventories on rHEALPix [@li_2025_17362125; @li2026harmonized].
 
 # AI usage disclosure
 
