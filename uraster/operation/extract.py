@@ -1323,7 +1323,9 @@ def run_remap(
     aTemporary_resampled_files = []
 
     if dRaster_resolution > dMesh_characteristic_size:
-        dTarget_res = min(dRaster_resolution, dMesh_characteristic_size / 2.0)
+        dTarget_res = min(
+            abs(dPixelWidth), abs(pPixelHeight), dMesh_characteristic_size / 2.0
+        )
         if iFlag_discrete_in:
             sResample_alg = "near"
         else:
