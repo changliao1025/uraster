@@ -2,7 +2,7 @@
 Classes module for uraster package
 """
 
-from .uraster import uraster
-from .sraster import sraster
+from .sraster import SRaster
+from .uraster import URaster
 
-__all__ = ["uraster", "sraster"]
+__all__ = ["URaster", "SRaster"]

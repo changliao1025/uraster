@@ -1,19 +1,26 @@
 # Extract module for uraster - contains remap workflow functions
 import os
+import platform
+import sys
 import time
-import sys, platform
 import traceback
-from typing import Optional, Tuple, List, Dict, Any, Union
-import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
 from osgeo import gdal, ogr, osr
 
 gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from uraster.utility import get_polygon_list, get_unique_values_from_rasters
-from uraster.classes.sraster import sraster
-from uraster.utility import setup_logger
+from pyearth.toolbox.management.raster.resample import resample_raster
+
+from uraster.classes.sraster import SRaster
+from uraster.utility import (
+    get_polygon_list,
+    get_unique_values_from_rasters,
+    setup_logger,
+)
 
 logger = setup_logger(__name__.split(".")[-1])
 crs = "EPSG:4326"
@@ -44,6 +51,20 @@ def custom_error_handler(err_class, err_num, err_msg):
     else:
         # Let other errors pass through
         print(f"GDAL Error [{err_num}]: {err_msg}")
+
+
+def _set_feature_field(feature, field_name: str, value, is_integer: bool = False):
+    """Set feature field value or set to NULL if value is None or NaN."""
+    if value is None or (isinstance(value, (float, np.floating)) and np.isnan(value)):
+        if hasattr(feature, "SetFieldNull"):
+            feature.SetFieldNull(field_name)
+        else:
+            feature.SetField(field_name, None)
+    else:
+        if is_integer:
+            feature.SetField(field_name, int(value))
+        else:
+            feature.SetField(field_name, float(value))
 
 
 def _determine_optimal_resampling(
@@ -168,7 +189,7 @@ def _process_single_polygon(
     iFlag_discrete_in: bool = False,
     iFlag_verbose_in: bool = False,
     aUnique_value: Optional[List[float]] = None,
-) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
+) -> Tuple[int, Union[int, str], bool, Union[Dict[str, Any], str]]:
     """
     Process a single polygon with GDAL Warp operation and calculate statistics.
 
@@ -327,17 +348,18 @@ def _process_single_polygon(
 
             valid_data = aData_clip_copy[valid_mask]
 
+            stats: Dict[str, Any]
             if len(valid_data) == 0:
                 if iFlag_discrete_in == 1:
                     # Handle case for discrete data with no valid pixels
-                    stats = {"mode": float(np.nan), "count": 0}
+                    stats = {"mode": None, "count": 0}
                 else:
                     # No valid pixels for this feature: not treated as an error
                     stats = {
-                        "mean": float(np.nan),
-                        "min": float(np.nan),
-                        "max": float(np.nan),
-                        "std": float(np.nan),
+                        "mean": None,
+                        "min": None,
+                        "max": None,
+                        "std": None,
                         "count": 0,
                     }
                 if iFlag_verbose_in:
@@ -681,7 +703,7 @@ def _process_multipolygon_idl(
             )
 
         merged_data_arrays = []
-        merged_transforms = []
+        merged_transforms: List[Optional[Any]] = []
         successful_parts = 0
 
         # Process each polygon part separately
@@ -869,7 +891,7 @@ def _process_task(
         bool,
         Optional[List[float]],
     ],
-) -> Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
+) -> Tuple[int, Union[int, str], bool, Union[Dict[str, Any], str]]:
     """
     Module-level worker function for multiprocessing polygon processing.
 
@@ -987,18 +1009,19 @@ def _process_task(
                     f"Multipolygon feature {cellid} has no valid data, but will be included in output"
                 )
                 # Create empty stats for consistency
+                stats: Dict[str, Any]
                 if iFlag_discrete_in:
-                    stats = {"mode": float(np.nan), "count": 0}
+                    stats = {"mode": None, "count": 0}
                     # Add zero percentages for all unique values
                     if aUnique_value is not None:
                         for val in aUnique_value:
                             stats[f"percentage_{val}"] = 0.0
                 else:
                     stats = {
-                        "mean": float(np.nan),
-                        "min": float(np.nan),
-                        "max": float(np.nan),
-                        "std": float(np.nan),
+                        "mean": None,
+                        "min": None,
+                        "max": None,
+                        "std": None,
                         "count": 0,
                     }
                 return feature_idx, cellid, True, stats
@@ -1016,17 +1039,17 @@ def _process_task(
                 if len(valid_data) == 0:
                     if iFlag_discrete_in:
                         # Handle case for discrete data with no valid pixels
-                        stats = {"mode": float(np.nan), "count": 0}
+                        stats = {"mode": None, "count": 0}
                         # Add zero percentages for all unique values
                         if aUnique_value is not None:
                             for val in aUnique_value:
                                 stats[f"percentage_{val}"] = 0.0
                     else:
                         stats = {
-                            "mean": float(np.nan),
-                            "min": float(np.nan),
-                            "max": float(np.nan),
-                            "std": float(np.nan),
+                            "mean": None,
+                            "min": None,
+                            "max": None,
+                            "std": None,
                             "count": 0,
                         }
                     return feature_idx, cellid, True, stats
@@ -1125,7 +1148,7 @@ def run_remap(
     sFilename_target_mesh,
     sFilename_source_mesh,
     aFilename_source_raster,
-    dArea_min,
+    dArea_min=None,
     iFlag_remap_method_in=1,
     iFlag_stat_in=True,
     iFlag_save_clipped_raster_in=0,
@@ -1229,8 +1252,8 @@ def run_remap(
     pPixelHeight = None
     sRaster_source_srs = None
     for sFilename_raster in aFilename_source_raster:
-        # use sraster class to read the raster info
-        pRaster = sraster(sFilename_in=sFilename_raster)
+        # use SRaster class to read the raster info
+        pRaster = SRaster(sFilename_in=sFilename_raster)
         pRaster.read_metadata()
         if dPixelWidth is None or pRaster.dResolution_x < dPixelWidth:
             dPixelWidth = pRaster.dResolution_x
@@ -1243,6 +1266,27 @@ def run_remap(
     if sRaster_source_srs is None:
         sRaster_source_srs = "EPSG:4326"
 
+    if iFlag_verbose_in:
+        logger.info("run_remap: Opening mesh dataset and analyzing features...")
+
+    aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
+        sFilename_source_mesh, iFlag_verbose_in, sField_unique_id
+    )
+    if aPolygon is None or len(aPolygon) == 0:
+        logger.error("Failed to load polygon features from mesh dataset")
+        return
+
+    # If dArea_min was not supplied or is non-positive, compute it from the mesh polygons
+    if dArea_min is None or dArea_min <= 0:
+        valid_areas = [a for a in aArea if a > 0]
+        if valid_areas:
+            dArea_min = float(min(valid_areas))
+        else:
+            dArea_min = 1.0
+
+    pSpatialRef_target = osr.SpatialReference()
+    pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
@@ -1250,8 +1294,8 @@ def run_remap(
     )
 
     # Use automatically determined method if it's more conservative than user setting
-    # Priority: weighted averaging > nearest neighbor
-    if iRemap_method_auto == 3 and iFlag_remap_method != 3:
+    # Priority: weighted averaging > nearest neighbor (except for discrete data)
+    if iRemap_method_auto == 3 and iFlag_remap_method != 3 and not iFlag_discrete_in:
         logger.warning(
             f"Overriding user remap method ({iFlag_remap_method}) with automatic selection (3 - weighted average)"
         )
@@ -1268,14 +1312,68 @@ def run_remap(
         if iFlag_verbose_in:
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
-    if iFlag_verbose_in:
-        logger.info("run_remap: Opening mesh dataset and analyzing features...")
+    # Check if raster resolution is coarser than mesh cell resolution.
+    # When raster pixels are larger than mesh cells, mesh cells fall between source pixel
+    # centers. Resampling the raster to a higher resolution upfront ensures every mesh cell
+    # contains pixel centers and receives valid data.
+    dMesh_characteristic_size = np.sqrt(dArea_min)
+    dRaster_resolution = max(abs(dPixelWidth), abs(pPixelHeight))
 
-    aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
-        sFilename_source_mesh, iFlag_verbose_in, sField_unique_id
-    )
-    pSpatialRef_target = osr.SpatialReference()
-    pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+    aFilename_to_process = list(aFilename_source_raster)
+    aTemporary_resampled_files = []
+
+    if dRaster_resolution > dMesh_characteristic_size:
+        dTarget_res = min(
+            abs(dPixelWidth), abs(pPixelHeight), dMesh_characteristic_size / 2.0
+        )
+
+        sResample_alg = "near"
+
+        if iFlag_verbose_in:
+            logger.info(
+                f"Raster resolution ({dRaster_resolution:.6f}) is coarser than mesh ({dMesh_characteristic_size:.6f}). "
+                f"Resampling source raster to {dTarget_res:.6f} via pyearth.resample_raster before remapping..."
+            )
+
+        aFilename_to_process = []
+        base_dir = os.path.dirname(os.path.abspath(sFilename_target_mesh))
+        if not os.path.exists(base_dir):
+            base_dir = os.path.dirname(os.path.abspath(sFilename_source_mesh))
+
+        for idx_r, sFilename_r in enumerate(aFilename_source_raster):
+            base_name = os.path.splitext(os.path.basename(sFilename_r))[0]
+            sFilename_resampled = os.path.join(
+                base_dir, f"_temp_resampled_{base_name}_{idx_r}_{os.getpid()}.tif"
+            )
+
+            pRaster_src = SRaster(sFilename_in=sFilename_r)
+            pRaster_src.read_metadata()
+            iData_type = (
+                pRaster_src.eType if pRaster_src.eType is not None else gdal.GDT_Float32
+            )
+            dNoData_src = (
+                pRaster_src.dNoData if pRaster_src.dNoData is not None else -9999.0
+            )
+
+            resample_raster(
+                sFilename_r,
+                sFilename_resampled,
+                abs(dTarget_res),
+                abs(dTarget_res),
+                pProjection_target_in=sRaster_source_srs,
+                iData_type=iData_type,
+                sResampleAlg=sResample_alg,
+                dMissing_value_source=dNoData_src,
+                dMissing_value_target=dNoData_src,
+                iFlag_overwrite=True,
+                iFlag_verbose=iFlag_verbose_in,
+            )
+
+            aFilename_to_process.append(sFilename_resampled)
+            aTemporary_resampled_files.append(sFilename_resampled)
+
+        dPixelWidth = dTarget_res
+        pPixelHeight = dTarget_res
 
     # create a polygon feature to save the output
     pDataset_out = pDriver_vector.CreateDataSource(sFilename_target_mesh)
@@ -1295,7 +1393,7 @@ def run_remap(
     if iFlag_discrete_in:
         # we might need to get the unique values first to create the fields
         aUnique_value = get_unique_values_from_rasters(
-            aFilename_source_raster,
+            aFilename_to_process,
             dMissing_value,
             band_index=1,
             iFlag_verbose_in=iFlag_verbose_in,
@@ -1316,7 +1414,7 @@ def run_remap(
         else:
             pass
 
-    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reseverd for future use
+    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reserved for future use
 
     # Pre-compute GDAL options to avoid repeated object creation
     # sRemap_method was already determined above based on resolution comparison
@@ -1329,6 +1427,7 @@ def run_remap(
         "resampleAlg": sRemap_method,
         "srcSRS": sRaster_source_srs,
         "cutlineSRS": pSpatialRef_target.ExportToWkt(),
+        "warpOptions": ["CUTLINE_ALL_TOUCHED=TRUE"],
     }
 
     logger.info("run_remap: Starting main feature processing loop...")
@@ -1424,7 +1523,7 @@ def run_remap(
                 idx,
                 cellid,
                 wkt,
-                aFilename_source_raster,
+                aFilename_to_process,
                 gdal_warp_options_serial,
                 dMissing_value,
                 iFlag_discrete_in,
@@ -1459,13 +1558,9 @@ def run_remap(
                 pFeature_out.SetField(sField_unique_id, int(cellid))
                 pFeature_out.SetField("area", aArea[feature_idx])
                 if iFlag_discrete_in:
-                    # Populate the 'mode' field with the mode (most frequent value)
-                    mode_val = stats.get("mode", -1)
-                    # Handle NaN values - cannot convert NaN to integer
-                    if isinstance(mode_val, float) and np.isnan(mode_val):
-                        pFeature_out.SetField("mode", -1)
-                    else:
-                        pFeature_out.SetField("mode", int(mode_val))
+                    # Populate the 'mode' field with the mode (most frequent value) or NULL if empty
+                    mode_val = stats.get("mode", None)
+                    _set_feature_field(pFeature_out, "mode", mode_val, is_integer=True)
                     pFeature_out.SetField("count", int(stats.get("count", 0)))
                     # Populate the percentage fields for each unique value
                     for val in aUnique_value:
@@ -1473,11 +1568,11 @@ def run_remap(
                         percentage = stats.get(f"percentage_{val}", 0.0)
                         pFeature_out.SetField(field_name, float(percentage))
                 else:
-                    pFeature_out.SetField("mean", float(stats.get("mean", np.nan)))
+                    _set_feature_field(pFeature_out, "mean", stats.get("mean", None))
                     if iFlag_stat_in:
-                        pFeature_out.SetField("min", float(stats.get("min", np.nan)))
-                        pFeature_out.SetField("max", float(stats.get("max", np.nan)))
-                        pFeature_out.SetField("std", float(stats.get("std", np.nan)))
+                        _set_feature_field(pFeature_out, "min", stats.get("min", None))
+                        _set_feature_field(pFeature_out, "max", stats.get("max", None))
+                        _set_feature_field(pFeature_out, "std", stats.get("std", None))
                 pLayer_out.CreateFeature(pFeature_out)
                 pFeature_out = None
                 successful_features += 1
@@ -1515,13 +1610,11 @@ def run_remap(
                     pFeature_out.SetField(sField_unique_id, int(cellid))
                     pFeature_out.SetField("area", aArea[feature_idx])
                     if iFlag_discrete_in:
-                        # Populate the 'mode' field with the mode (most frequent value)
-                        mode_val = stats.get("mode", -1)
-                        # Handle NaN values - cannot convert NaN to integer
-                        if isinstance(mode_val, float) and np.isnan(mode_val):
-                            pFeature_out.SetField("mode", -1)
-                        else:
-                            pFeature_out.SetField("mode", int(mode_val))
+                        # Populate the 'mode' field with the mode (most frequent value) or NULL if empty
+                        mode_val = stats.get("mode", None)
+                        _set_feature_field(
+                            pFeature_out, "mode", mode_val, is_integer=True
+                        )
                         pFeature_out.SetField("count", int(stats.get("count", 0)))
                         # Populate the percentage fields for each unique value
                         for val in aUnique_value:
@@ -1529,16 +1622,18 @@ def run_remap(
                             percentage = stats.get(f"percentage_{val}", 0.0)
                             pFeature_out.SetField(field_name, float(percentage))
                     else:
-                        pFeature_out.SetField("mean", float(stats.get("mean", np.nan)))
+                        _set_feature_field(
+                            pFeature_out, "mean", stats.get("mean", None)
+                        )
                         if iFlag_stat_in:
-                            pFeature_out.SetField(
-                                "min", float(stats.get("min", np.nan))
+                            _set_feature_field(
+                                pFeature_out, "min", stats.get("min", None)
                             )
-                            pFeature_out.SetField(
-                                "max", float(stats.get("max", np.nan))
+                            _set_feature_field(
+                                pFeature_out, "max", stats.get("max", None)
                             )
-                            pFeature_out.SetField(
-                                "std", float(stats.get("std", np.nan))
+                            _set_feature_field(
+                                pFeature_out, "std", stats.get("std", None)
                             )
                     pLayer_out.CreateFeature(pFeature_out)
                     pFeature_out = None
@@ -1590,5 +1685,15 @@ def run_remap(
                 logger.info(f"Failure report saved to: {failure_report_file}")
         except Exception as e:
             logger.error(f"Could not save failure report: {e}")
+
+    # Clean up temporary resampled raster files if any were generated
+    for sTempFile in aTemporary_resampled_files:
+        if os.path.exists(sTempFile):
+            try:
+                os.remove(sTempFile)
+            except OSError as e:
+                logger.warning(
+                    f"Could not remove temporary resampled file {sTempFile}: {e}"
+                )
 
     return

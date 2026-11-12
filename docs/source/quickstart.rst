@@ -21,7 +21,7 @@ Or install from source for development:
 .. code-block:: bash
 
    # Create and activate a new conda environment with dependencies
-   conda create -n uraster_dev python=3.10 gdal numpy pyearth vtk=9.3.0 -c conda-forge
+   conda create -n uraster_dev python=3.11 gdal numpy pyearth vtk=9.3.0 -c conda-forge
    conda activate uraster_dev
 
    # Clone and install uraster in development mode
@@ -38,7 +38,7 @@ Here's a simple example to convert raster data to an unstructured mesh:
 .. code-block:: python
 
    import uraster
-   from uraster.classes.uraster import uraster
+   from uraster.classes.uraster import URaster
 
    # Configuration dictionary
    config = {
@@ -52,7 +52,7 @@ Here's a simple example to convert raster data to an unstructured mesh:
    }
 
    # Create uraster instance
-   processor = uraster(config)
+   processor = URaster(config)
 
    # Setup and validate inputs
    processor.setup(iFlag_verbose_in=True)
@@ -75,7 +75,7 @@ For more control over processing:
        'sField_unique_id': 'cellid'
    }
 
-   processor = uraster(config_advanced)
+   processor = URaster(config_advanced)
    processor.setup(iFlag_verbose_in=True)
 
    # Run with discrete data handling

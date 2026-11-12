@@ -1,5 +1,6 @@
 import os
-from uraster.classes.uraster import uraster
+
+from uraster.classes.uraster import URaster
 
 # Download input data using Pooch (downloads to system cache)
 from uraster.utility import get_example_paths
@@ -36,7 +37,7 @@ def main():
     aFilename_source_raster.append(sFilename_hydrosheds_dem)  # dem from hydros
     aConfig["aFilename_source_raster"] = aFilename_source_raster
     aConfig["sFilename_target_mesh"] = sFilename_target_mesh
-    pRaster = uraster(aConfig)
+    pRaster = URaster(aConfig)
     pRaster.setup()
     pRaster.report_inputs()
     # use delaware area for visualization

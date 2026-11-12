@@ -23,7 +23,7 @@ Every example follows the same workflow:
    - `iFlag_discrete` — set to `1` for categorical rasters (optional).
 3. **Run** the pipeline:
    ```python
-   pRaster = uraster(aConfig)
+   pRaster = URaster(aConfig)
    pRaster.setup()
    pRaster.report_inputs()
    pRaster.visualize_source_mesh(sFilename_out="mesh.jpg", ...)

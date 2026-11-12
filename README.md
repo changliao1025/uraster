@@ -1,9 +1,17 @@
+# URaster: Structured Raster to Unstructured Mesh
+
 [![DOI](https://zenodo.org/badge/1060295281.svg)](https://doi.org/10.5281/zenodo.17613497)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![geovista](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bjlittle/geovista/main/docs/assets/badge/v0.json)](https://geovista.readthedocs.io/)
+
+[![PyPI version](https://badge.fury.io/py/uraster.svg)](https://badge.fury.io/py/uraster)
+[![PyPI Downloads](https://static.pepy.tech/badge/uraster)](https://pepy.tech/project/uraster)
+
+[![Conda Version](https://img.shields.io/conda/v/conda-forge/uraster.svg)](https://anaconda.org/conda-forge/uraster)
+[![Conda Downloads](https://anaconda.org/conda-forge/uraster/badges/downloads.svg)](https://anaconda.org/conda-forge/uraster)
+
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/changliao1025/uraster/main?urlpath=%2Fdoc%2Ftree%2Fnotebooks%2Fexample_1%2Frun_rhpx_example.ipynb)
 
-# URaster: Structured Raster to Unstructured Mesh
+[![geovista](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bjlittle/geovista/main/docs/assets/badge/v0.json)](https://geovista.readthedocs.io/)
 
 ## Overview
 
@@ -76,6 +84,13 @@ conda run -n uraster pytest tests/ -v
 Network-dependent workflow tests are deselected by default; run them explicitly with
 `pytest tests/ -m network`.
 
+## 🔬 Research & Applications
+
+**uraster** has been used in research and related projects:
+
+- Liao, C. et al. [“An Unstructured Voronoi Mesh Framework for Large-Scale Hydrologic and Land Surface Models.”](https://doi.org/10.1029/2025MS005442) *Journal of Advances in Modeling Earth Systems*, 18(11), published November 6, 2026.
+- Li, M.E.; Gao, M.; Liang, S.H.L. [“Harmonized Global-to-Regional Gridded Methane Inventories in a Discrete Global Grid Framework.”](https://doi.org/10.3390/ijgi15100466) *ISPRS International Journal of Geo-Information*, 2026, 15, 466.
+
 ## 🙏 Acknowledgments
 
 The model described in this repository was supported by the following:
@@ -95,4 +110,3 @@ PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-7
 We welcome contributions! Please open an issue or submit a pull request on the GitHub repository.
 
 **uraster** is distributed under the BSD 3-Clause License.
-

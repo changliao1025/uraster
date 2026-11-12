@@ -2,10 +2,11 @@ name: uraster
 channels:
   - conda-forge
 dependencies:
-  - python>=3.10
+  - python>=3.11,<3.15
   - pip
   - numpy
   - gdal>=3.0.0
   - pooch
-  - pyearth>=0.2.3
-  - pyearthviz3d>=0.1.2
+  - pyearth>=0.2.5
+  - pyearthviz3d>=0.1.4
+  - pyearthmesh>=0.1.2

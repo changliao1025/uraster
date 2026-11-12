@@ -1,21 +1,21 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Pool, cpu_count
 import os
 import time
-from typing import Optional, Tuple, List, Dict, Any, Union
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Pool, cpu_count
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 from osgeo import gdal, ogr, osr
+from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
+from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
+from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
 
 # use rtree for spatial indexing
 from rtree.index import Index as RTreeindex
-from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
-from pyearth.gis.location.get_geometry_coordinates import get_geometry_coordinates
-from pyearth.gis.geometry.calculate_polygon_area import calculate_polygon_area
 
 gdal.UseExceptions()
-from uraster.classes.sraster import sraster
-from uraster.utility import get_polygon_list
-from uraster.utility import setup_logger
+from uraster.classes.sraster import SRaster
+from uraster.utility import get_polygon_list, setup_logger
 
 logger = setup_logger(__name__.split(".")[-1])
 crs = "EPSG:4326"
@@ -120,8 +120,8 @@ def run_remap(
             "run_remap: Reading raster metadata and determining processing bounds..."
         )
 
-    # use sraster class to read the raster info
-    pRaster = sraster(sFilename_in=sFilename_source_raster)
+    # use SRaster class to read the raster info
+    pRaster = SRaster(sFilename_in=sFilename_source_raster)
     pRaster.read_metadata()
     pRaster_data = pRaster.read_data(iBand=1)
     # Initialize pixel resolution variables
@@ -132,9 +132,11 @@ def run_remap(
     if iFlag_verbose_in:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
 
-    pDateset_source_mesh = pDriver_vector.Open(sFilename_source_mesh, 0)
-    pLayer_source_mesh = pDateset_source_mesh.GetLayer()
-    sProjection_source_wkt = pLayer_source_mesh.GetSpatialRef().ExportToWkt
+    pDataset_source_mesh = ogr.Open(sFilename_source_mesh, 0)
+    if pDataset_source_mesh is None:
+        logger.error(f"Failed to open source mesh: {sFilename_source_mesh}")
+        return
+    pLayer_source_mesh = pDataset_source_mesh.GetLayer(0)
     # build the rtree index for the polygons for the source mesh
     aPolygon, aArea, sProjection_source_wkt = get_polygon_list(
         sFilename_raster_mesh,
@@ -171,7 +173,7 @@ def run_remap(
     pLayer_out.CreateField(pField)
     # in the future, we will also copy other attributes from the input geojson file
     pLayer_out.CreateField(ogr.FieldDefn("mean", ogr.OFTReal))
-    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reseverd for future use
+    options = ["COMPRESS=DEFLATE", "PREDICTOR=2"]  # reserved for future use
     # Pre-compute GDAL options to avoid repeated object creation
     logger.info("run_remap: Starting main feature processing loop...")
     n_raster_features = len(aPolygon)
@@ -315,62 +317,63 @@ def run_remap(
         # \text{Weighted Mean} = \frac{\sum_{i=1}^{N} (\text{Value}_i \times \text{Area}_i)}{\text{Total Area}}
         # $$
         dWeighted_sum = 0.0
+
+        def _get_valid_pixel_value(idx: int):
+            cell_id, _ = aPolygon[idx]
+            pixel_idx = int(cell_id) - 1
+            nCol = pixel_idx % pRaster.ncolumn
+            nRow = pixel_idx // pRaster.ncolumn
+            # cellid starts from the lower left corner (1-based), convert to upper-left row
+            nRow_converted = pRaster.nrow - 1 - nRow
+            dVal = pRaster_data[nRow_converted, nCol]
+            if np.isnan(dVal) or (
+                dMissing_value is not None
+                and not np.isnan(dMissing_value)
+                and dVal == dMissing_value
+            ):
+                return None
+            return float(dVal)
+
         # first process the within cells
         for idx in aMesh_cell_within:
-            # convert the ids to row and column indices
-            nCol = idx % pRaster.ncolumn
-            nRow = idx // pRaster.ncolumn
-            # the idx start from the lower left corner, so we need to convert it to the upper left corner
-            nRow_converted = pRaster.nrow - 1 - nRow
-            # get the raster value
-            dRaster_value = pRaster_data[nRow_converted, nCol]
-            dArea_mesh_cell = aArea[idx]
-            if dRaster_value == dMissing_value:
+            dRaster_value = _get_valid_pixel_value(idx)
+            if dRaster_value is None:
                 continue
-            else:
-                dWeighted_sum += dRaster_value * dArea_mesh_cell
-                dArea_check += dArea_mesh_cell
+            dArea_mesh_cell = float(aArea[idx])
+            dWeighted_sum += dRaster_value * dArea_mesh_cell
+            dArea_check += dArea_mesh_cell
 
         # then process the intersected cells
         for k, idx in enumerate(aMesh_cell_intersect):
-            # convert the ids to row and column indices
-            nCol = idx % pRaster.ncolumn
-            nRow = idx // pRaster.ncolumn
-            # the idx start from the lower left corner, so we need to convert it to the upper left corner
-            nRow_converted = pRaster.nrow - 1 - nRow
-            # get the raster value
-            dRaster_value = pRaster_data[nRow_converted, nCol]
-            dArea_mesh_cell = aArea[idx]
-            dArea_ratio = aArea_ratio[k]
-            dArea_intersected = dArea_mesh_cell * dArea_ratio
-            if dRaster_value == dMissing_value:
+            dRaster_value = _get_valid_pixel_value(idx)
+            if dRaster_value is None:
                 continue
-            else:
-                dWeighted_sum += dRaster_value * dArea_intersected
-                dArea_check += dArea_intersected
+            dArea_mesh_cell = float(aArea[idx])
+            dArea_intersected = dArea_mesh_cell * float(aArea_ratio[k])
+            dWeighted_sum += dRaster_value * dArea_intersected
+            dArea_check += dArea_intersected
 
-        if dArea_check == 0:
-            dWeighted_mean = None
+        if dArea_check > 0:
+            dWeighted_mean = dWeighted_sum / dArea_check
+            if dArea_total > 0 and abs(dArea_check - dArea_total) / dArea_total > 0.01:
+                if iFlag_verbose_in:
+                    logger.warning(
+                        f"run_remap: Warning - Partial coverage for feature ID {cellid}: "
+                        f"valid area {dArea_check:.4f} vs total area {dArea_total:.4f}"
+                    )
         else:
-            # the difference between dArea_check and dArea_total should be small
-            if abs(dArea_check - dArea_total) / dArea_total > 0.01:
-                logger.warning(
-                    f"run_remap: Warning - Area check failed for feature ID {cellid}..."
-                )
-                if dArea_check == 0:
-                    dWeighted_mean = None
-                else:
-                    dWeighted_mean = dWeighted_sum / dArea_check
-            else:
-                dWeighted_mean = dWeighted_sum / dArea_total
+            dWeighted_mean = None
 
         # set the area field
-        pFeature_out.SetField("area", dArea_total_source)
+        pFeature_out.SetField("area", float(dArea_total_source))
         # set the mean field
-        if dWeighted_mean is not None:
+        if dWeighted_mean is not None and not np.isnan(dWeighted_mean):
             pFeature_out.SetField("mean", float(dWeighted_mean))
         else:
-            pFeature_out.SetField("mean", None)
+            if hasattr(pFeature_out, "SetFieldNull"):
+                pFeature_out.SetFieldNull("mean")
+            else:
+                pFeature_out.SetField("mean", None)
         # create the feature in the output layer
         pLayer_out.CreateFeature(pFeature_out)
         pFeature_out = None  # destroy the feature to free memory
@@ -378,6 +381,7 @@ def run_remap(
     # flush and close output
     pDataset_out.FlushCache()
     pDataset_out = None
+    pDataset_source_mesh = None
 
     # Clean up spatial reference objects to prevent memory leaks
     pSpatialRef_target = None

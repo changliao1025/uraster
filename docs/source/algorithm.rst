@@ -14,5 +14,3 @@ The package conduct this operation using several steps:
     - Check the source mesh, and build the mesh topology, which will be used for the visualization later.
 3. Sample the raster dataset using the source mesh. The specific sampling method can be configured by the user. The default method is nearest interpolation.
 4. Write the sampled data into the target mesh file. The output format can be configured by the user. The default format is GeoParquet.
-
-

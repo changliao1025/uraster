@@ -39,4 +39,3 @@ uraster is developed and maintained by:
 **Acknowledgments**
 
 We thank all contributors who have helped improve uraster through code contributions, bug reports, feature requests, and feedback.
-
