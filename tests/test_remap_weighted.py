@@ -168,3 +168,49 @@ def test_sraster_raster_driver_metadata(make_raster, tmp_path):
     r.read_metadata()
     assert r.sDriver_raster == "GTiff"
     assert r.sDriver == "GTiff"
+
+
+def test_weighted_reordered_raster_mesh_uses_cellid(
+    make_raster, make_grid_mesh, read_vector, tmp_path
+):
+    """Weighted remap must index pixels by stable cellid even if mesh features are reordered."""
+    from osgeo import ogr
+
+    # Upper row (y in [1, 2]): [10, 20]; lower row (y in [0, 1]): [30, 40]
+    values = np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32)
+    raster = make_raster(tmp_path / "nonconst.tif", values=values, bbox=(0, 0, 2, 2))
+    raster_mesh = _raster_mesh(raster)
+
+    # Reverse feature order into a GeoJSON copy to simulate FlatGeobuf spatial reordering
+    reordered_mesh = str(tmp_path / "reordered_raster_mesh.geojson")
+    src_ds = ogr.Open(raster_mesh, 0)
+    src_layer = src_ds.GetLayer(0)
+    drv = ogr.GetDriverByName("GeoJSON")
+    dst_ds = drv.CreateDataSource(reordered_mesh)
+    dst_layer = dst_ds.CreateLayer(
+        "mesh", src_layer.GetSpatialRef(), src_layer.GetGeomType()
+    )
+    src_defn = src_layer.GetLayerDefn()
+    for i in range(src_defn.GetFieldCount()):
+        dst_layer.CreateField(src_defn.GetFieldDefn(i))
+    features = [feat.Clone() for feat in src_layer]
+    for feat in reversed(features):
+        dst_layer.CreateFeature(feat)
+    dst_ds = None
+    src_ds = None
+
+    # 2x2 target mesh matching the 4 pixels:
+    # row 0 (lower, y in [0, 1]) -> cellid 1 (x=[0,1], val=30), cellid 2 (x=[1,2], val=40)
+    # row 1 (upper, y in [1, 2]) -> cellid 3 (x=[0,1], val=10), cellid 4 (x=[1,2], val=20)
+    target_mesh = make_grid_mesh(
+        tmp_path / "target.geojson", bbox=(0, 0, 2, 2), nrows=2, ncols=2
+    )
+    out = str(tmp_path / "out_reordered.geojson")
+    intersect.run_remap(
+        out, target_mesh, raster, reordered_mesh, iFlag_verbose_in=False
+    )
+    rows = read_vector(out)
+    assert rows[1]["mean"] == pytest.approx(30.0, rel=1e-3)
+    assert rows[2]["mean"] == pytest.approx(40.0, rel=1e-3)
+    assert rows[3]["mean"] == pytest.approx(10.0, rel=1e-3)
+    assert rows[4]["mean"] == pytest.approx(20.0, rel=1e-3)

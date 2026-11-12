@@ -317,47 +317,41 @@ def run_remap(
         # \text{Weighted Mean} = \frac{\sum_{i=1}^{N} (\text{Value}_i \times \text{Area}_i)}{\text{Total Area}}
         # $$
         dWeighted_sum = 0.0
-        # first process the within cells
-        for idx in aMesh_cell_within:
-            # convert the ids to row and column indices
-            nCol = idx % pRaster.ncolumn
-            nRow = idx // pRaster.ncolumn
-            # the idx start from the lower left corner, so we need to convert it to the upper left corner
+
+        def _get_valid_pixel_value(idx: int):
+            cell_id, _ = aPolygon[idx]
+            pixel_idx = int(cell_id) - 1
+            nCol = pixel_idx % pRaster.ncolumn
+            nRow = pixel_idx // pRaster.ncolumn
+            # cellid starts from the lower left corner (1-based), convert to upper-left row
             nRow_converted = pRaster.nrow - 1 - nRow
-            # get the raster value
-            dRaster_value = pRaster_data[nRow_converted, nCol]
-            dArea_mesh_cell = aArea[idx]
-            if np.isnan(dRaster_value) or (
+            dVal = pRaster_data[nRow_converted, nCol]
+            if np.isnan(dVal) or (
                 dMissing_value is not None
                 and not np.isnan(dMissing_value)
-                and dRaster_value == dMissing_value
+                and dVal == dMissing_value
             ):
+                return None
+            return float(dVal)
+
+        # first process the within cells
+        for idx in aMesh_cell_within:
+            dRaster_value = _get_valid_pixel_value(idx)
+            if dRaster_value is None:
                 continue
-            else:
-                dWeighted_sum += float(dRaster_value) * float(dArea_mesh_cell)
-                dArea_check += float(dArea_mesh_cell)
+            dArea_mesh_cell = float(aArea[idx])
+            dWeighted_sum += dRaster_value * dArea_mesh_cell
+            dArea_check += dArea_mesh_cell
 
         # then process the intersected cells
         for k, idx in enumerate(aMesh_cell_intersect):
-            # convert the ids to row and column indices
-            nCol = idx % pRaster.ncolumn
-            nRow = idx // pRaster.ncolumn
-            # the idx start from the lower left corner, so we need to convert it to the upper left corner
-            nRow_converted = pRaster.nrow - 1 - nRow
-            # get the raster value
-            dRaster_value = pRaster_data[nRow_converted, nCol]
-            dArea_mesh_cell = aArea[idx]
-            dArea_ratio = aArea_ratio[k]
-            dArea_intersected = dArea_mesh_cell * dArea_ratio
-            if np.isnan(dRaster_value) or (
-                dMissing_value is not None
-                and not np.isnan(dMissing_value)
-                and dRaster_value == dMissing_value
-            ):
+            dRaster_value = _get_valid_pixel_value(idx)
+            if dRaster_value is None:
                 continue
-            else:
-                dWeighted_sum += float(dRaster_value) * float(dArea_intersected)
-                dArea_check += float(dArea_intersected)
+            dArea_mesh_cell = float(aArea[idx])
+            dArea_intersected = dArea_mesh_cell * float(aArea_ratio[k])
+            dWeighted_sum += dRaster_value * dArea_intersected
+            dArea_check += dArea_intersected
 
         if dArea_check > 0:
             dWeighted_mean = dWeighted_sum / dArea_check
