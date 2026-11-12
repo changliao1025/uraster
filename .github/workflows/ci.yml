@@ -45,9 +45,9 @@ jobs:
             gdal
             libgdal-arrow-parquet
             pooch
-            "pyearth>=0.2.5"
-            "pyearthviz3d>=0.1.4"
-            "pyearthmesh>=0.1.2"
+            pyearth>=0.2.5
+            pyearthviz3d>=0.1.4
+            pyearthmesh>=0.1.2
             pytest
             pytest-cov
           cache-environment: true
