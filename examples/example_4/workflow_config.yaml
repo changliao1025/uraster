@@ -1,0 +1,36 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 4: Higher-resolution methane emissions on rHEALPix DGGS mesh (resolution 6)
+
+workflow:
+  example_number: 4
+  name: "china_ch4_rhealpix_res6"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "rhealpix_China_res6.geojson"
+  cellid_field: "cellid"
+  mesh_type: "rhealpix"
+
+rasters:
+  source_rasters:
+    - "China_CH4_emission_2020.tif"
+  is_discrete: false
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_4/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: null

@@ -1,0 +1,39 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 7: Categorical dynamic world land cover tiles on ISEA3H mesh
+
+workflow:
+  example_number: 7
+  name: "dynamic_world_isea3h_res12"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "isea3h_bbox_res12.geojson"
+  cellid_field: "cellid"
+  mesh_type: "isea3h"
+
+rasters:
+  source_rasters:
+    - "11T_20240101-20241231.tif"
+    - "11U_20240101-20241231.tif"
+    - "12T_20240101-20241231.tif"
+    - "12U_20240101-20241231.tif"
+  is_discrete: true                  # Categorical landcover tiles
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_7/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: null

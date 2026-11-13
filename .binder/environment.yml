@@ -2,7 +2,7 @@ name: uraster_notebook
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11,<3.15
+  - python=3.11
   - numpy
   - gdal>=3.0.0
   - pyearth>=0.2.5
@@ -10,6 +10,7 @@ dependencies:
   - pyearthmesh>=0.1.2
   - uraster>=0.1.9
   - pooch
+  - pyyaml
   - ipykernel
   - jupyter-server-proxy
   - tqdm

@@ -921,8 +921,6 @@ def rebuild_mesh_topology(
             return None
         # Calculate centroids efficiently using vectorized operations
         try:
-            cell_lons_1d = []
-            cell_lats_1d = []
             # Pre-allocate arrays for better performance
             cell_lons_1d = np.zeros(len(lons_list), dtype=np.float64)
             cell_lats_1d = np.zeros(len(lats_list), dtype=np.float64)
@@ -1010,9 +1008,9 @@ def rebuild_mesh_topology(
                 )
                 missing_count = len(cell_lons_1d) - len(aCellID)
                 aCellID.extend(range(len(aCellID), len(aCellID) + missing_count))
-        aCellID = np.array(aCellID)
+        aCellID_arr = np.array(aCellID)
         if iFlag_verbose_in:
-            logger.info(f"Final aCellID array length: {len(aCellID)}")
+            logger.info(f"Final aCellID array length: {len(aCellID_arr)}")
         # Calculate and store area statistics
         if aArea_list:
             area_array = np.array(aArea_list)
@@ -1092,7 +1090,7 @@ def rebuild_mesh_topology(
             "connectivity": aConnectivity,
             "cell_centroids_longitude": aCenter_longititude,
             "cell_centroids_latitude": aCenter_latitude,
-            "cell_ids": aCellID,
+            "cell_ids": aCellID_arr,
             "area_min": dArea_min,
             "area_max": dArea_max,
             "area_mean": dArea_mean,

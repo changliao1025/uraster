@@ -1,0 +1,36 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 8: HydroSHEDS global elevation on Triangulated Irregular Network (TIN)
+
+workflow:
+  example_number: 8
+  name: "elevation_tin"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "tin.geojson"
+  cellid_field: "cellid"
+  mesh_type: "tin"
+
+rasters:
+  source_rasters:
+    - "hyd_glo_dem_15s.tif"
+  is_discrete: false
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_8/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: [-75.0, 39.0]   # Delaware area focus

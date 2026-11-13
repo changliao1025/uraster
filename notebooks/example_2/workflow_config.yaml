@@ -1,0 +1,36 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 2: Discrete global settlement footprint on ISEA3H aperture 3 hexagon mesh
+
+workflow:
+  example_number: 2
+  name: "settlement_isea3h"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "isea3h_bbox_res15.geojson"
+  cellid_field: "cellid"
+  mesh_type: "isea3h"
+
+rasters:
+  source_rasters:
+    - "WSF2015_v2_-80_42.tif"
+  is_discrete: true                  # Categorical/discrete settlement raster
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_2/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.gif"
+  focus_coordinates: null

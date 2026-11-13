@@ -1,0 +1,44 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 6: High-latitude Arctic elevation tiles on ISEA7H aperture 7 mesh
+
+workflow:
+  example_number: 6
+  name: "arctic_dem_isea7h_res8"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "isea7h_bbox_res8.geojson"
+  cellid_field: "cellid"
+  mesh_type: "isea7h"
+
+rasters:
+  source_rasters:
+    - "ArcticDEM_32_34_1_1_2m_v4.1_dem.tif"
+    - "ArcticDEM_32_34_1_2_2m_v4.1_dem.tif"
+    - "ArcticDEM_32_35_1_1_2m_v4.1_dem.tif"
+    - "N79W078_FABDEM_V1-0.tif"
+    - "N79W079_FABDEM_V1-0.tif"
+    - "N79W080_FABDEM_V1-0.tif"
+    - "N79W081_FABDEM_V1-0.tif"
+    - "N79W082_FABDEM_V1-0.tif"
+    - "N79W083_FABDEM_V1-0.tif"
+  is_discrete: false
+
+remap:
+  method: "nearest"
+  global: true
+  polar: true                        # Polar region handling
+
+outputs:
+  output_workspace: "../../data/example_6/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: null
