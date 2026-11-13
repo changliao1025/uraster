@@ -8,7 +8,7 @@ dependencies:
   - pyearth>=0.2.5
   - pyearthviz3d>=0.1.4
   - pyearthmesh>=0.1.2
-  - uraster
+  - uraster>=0.1.9
   - pooch
   - ipykernel
   - jupyter-server-proxy
