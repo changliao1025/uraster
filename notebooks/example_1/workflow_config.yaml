@@ -1,0 +1,40 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 1: Global CH4 emissions remapping onto an rHEALPix DGGS mesh
+
+workflow:
+  name: "global_ch4_rhealpix"        # Workflow case identifier
+  example_number: 1                  # Automatically retrieves input data via Pooch
+  date: null                         # Defaults to today (YYYYMMDD) if null
+  debug: false                       # Diagnostic logging
+
+mesh:
+  # Filename from the example 1 dataset
+  source_mesh: "rhealpix_global_res3.geojson"
+  cellid_field: "cellid"             # Unique ID field name in mesh
+  mesh_type: "rhealpix"              # Mesh family hint
+
+rasters:
+  # Filename from the example 1 dataset
+  source_rasters:
+    - "EDGAR_CH4_emission_global_2015.tiff"
+  is_discrete: false                 # false = continuous (e.g. emission), true = categorical
+
+remap:
+  # Remap method: 'nearest' (1), 'bilinear' (2), or 'weighted' (3, mass-conserving)
+  method: "nearest"
+  global: true                       # Global domain coverage
+  polar: false                       # Polar mesh handling
+  resolution_ratio_threshold: 3.0    # Ratio to trigger weighted averaging
+
+outputs:
+  output_workspace: "../../data/example_1/output"   # Output directory relative to this YAML
+  target_mesh: "uraster.geojson"                    # Filename for remapped vector output
+
+visualization:
+  enabled: true                      # Set true to render visualizations
+  source_mesh_image: "mesh.jpg"      # Input mesh visualization image
+  target_mesh_image: "uraster.png"   # Remapped mesh visualization image
+  animation: "uraster.gif"           # 3D globe rotation animation
+  focus_coordinates: null            # Optional [lon, lat] focus center

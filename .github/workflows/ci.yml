@@ -45,6 +45,7 @@ jobs:
             gdal
             libgdal-arrow-parquet
             pooch
+            pyyaml
             pyearth>=0.2.5
             pyearthviz3d>=0.1.4
             pyearthmesh>=0.1.2

@@ -1,0 +1,36 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 10: Weighted area (mass-conserving) methane remap on rHEALPix DGGS mesh
+
+workflow:
+  example_number: 10
+  name: "china_ch4_weighted_rhealpix"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "rhealpix_China_res3.geojson"
+  cellid_field: "cellid"
+  mesh_type: "rhealpix"
+
+rasters:
+  source_rasters:
+    - "China_CH4_emission_2020.tif"
+  is_discrete: false
+
+remap:
+  method: "weighted"                 # Mass-conserving area-weighted remap
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_10/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: null

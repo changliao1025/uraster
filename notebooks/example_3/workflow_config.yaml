@@ -1,0 +1,36 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 3: Regional methane emissions on rHEALPix DGGS mesh (resolution 3)
+
+workflow:
+  example_number: 3
+  name: "china_ch4_rhealpix_res3"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "rhealpix_China_res3.geojson"
+  cellid_field: "cellid"
+  mesh_type: "rhealpix"
+
+rasters:
+  source_rasters:
+    - "China_CH4_emission_2020.tif"
+  is_discrete: false
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_3/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: null

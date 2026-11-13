@@ -1,5 +1,6 @@
 import os
 
+from uraster import compile_remap_workflow, load_workflow_config
 from uraster.classes.uraster import URaster
 
 # Download input data using Pooch (downloads to system cache)
@@ -30,16 +31,12 @@ sFilename_variable_animation = os.path.join(sFolder_output, "uraster.gif")
 
 
 def main():
-    aConfig = dict()
-    aConfig["sFilename_source_mesh"] = (
-        sFilename_source_mesh  # use the L10-100 test mesh
-    )
-    aFilename_source_raster = []
+    # Load Tier 1 configuration from workflow_config.yaml
+    sFilename_yaml = os.path.join(os.path.dirname(__file__), "workflow_config.yaml")
+    config = load_workflow_config(sFilename_yaml)
 
-    aFilename_source_raster.append(sFilename_raster)  # dem from hydros
-    aConfig["aFilename_source_raster"] = aFilename_source_raster
-    aConfig["sFilename_target_mesh"] = sFilename_target_mesh
-    aConfig["iFlag_discrete"] = 1
+    # Compile Tier 1 specification into backend execution parameters
+    aConfig = compile_remap_workflow(config)
     pRaster = URaster(aConfig)
 
     pRaster.setup()

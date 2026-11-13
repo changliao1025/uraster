@@ -1,0 +1,36 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 9: HydroSHEDS global elevation on MPAS Voronoi mesh
+
+workflow:
+  example_number: 9
+  name: "elevation_mpas"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "mpas.geojson"
+  cellid_field: "cellid"
+  mesh_type: "mpas"
+
+rasters:
+  source_rasters:
+    - "hyd_glo_dem_15s.tif"
+  is_discrete: false
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_9/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.jpg"
+  animation: "uraster.gif"
+  focus_coordinates: null

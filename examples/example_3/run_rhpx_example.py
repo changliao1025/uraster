@@ -1,5 +1,6 @@
 import os
 
+from uraster import compile_remap_workflow, load_workflow_config
 from uraster.classes.uraster import URaster
 
 # Download input data using Pooch (downloads to system cache)
@@ -31,18 +32,14 @@ sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
 
 
 def main():
-    aConfig = dict()
-    aConfig["sFilename_source_mesh"] = (
-        sFilename_source_mesh  # use the L10-100 test mesh
-    )
-    aFilename_source_raster = []
-    sFilename_source_raster_resample = sFilename_raster.replace(".tif", "_resample.tif")
-    # resample_raster(sFilename_raster, sFilename_source_raster_resample, 1.0, 1.0, sResampleAlg='average', dMissing_value_source =0)
-    aFilename_source_raster.append(sFilename_raster)  #
-    aConfig["aFilename_source_raster"] = aFilename_source_raster
-    aConfig["sFilename_target_mesh"] = sFilename_target_mesh
-    # use weighted average remap method
+    # Load Tier 1 configuration from workflow_config.yaml
+    sFilename_yaml = os.path.join(os.path.dirname(__file__), "workflow_config.yaml")
+    config = load_workflow_config(sFilename_yaml)
+
+    # Compile Tier 1 specification into backend execution parameters
+    aConfig = compile_remap_workflow(config)
     pRaster = URaster(aConfig)
+
     pRaster.setup()
     pRaster.report_inputs()
     # visualize source mesh at the Wuhan City area

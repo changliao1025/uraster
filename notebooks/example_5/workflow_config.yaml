@@ -1,0 +1,39 @@
+# ==============================================================================
+# URaster Workflow Specification
+# ==============================================================================
+# Example 5: Multi-tile Hansen treecover remapping on ISEA7H aperture 7 mesh
+
+workflow:
+  example_number: 5
+  name: "treecover_isea7h_res5"
+  date: null
+  debug: false
+
+mesh:
+  source_mesh: "isea7h_bbox_res5.geojson"
+  cellid_field: "cellid"
+  mesh_type: "isea7h"
+
+rasters:
+  source_rasters:
+    - "Hansen_GFC-2019-v1.7_treecover2000_40N_090W.tif"
+    - "Hansen_GFC-2019-v1.7_treecover2000_50N_090W.tif"
+    - "Hansen_GFC-2019-v1.7_treecover2000_40N_100W.tif"
+    - "Hansen_GFC-2019-v1.7_treecover2000_50N_100W.tif"
+  is_discrete: false
+
+remap:
+  method: "nearest"
+  global: true
+  polar: false
+
+outputs:
+  output_workspace: "../../data/example_5/output"
+  target_mesh: "uraster.geojson"
+
+visualization:
+  enabled: true
+  source_mesh_image: "mesh.jpg"
+  target_mesh_image: "uraster.png"
+  animation: "uraster.mp4"
+  focus_coordinates: null

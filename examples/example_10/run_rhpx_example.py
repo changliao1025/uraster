@@ -3,6 +3,7 @@ import os
 from osgeo import gdal, osr
 from pyearth.toolbox.management.raster.resample import resample_raster
 
+from uraster import compile_remap_workflow, load_workflow_config
 from uraster.classes.uraster import URaster
 
 # Download input data using Pooch (downloads to system cache)
@@ -34,11 +35,6 @@ sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
 
 
 def main():
-    aConfig = dict()
-    aConfig["sFilename_source_mesh"] = (
-        sFilename_source_mesh  # use the L10-100 test mesh
-    )
-    aFilename_source_raster = []
     sFilename_source_raster_resample = sFilename_raster.replace(".tif", "_resample.tif")
     default_srs = osr.SpatialReference()
     default_srs.ImportFromEPSG(4326)
@@ -52,10 +48,15 @@ def main():
         dMissing_value_source=0,
         pProjection_target_in=pProjection_target,
     )
-    aFilename_source_raster.append(sFilename_source_raster_resample)  #
-    aConfig["aFilename_source_raster"] = aFilename_source_raster
-    aConfig["sFilename_target_mesh"] = sFilename_target_mesh
-    # use weighted average remap method
+
+    # Load Tier 1 configuration from workflow_config.yaml
+    sFilename_yaml = os.path.join(os.path.dirname(__file__), "workflow_config.yaml")
+    config = load_workflow_config(sFilename_yaml)
+    # Update with resampled raster path
+    config["rasters"]["source_rasters"] = [sFilename_source_raster_resample]
+
+    # Compile Tier 1 specification into backend execution parameters
+    aConfig = compile_remap_workflow(config)
     pRaster = URaster(aConfig)
     pRaster.setup()
     pRaster.report_inputs()

@@ -10,27 +10,49 @@ directory.
 
 ## How the examples work
 
-Every example follows the same workflow:
+Each example is driven by a clean, declarative **Tier 1 YAML specification** ([`workflow_config.yaml`](example_1/workflow_config.yaml)) that configures:
+- `workflow` — case identifier and optional `example_number` (downloads inputs automatically via Pooch).
+- `mesh` — source unstructured mesh vector file and unique ID field (`cellid`).
+- `rasters` — one or more source raster files and whether they are continuous or discrete (`is_discrete`).
+- `remap` — remapping method (`nearest`, `bilinear`, or `weighted`), domain flags (`global`, `polar`), and resolution ratio threshold.
+- `outputs` — target output directory (`output_workspace`) and remapped mesh filename (`target_mesh`).
+- `visualization` — optional static images (`source_mesh_image`, `target_mesh_image`), animations (`animation`), and focus coordinates.
 
-1. **Download inputs** with [Pooch](https://www.fatiando.org/pooch/) via
-   `get_example_paths(example_number=N)`. Input meshes and rasters are hosted in the
-   companion data repository, [`uraster_data`](https://github.com/changliao1025/uraster_data),
-   and cached locally on first run.
-2. **Configure** the run through an `aConfig` dictionary:
-   - `sFilename_source_mesh` — the input unstructured mesh (vector).
-   - `aFilename_source_raster` — a list of one or more source raster tiles.
-   - `sFilename_target_mesh` — the output mesh path.
-   - `iFlag_discrete` — set to `1` for categorical rasters (optional).
-3. **Run** the pipeline:
-   ```python
-   pRaster = URaster(aConfig)
-   pRaster.setup()
-   pRaster.report_inputs()
-   pRaster.visualize_source_mesh(sFilename_out="mesh.jpg", ...)
-   pRaster.run_remap(...)
-   pRaster.visualize_target_mesh(sFilename_out="uraster.png", ...)
-   pRaster.cleanup()
-   ```
+### Running an example script
+
+Every example Python script loads its configuration from `workflow_config.yaml`, compiles it, and exposes the individual steps:
+
+```python
+import os
+from uraster import compile_remap_workflow, load_workflow_config
+from uraster.classes.uraster import URaster
+
+def main():
+    # Load Tier 1 configuration from workflow_config.yaml
+    sFilename_yaml = os.path.join(os.path.dirname(__file__), "workflow_config.yaml")
+    config = load_workflow_config(sFilename_yaml)
+
+    # Compile Tier 1 specification into backend execution parameters
+    aConfig = compile_remap_workflow(config)
+    pRaster = URaster(aConfig)
+
+    # Step 1: Setup and validate inputs
+    pRaster.setup()
+    pRaster.report_inputs()
+
+    # Step 2: Visualize input mesh
+    pRaster.visualize_source_mesh(...)
+
+    # Step 3: Run remap operation
+    pRaster.run_remap()
+    pRaster.report_outputs()
+
+    # Step 4: Visualize output target mesh & animation
+    pRaster.visualize_target_mesh(...)
+
+    # Step 5: Clean up temporary files
+    pRaster.cleanup()
+```
 
 Outputs are written to `data/example_N/output/` relative to the working directory
 (`mesh.jpg`, `uraster.geojson`, `uraster.png`, and an `.mp4`/`.gif` animation).
