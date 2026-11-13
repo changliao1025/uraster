@@ -46,7 +46,9 @@ def test_compile_remap_workflow():
     assert compiled["sFilename_source_mesh"] == "/path/to/mesh.geojson"
     assert compiled["sField_unique_id"] == "fid"
     assert compiled["aFilename_source_raster"] == ["/path/to/r.tif"]
-    assert compiled["sFilename_target_mesh"] == "/path/to/out/remapped.geojson"
+    assert compiled["sFilename_target_mesh"] == os.path.join(
+        "/path/to/out", "remapped.geojson"
+    )
     assert compiled["iFlag_remap_method"] == 3
     assert compiled["iFlag_discrete"] == 1
     assert compiled["iFlag_global"] == 1
