@@ -324,12 +324,21 @@ def _validate_multipolygon_geometry(
 
             # Skip GDAL geometry validation as it cannot handle IDL-crossing cells
 
-            # Validate coordinates of this part
-            aCoord_part = get_geometry_coordinates(pPolygon_part)
+            # Validate coordinates of this part safely
+            try:
+                aCoord_part = get_geometry_coordinates(pPolygon_part)
+            except Exception as e:
+                if iFlag_verbose_in:
+                    logger.debug(
+                        f"Feature {feature_id}: Skipping degenerate multipolygon part {iPart}: {e}"
+                    )
+                continue
+
             if aCoord_part is None or len(aCoord_part) < 3:
-                logger.warning(
-                    f"Feature {feature_id}: Multipolygon part {iPart} has insufficient coordinates"
-                )
+                if iFlag_verbose_in:
+                    logger.warning(
+                        f"Feature {feature_id}: Multipolygon part {iPart} has insufficient coordinates"
+                    )
                 continue
 
             # Check coordinate bounds for this part
@@ -530,9 +539,10 @@ def get_polygon_list(
                                         aCoords_part[:, 0], aCoords_part[:, 1]
                                     )
                             except Exception as part_error:
-                                logger.warning(
-                                    f"Error processing multipolygon part {iPart} of feature {i}: {part_error}"
-                                )
+                                if iFlag_verbose_in:
+                                    logger.debug(
+                                        f"Error processing multipolygon part {iPart} of feature {i}: {part_error}"
+                                    )
                                 continue
 
                         wkt = pPolygon.ExportToWkt()
@@ -791,9 +801,10 @@ def rebuild_mesh_topology(
                         try:
                             aCoord_part = get_geometry_coordinates(pPolygon_part)
                         except Exception as e:
-                            logger.warning(
-                                f"Skipping degenerate part {iPart} in multipolygon feature {iFeature_index}: {e}"
-                            )
+                            if iFlag_verbose_in:
+                                logger.debug(
+                                    f"Skipping degenerate part {iPart} in multipolygon feature {iFeature_index}: {e}"
+                                )
                             continue
 
                         if aCoord_part is not None and len(aCoord_part) >= 3:
