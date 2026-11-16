@@ -14,6 +14,7 @@ dependencies:
   - jupyter-server-proxy
   - tqdm
   - ipywidgets
+  - anywidget
   - trame
   - trame-vtk
   - trame-vuetify
