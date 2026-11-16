@@ -6,6 +6,21 @@ __version__ = "0.1.9"
 __author__ = "Chang Liao"
 __email__ = "changliao.climate@gmail.com"
 
+import logging
+
+# Silence verbose third-party loggers that can flood Jupyter IOPub channels
+for _name in (
+    "trame",
+    "trame_server",
+    "trame_client",
+    "trame_rca",
+    "wslink",
+    "aiohttp",
+    "matplotlib",
+    "asyncio",
+):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 from .classes.sraster import SRaster
 
 # Import main classes for easier access

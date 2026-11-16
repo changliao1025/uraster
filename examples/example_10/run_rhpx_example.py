@@ -1,99 +1,60 @@
 import os
 
-from osgeo import gdal, osr
+from osgeo import osr
 from pyearth.toolbox.management.raster.resample import resample_raster
 
-from uraster import compile_remap_workflow, load_workflow_config
-from uraster.classes.uraster import URaster
-
-# Download input data using Pooch (downloads to system cache)
-from uraster.utility import get_example_paths
-
-print("Downloading example 10 input data...")
-paths = get_example_paths(example_number=10)
-sFolder_input = paths["input"]
-print(f"Input data cached at: {sFolder_input}")
-
-# Set up output directory relative to current working directory
-sFolder_output = os.path.join("data", "example_10", "output")
-os.makedirs(sFolder_output, exist_ok=True)
-print(f"Output directory: {sFolder_output}")
-
-
-# Convert absolute paths to relative paths
-sFilename_source_mesh = os.path.join(
-    sFolder_input, "rhealpix_China_res3.geojson"
-)  # use the L10-100 test mesh
-# sFilename_source_mesh = os.path.join(sFolder_data, 'input','mpas.geojson')
-sFilename_raster = os.path.join(sFolder_input, "China_CH4_emission_2020.tif")
-
-sFilename_target_mesh = os.path.join(sFolder_output, "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
-sFilename_raster_png = os.path.join(sFolder_output, "raster.png")
-sFilename_variable_png = os.path.join(sFolder_output, "uraster.png")
-sFilename_variable_animation = os.path.join(sFolder_output, "uraster.mp4")
+from uraster import URaster, compile_remap_workflow, load_workflow_config
 
 
 def main():
-    sFilename_source_raster_resample = sFilename_raster.replace(".tif", "_resample.tif")
-    default_srs = osr.SpatialReference()
-    default_srs.ImportFromEPSG(4326)
-    pProjection_target = default_srs.ExportToWkt()
-    resample_raster(
-        sFilename_raster,
-        sFilename_source_raster_resample,
-        1.0,
-        1.0,
-        sResampleAlg="average",
-        dMissing_value_source=0,
-        pProjection_target_in=pProjection_target,
-    )
-
-    # Load Tier 1 configuration from workflow_config.yaml
+    # 1. Load Tier 1 configuration from workflow_config.yaml
     sFilename_yaml = os.path.join(os.path.dirname(__file__), "workflow_config.yaml")
     config = load_workflow_config(sFilename_yaml)
-    # Update with resampled raster path
+
+    # Example 10 downsamples the raw input raster for the demonstration
+    sFilename_raster = config["rasters"]["source_rasters"][0]
+    sFilename_source_raster_resample = sFilename_raster.replace(".tif", "_resample.tif")
+    if not os.path.exists(sFilename_source_raster_resample):
+        default_srs = osr.SpatialReference()
+        default_srs.ImportFromEPSG(4326)
+        pProjection_target = default_srs.ExportToWkt()
+        resample_raster(
+            sFilename_raster,
+            sFilename_source_raster_resample,
+            1.0,
+            1.0,
+            sResampleAlg="average",
+            dMissing_value_source=0,
+            pProjection_target_in=pProjection_target,
+        )
+
+    # Update workflow config with resampled raster path
     config["rasters"]["source_rasters"] = [sFilename_source_raster_resample]
 
-    # Compile Tier 1 specification into backend execution parameters
+    # 2. Compile Tier 1 specification into backend execution parameters
     aConfig = compile_remap_workflow(config)
     pRaster = URaster(aConfig)
+
+    # 3. Setup and report input metadata
     pRaster.setup()
     pRaster.report_inputs()
-    # visualize source mesh at the Wuhan City area
-    dLongitude_focus_in = (pRaster.aExtent_rasters[0] + pRaster.aExtent_rasters[2]) / 2
-    dLatitude_focus_in = (pRaster.aExtent_rasters[1] + pRaster.aExtent_rasters[3]) / 2
-    pRaster.visualize_source_mesh(
-        sFilename_out=sFilename_mesh_png,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-    )
-    # pRaster.visualize_raster(sFilename_out=sFilename_raster_png)
 
-    pRaster.run_remap(iFlag_weighted_average_in=True)
+    # 4. Visualize source mesh
+    pRaster.visualize_source_mesh()
+
+    # 5. Run remap (mass-conserving weighted remap configured via YAML method: "weighted")
+    pRaster.run_remap()
     pRaster.report_outputs()
-    sColormap = "terrain"
 
-    # Optional visualization and animation (disabled by default in this script)
-    pRaster.visualize_target_mesh(
-        sFilename_out=sFilename_variable_png,
-        sColormap=sColormap,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-    )
+    # 6. Visualize remapped target mesh
+    pRaster.visualize_target_mesh()
 
-    pRaster.visualize_target_mesh(
-        sFilename_out=sFilename_variable_animation,
-        sColormap=sColormap,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-        iFlag_create_animation=True,
-        iAnimation_frames=360,  # 1° longitude per frame
-        sAnimation_format="mp4",
-    )
+    # 7. Create optional 3D animation if configured
+    if config.get("visualization", {}).get("animation"):
+        pRaster.visualize_target_mesh(iFlag_create_animation=True)
 
+    # 8. Clean up temporary files
     pRaster.cleanup()
-
     print("done")
 
 

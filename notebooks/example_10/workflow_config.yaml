@@ -30,7 +30,8 @@ outputs:
 
 visualization:
   enabled: true
-  source_mesh_image: "mesh.jpg"
-  target_mesh_image: "uraster.png"
-  animation: "uraster.mp4"
+  colormap: "terrain"
+  source_mesh_image: null
+  target_mesh_image: null
+  animation: null
   focus_coordinates: null

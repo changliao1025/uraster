@@ -1,82 +1,37 @@
 import os
 
-from uraster import compile_remap_workflow, load_workflow_config
-from uraster.classes.uraster import URaster
-
-# Download input data using Pooch (downloads to system cache)
-from uraster.utility import get_example_paths
-
-print("Downloading example 9 input data...")
-paths = get_example_paths(example_number=9)
-sFolder_input = paths["input"]
-print(f"Input data cached at: {sFolder_input}")
-
-# Set up output directory relative to current working directory
-sFolder_output = os.path.join("data", "example_9", "output")
-os.makedirs(sFolder_output, exist_ok=True)
-print(f"Output directory: {sFolder_output}")
-
-# Convert absolute paths to relative paths
-sFilename_source_mesh = os.path.join(
-    sFolder_input, "mpas.geojson"
-)  # use the L10-100 test mesh
-sFilename_hydrosheds_dem = os.path.join(sFolder_input, "hyd_glo_dem_15s.tif")
-
-sFilename_target_mesh = os.path.join(sFolder_output, "uraster.geojson")
-sFilename_mesh_png = os.path.join(sFolder_output, "mesh.jpg")
-sFilename_variable_png = os.path.join(sFolder_output, "uraster.jpg")
-sFilename_variable_animation = os.path.join(sFolder_output, "uraster.gif")
+from uraster import URaster, compile_remap_workflow, load_workflow_config
 
 
 def main():
-    # Load Tier 1 configuration from workflow_config.yaml
+    # 1. Load Tier 1 configuration from workflow_config.yaml
     sFilename_yaml = os.path.join(os.path.dirname(__file__), "workflow_config.yaml")
     config = load_workflow_config(sFilename_yaml)
 
-    # Compile Tier 1 specification into backend execution parameters
+    # 2. Compile Tier 1 specification into backend execution parameters
     aConfig = compile_remap_workflow(config)
     pRaster = URaster(aConfig)
 
+    # 3. Setup and report input metadata
     pRaster.setup()
     pRaster.report_inputs()
-    dLongitude_focus_in = (pRaster.aExtent_rasters[0] + pRaster.aExtent_rasters[2]) / 2
-    dLatitude_focus_in = (pRaster.aExtent_rasters[1] + pRaster.aExtent_rasters[3]) / 2
-    pRaster.visualize_source_mesh(
-        sFilename_out=sFilename_mesh_png,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-        window_size_in=(8000, 7000),
-        iFlag_show_graticule=False,
-        iFlag_wireframe_only=True,
-    )
 
-    pRaster.run_remap(iFlag_verbose_in=True)
-    sFilename_mesh_parquet = os.path.join(sFolder_output, "mpas_uraster.parquet")
-    # convert_vector_format(pRaster.sFilename_target_mesh, sFilename_mesh_parquet)
+    # 4. Visualize source mesh
+    pRaster.visualize_source_mesh()
+
+    # 5. Run remap and report output stats
+    pRaster.run_remap()
     pRaster.report_outputs()
-    sColormap = "terrain"
 
-    pRaster.visualize_target_mesh(
-        sFilename_out=sFilename_variable_png,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-        window_size_in=(8000, 7000),
-        sColormap=sColormap,
-        iFlag_show_graticule=False,
-    )
+    # 6. Visualize remapped target mesh
+    pRaster.visualize_target_mesh()
 
-    pRaster.visualize_target_mesh(
-        sFilename_out=sFilename_variable_animation,
-        sColormap=sColormap,
-        dLongitude_focus_in=dLongitude_focus_in,
-        dLatitude_focus_in=dLatitude_focus_in,
-        iFlag_create_animation=True,
-        iAnimation_frames=360,  # 1° longitude per frame
-        sAnimation_format="gif",
-    )
+    # 7. Create optional 3D animation if configured
+    if config.get("visualization", {}).get("animation"):
+        pRaster.visualize_target_mesh(iFlag_create_animation=True)
 
+    # 8. Clean up temporary files
     pRaster.cleanup()
-
     print("done")
 
 

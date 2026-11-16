@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+# Start Xvfb virtual framebuffer for headless 3D rendering with VTK / GeoVista
+if command -v Xvfb > /dev/null 2>&1; then
+    Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+    export DISPLAY=:99
+fi
+
+# Configure PyVista to use jupyter-server-proxy on Binder/JupyterHub
+export PYVISTA_TRAME_SERVER_PROXY_ENABLED=true
+
+# Execute the container entrypoint command (starts Jupyter notebook server)
+exec "$@"

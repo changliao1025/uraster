@@ -43,6 +43,7 @@ requirements:
     - pyearthmesh >=0.1.2
     - pooch >=1.6.0
     - pyyaml
+    - tqdm
 
 tests:
   - python:

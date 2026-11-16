@@ -39,15 +39,117 @@ logger = setup_logger(__name__.split(".")[-1])
 CRS = "EPSG:4326"
 
 
+def _is_in_notebook() -> bool:
+    """Check if code is running inside a Jupyter notebook / IPython kernel."""
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is None:
+            return False
+        shell_class = shell.__class__.__name__
+        return "ZMQInteractiveShell" in shell_class or "Shell" in shell_class
+    except Exception:
+        return False
+
+
+def _ensure_display_environment() -> None:
+    """Ensure a virtual display (Xvfb) and Jupyter server proxy settings are configured."""
+    if sys.platform == "linux" and not os.environ.get("DISPLAY"):
+        try:
+            import shutil
+
+            if shutil.which("Xvfb"):
+                import subprocess
+
+                subprocess.Popen(
+                    ["Xvfb", ":99", "-screen", "0", "1024x768x24"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                os.environ["DISPLAY"] = ":99"
+        except Exception:
+            pass
+
+    # Silence verbose third-party loggers that flood Jupyter IOPub channel
+    for noisy_logger in [
+        "trame",
+        "trame_server",
+        "trame_client",
+        "trame_rca",
+        "wslink",
+        "aiohttp",
+        "matplotlib",
+        "asyncio",
+    ]:
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+    try:
+        import pyvista as pv
+
+        if hasattr(pv, "global_theme") and hasattr(pv.global_theme, "trame"):
+            is_remote_jupyter = (
+                "JUPYTERHUB_SERVICE_PREFIX" in os.environ
+                or "BINDER_SERVICE_PREFIX" in os.environ
+                or "JPY_PARENT_PID" in os.environ
+                or os.environ.get("PYVISTA_TRAME_SERVER_PROXY_ENABLED", "").lower()
+                in ("true", "1")
+            )
+            if is_remote_jupyter:
+                pv.global_theme.trame.server_proxy_enabled = True
+
+        # In notebook environments, default to client-side WebGL rendering (VTK.js)
+        # for fast, responsive 60 FPS local GPU interaction without streaming lag
+        if _is_in_notebook() and hasattr(pv, "set_jupyter_backend"):
+            current_backend = getattr(pv.global_theme, "jupyter_backend", None)
+            if current_backend is None or current_backend == "trame":
+                pv.set_jupyter_backend("client")
+    except Exception:
+        pass
+
+
+_ensure_display_environment()
+
+
+def _safe_map_single_frame(*args: Any, **kwargs: Any) -> Any:
+    """Wrap map_single_frame to preserve interactive Trame sessions in Jupyter notebooks.
+
+    In Jupyter notebooks, plotter.show() returns asynchronously while the Trame widget
+    is active. If plotter.close() is called immediately in a finally block, it wipes
+    all actors (view props) from the renderer and finalizes the window, causing an empty
+    white display in the notebook. This wrapper prevents plotter.close() from closing
+    the renderer during interactive notebook sessions.
+    """
+    sFilename_out = kwargs.get("sFilename_out")
+    if len(args) >= 7 and sFilename_out is None:
+        sFilename_out = args[6]
+
+    if sFilename_out is None and _is_in_notebook():
+        import pyvista as pv
+
+        if hasattr(pv, "set_jupyter_backend"):
+            current_backend = getattr(pv.global_theme, "jupyter_backend", None)
+            if current_backend is None or current_backend == "trame":
+                pv.set_jupyter_backend("client")
+
+        orig_close = pv.Plotter.close
+        try:
+            pv.Plotter.close = lambda self, *a, **k: None  # type: ignore[assignment]
+            return map_single_frame(*args, **kwargs)
+        finally:
+            pv.Plotter.close = orig_close  # type: ignore[assignment]
+    else:
+        return map_single_frame(*args, **kwargs)
+
+
 def visualize_raster(
     self,
     sFilename_out: Optional[str] = None,
-    dLongitude_focus_in: float = 0.0,
-    dLatitude_focus_in: float = 0.0,
+    dLongitude_focus_in: Optional[float] = None,
+    dLatitude_focus_in: Optional[float] = None,
     dZoom_factor: float = 0.7,
     iFlag_show_coastlines: bool = True,
     iFlag_show_graticule: bool = True,
-    sColormap: str = "viridis",
+    sColormap: Optional[str] = None,
     sCoastline_color: str = "black",
     dCoastline_width: float = 1.0,
     iFlag_verbose_in: bool = False,
@@ -78,9 +180,42 @@ def visualize_raster(
         - Converts raster data to mesh format for 3D visualization
         - Multiple rasters can be overlaid
     """
+    _ensure_display_environment()
     if not self.aFilename_source_raster:
         logger.error("No source raster files available for visualization")
         return False
+
+    # Check defaults from workflow configuration if available
+    vis_cfg = (
+        getattr(self, "aConfig", {}).get("_visualization", {})
+        if hasattr(self, "aConfig")
+        else {}
+    )
+    focus_coords = vis_cfg.get("focus_coordinates")
+    default_lon = 0.0
+    default_lat = 0.0
+    if focus_coords and len(focus_coords) >= 2:
+        default_lon, default_lat = float(focus_coords[0]), float(focus_coords[1])
+    elif hasattr(self, "aExtent_rasters") and self.aExtent_rasters is not None:
+        default_lon = (self.aExtent_rasters[0] + self.aExtent_rasters[1]) / 2.0
+        default_lat = (self.aExtent_rasters[2] + self.aExtent_rasters[3]) / 2.0
+
+    if dLongitude_focus_in is None:
+        dLongitude_focus_in = default_lon
+    if dLatitude_focus_in is None:
+        dLatitude_focus_in = default_lat
+    if sColormap is None:
+        sColormap = vis_cfg.get("colormap", "viridis")
+    if sFilename_out is None and vis_cfg.get("raster_image"):
+        out_ws = (
+            getattr(self, "aConfig", {})
+            .get("_outputs", {})
+            .get("output_workspace", ".")
+        )
+        img_name = vis_cfg["raster_image"]
+        sFilename_out = (
+            img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+        )
 
     # Create configuration object
     config = VisualizationConfig(
@@ -180,7 +315,7 @@ def visualize_raster(
         sUnit = ""
         style = "surface"
 
-        map_single_frame(
+        _safe_map_single_frame(
             pMesh_raster,
             aValid_cell_indices,
             config,
@@ -242,9 +377,41 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
         - Wireframe mode is useful for examining mesh structure and topology
     """
     # Set defaults for all optional parameters
+    _ensure_display_environment()
+    default_lon = 0.0
+    default_lat = 0.0
+
+    # 1. Check if focus coordinates were provided in workflow config
+    vis_cfg = (
+        getattr(self, "aConfig", {}).get("_visualization", {})
+        if hasattr(self, "aConfig")
+        else {}
+    )
+    focus_coords = vis_cfg.get("focus_coordinates")
+    if focus_coords and len(focus_coords) >= 2:
+        default_lon, default_lat = float(focus_coords[0]), float(focus_coords[1])
+    elif hasattr(self, "aExtent_rasters") and self.aExtent_rasters is not None:
+        default_lon = (self.aExtent_rasters[0] + self.aExtent_rasters[1]) / 2.0
+        default_lat = (self.aExtent_rasters[2] + self.aExtent_rasters[3]) / 2.0
+
+    # 2. Check if output filename was specified in workflow config
+    if sFilename_out is None and vis_cfg.get("source_mesh_image"):
+        out_ws = (
+            getattr(self, "aConfig", {})
+            .get("_outputs", {})
+            .get("output_workspace", ".")
+        )
+        img_name = vis_cfg["source_mesh_image"]
+        sFilename_out = (
+            img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+        )
+
+    if sFilename_out:
+        os.makedirs(os.path.dirname(os.path.abspath(sFilename_out)), exist_ok=True)
+
     defaults = {
-        "dLongitude_focus_in": 0.0,
-        "dLatitude_focus_in": 0.0,
+        "dLongitude_focus_in": default_lon,
+        "dLatitude_focus_in": default_lat,
         "dImage_scale_in": 1.0,
         "dZoom_factor": 0.7,
         "window_size_in": (800, 600),
@@ -373,7 +540,7 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
             style = "surface"
             if config_static.verbose:
                 logger.info("Using surface visualization mode")
-        map_single_frame(
+        _safe_map_single_frame(
             pMesh_source,
             aValid_cell_indices,
             config_static,
@@ -456,21 +623,69 @@ def visualize_target_mesh(
         - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
     """
     # Set defaults for all optional parameters
+    _ensure_display_environment()
+    default_lon = 0.0
+    default_lat = 0.0
+
+    # 1. Check if focus coordinates were provided in workflow config
+    vis_cfg = (
+        getattr(self, "aConfig", {}).get("_visualization", {})
+        if hasattr(self, "aConfig")
+        else {}
+    )
+    focus_coords = vis_cfg.get("focus_coordinates")
+    if focus_coords and len(focus_coords) >= 2:
+        default_lon, default_lat = float(focus_coords[0]), float(focus_coords[1])
+    elif hasattr(self, "aExtent_rasters") and self.aExtent_rasters is not None:
+        default_lon = (self.aExtent_rasters[0] + self.aExtent_rasters[1]) / 2.0
+        default_lat = (self.aExtent_rasters[2] + self.aExtent_rasters[3]) / 2.0
+
+    # 2. Check if output filename or colormap was specified in workflow config
+    is_anim = kwargs.get("iFlag_create_animation", False)
+    if sFilename_out is None:
+        out_ws = (
+            getattr(self, "aConfig", {})
+            .get("_outputs", {})
+            .get("output_workspace", ".")
+        )
+        if is_anim and vis_cfg.get("animation"):
+            img_name = vis_cfg["animation"]
+            sFilename_out = (
+                img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+            )
+        elif not is_anim and vis_cfg.get("target_mesh_image"):
+            img_name = vis_cfg["target_mesh_image"]
+            sFilename_out = (
+                img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+            )
+
+    if sFilename_out:
+        os.makedirs(os.path.dirname(os.path.abspath(sFilename_out)), exist_ok=True)
+
+    default_colormap = vis_cfg.get("colormap", "viridis")
+    default_format = "mp4"
+    if sFilename_out and sFilename_out.lower().endswith(".gif"):
+        default_format = "gif"
+    elif vis_cfg.get("animation") and str(vis_cfg["animation"]).lower().endswith(
+        ".gif"
+    ):
+        default_format = "gif"
+
     defaults = {
-        "dLongitude_focus_in": 0.0,
-        "dLatitude_focus_in": 0.0,
+        "dLongitude_focus_in": default_lon,
+        "dLatitude_focus_in": default_lat,
         "dImage_scale_in": 1.0,
         "dZoom_factor": 0.7,
         "window_size_in": (800, 600),
         "iFlag_show_coastlines": True,
         "iFlag_show_graticule": True,
-        "sColormap": "viridis",
+        "sColormap": default_colormap,
         "sCoastline_color": "black",
         "dCoastline_width": 1.0,
         "iFlag_create_animation": False,
-        "iAnimation_frames": 36,
+        "iAnimation_frames": 360 if is_anim else 36,
         "dAnimation_speed": 1.0,
-        "sAnimation_format": "mp4",
+        "sAnimation_format": default_format,
         "iFlag_verbose_in": False,
         "show_edges": False,
         "edge_color": "black",
@@ -643,7 +858,7 @@ def visualize_target_mesh(
                     orientation="vertical",
                     n_labels=5,
                 )
-            map_single_frame(
+            _safe_map_single_frame(
                 pMesh,
                 aValid_cell_indices,
                 config_static,
@@ -802,16 +1017,25 @@ def _extract_target_mesh_data(
 
                         for iPart in range(nGeometryParts):
                             pPolygon_part = pGeometry.GetGeometryRef(iPart)
-                            if pPolygon_part is not None and pPolygon_part.IsValid():
-                                aData_list.append(dData_value)
-                                iValid_parts += 1
-                            else:
-                                pPolygon_part.FlattenTo2D()
-                                sWkt = pPolygon_part.ExportToWkt()
-                                logger.warning(
-                                    f"Invalid polygon part {iPart} in multipolygon feature {iFeature_count}: {sWkt} "
-                                )
-                                aData_list.append(np.nan)
+                            if pPolygon_part is not None:
+                                try:
+                                    aCoord_part = utility.get_geometry_coordinates(
+                                        pPolygon_part
+                                    )
+                                    if (
+                                        aCoord_part is not None
+                                        and len(aCoord_part) >= 3
+                                    ):
+                                        aData_list.append(dData_value)
+                                        iValid_parts += 1
+                                    else:
+                                        logger.warning(
+                                            f"Skipping empty polygon part {iPart} in multipolygon feature {iFeature_count}"
+                                        )
+                                except Exception:
+                                    logger.warning(
+                                        f"Skipping degenerate polygon part {iPart} in multipolygon feature {iFeature_count}"
+                                    )
 
                         if iValid_parts == 0:
                             logger.warning(

@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+# Install the local uraster repository in editable development mode
+pip install --no-deps -e .

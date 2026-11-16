@@ -2,3 +2,4 @@ libgl1
 libglx-mesa0
 libegl1
 xvfb
+x11-utils
