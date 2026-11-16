@@ -131,12 +131,16 @@ def _safe_map_single_frame(*args: Any, **kwargs: Any) -> Any:
             if current_backend is None or current_backend == "trame":
                 pv.set_jupyter_backend("client")
 
-        orig_close = pv.Plotter.close
-        try:
-            pv.Plotter.close = lambda self, *a, **k: None  # type: ignore[assignment]
+        current_backend = getattr(pv.global_theme, "jupyter_backend", None)
+        if current_backend != "static":
+            orig_close = pv.Plotter.close
+            try:
+                pv.Plotter.close = lambda self, *a, **k: None  # type: ignore[assignment]
+                return map_single_frame(*args, **kwargs)
+            finally:
+                pv.Plotter.close = orig_close  # type: ignore[assignment]
+        else:
             return map_single_frame(*args, **kwargs)
-        finally:
-            pv.Plotter.close = orig_close  # type: ignore[assignment]
     else:
         return map_single_frame(*args, **kwargs)
 

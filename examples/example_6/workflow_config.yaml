@@ -34,7 +34,7 @@ remap:
 
 outputs:
   output_workspace: "../../data/example_6/output"
-  target_mesh: "uraster.geojson"
+  target_mesh: "uraster.fgb"
 
 visualization:
   enabled: true
