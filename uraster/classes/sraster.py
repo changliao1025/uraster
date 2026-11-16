@@ -291,6 +291,23 @@ class SRaster:
         if self.sFilename_mesh and os.path.isfile(self.sFilename_mesh):
             os.remove(self.sFilename_mesh)
 
+        def _safe_create_mesh(create_fn, *args):
+            out_file = args[-1]
+            if out_file.lower().endswith((".fgb", ".flatgeobuf")):
+                # FlatGeobuf enforces strict 2D geometry type matching.
+                # Generate intermediate GeoJSON and translate with -dim XY to 2D.
+                tmp_geojson = out_file.rsplit(".", 1)[0] + "_tmp.geojson"
+                new_args = list(args[:-1]) + [tmp_geojson]
+                create_fn(*new_args)
+                if os.path.exists(out_file):
+                    os.remove(out_file)
+                ds = gdal.VectorTranslate(out_file, tmp_geojson, options="-dim XY")
+                del ds
+                if os.path.exists(tmp_geojson):
+                    os.remove(tmp_geojson)
+            else:
+                create_fn(*args)
+
         # Create mesh based on coordinate system
         if self.pSpatialRef_wkt != wkt_wgs84:
             # Projected coordinate system - use square mesh
@@ -302,7 +319,8 @@ class SRaster:
             sFilename_output_in = self.sFilename_mesh
             pProjection_reference_in = self.pSpatialRef_wkt
 
-            create_square_mesh(
+            _safe_create_mesh(
+                create_square_mesh,
                 dX_left_in,
                 dY_bot_in,
                 dResolution_meter_in,
@@ -325,7 +343,8 @@ class SRaster:
             sFilename_output_in = self.sFilename_mesh
 
             # the mesh starts from the lower left corner
-            create_latlon_mesh(
+            _safe_create_mesh(
+                create_latlon_mesh,
                 dLongitude_left_in,
                 dLatitude_bot_in,
                 dResolution_degree_in,

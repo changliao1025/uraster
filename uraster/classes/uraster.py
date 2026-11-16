@@ -61,6 +61,8 @@ class URaster:
         self.iField_unique_type = None  # Will be set during setup_mesh_cellid
         self.sFilename_target_mesh = aConfig.get("sFilename_target_mesh", None)
         self.aFilename_source_raster = aConfig.get("aFilename_source_raster", [])
+        self.aExtent_rasters = None
+        self.aConfig = aConfig
 
         self.iFlag_polar = aConfig.get("iFlag_polar", 0)  # Default to 0 (non-polar)
         self.iFlag_global = aConfig.get("iFlag_global", 1)  # Default to 1 (global)

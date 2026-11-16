@@ -33,6 +33,7 @@ outputs:
 
 visualization:
   enabled: true
+  colormap: "viridis"
   source_mesh_image: "mesh.jpg"
   target_mesh_image: "uraster.png"
   animation: "uraster.mp4"

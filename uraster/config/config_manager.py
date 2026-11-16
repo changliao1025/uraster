@@ -92,6 +92,14 @@ def _resolve_paths(data: Any, base_dir: Path) -> Any:
             if (
                 isinstance(v_plat, str)
                 and v_plat.strip()
+                and k
+                not in (
+                    "target_mesh",
+                    "source_mesh_image",
+                    "target_mesh_image",
+                    "raster_image",
+                    "animation",
+                )
                 and (
                     "mesh" in k
                     or "raster" in k
@@ -270,6 +278,10 @@ def compile_remap_workflow(
 
     # Path resolution for target mesh
     output_workspace = outputs_sec.get("output_workspace", "./output")
+    try:
+        os.makedirs(output_workspace, exist_ok=True)
+    except OSError:
+        pass
     target_mesh_name = outputs_sec.get("target_mesh", "uraster.geojson")
     if not os.path.isabs(target_mesh_name):
         sFilename_target_mesh = os.path.join(output_workspace, target_mesh_name)

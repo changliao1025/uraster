@@ -787,8 +787,15 @@ def rebuild_mesh_topology(
                                 f"Multipolygon part {iPart} is None in feature {iFeature_index}"
                             )
                             continue
-                        # Get coordinates of the polygon part (validation already done by check_geometry_validity)
-                        aCoord_part = get_geometry_coordinates(pPolygon_part)
+                        # Get coordinates of the polygon part safely
+                        try:
+                            aCoord_part = get_geometry_coordinates(pPolygon_part)
+                        except Exception as e:
+                            logger.warning(
+                                f"Skipping degenerate part {iPart} in multipolygon feature {iFeature_index}: {e}"
+                            )
+                            continue
+
                         if aCoord_part is not None and len(aCoord_part) >= 3:
                             lons_part = aCoord_part[:, 0]
                             lats_part = aCoord_part[:, 1]
@@ -1516,6 +1523,16 @@ if POOCH_AVAILABLE:
     )
 
 
+def _has_tqdm() -> bool:
+    """Check if tqdm is available for Pooch progress bars."""
+    try:
+        import tqdm  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def download_multipart_example(
     example_number: int, num_parts: int, extract_dir: Optional[str] = None
 ) -> str:
@@ -1553,9 +1570,17 @@ def download_multipart_example(
 
         try:
             # Download the part (no extraction yet)
-            file_path = DATA_FETCHER.fetch(filename, progressbar=True)
+            file_path = DATA_FETCHER.fetch(filename, progressbar=_has_tqdm())
             part_files.append(file_path)
             print(f"  ✓ Downloaded: {filename}")
+        except ValueError as e:
+            if "tqdm" in str(e):
+                file_path = DATA_FETCHER.fetch(filename, progressbar=False)
+                part_files.append(file_path)
+                print(f"  ✓ Downloaded: {filename}")
+            else:
+                print(f"  ✗ Error downloading {filename}: {e}")
+                raise
         except Exception as e:
             print(f"  ✗ Error downloading {filename}: {e}")
             raise
@@ -1648,9 +1673,21 @@ def download_example_data(
 
     try:
         # Fetch and extract the zip file
-        extracted_files = DATA_FETCHER.fetch(
-            filename, progressbar=True, processor=pooch.Unzip(extract_dir=extract_dir)
-        )
+        try:
+            extracted_files = DATA_FETCHER.fetch(
+                filename,
+                progressbar=_has_tqdm(),
+                processor=pooch.Unzip(extract_dir=extract_dir),
+            )
+        except ValueError as e:
+            if "tqdm" in str(e):
+                extracted_files = DATA_FETCHER.fetch(
+                    filename,
+                    progressbar=False,
+                    processor=pooch.Unzip(extract_dir=extract_dir),
+                )
+            else:
+                raise
 
         # The processor returns a list of extracted files
         if extracted_files:

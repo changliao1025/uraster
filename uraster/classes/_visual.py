@@ -42,12 +42,12 @@ CRS = "EPSG:4326"
 def visualize_raster(
     self,
     sFilename_out: Optional[str] = None,
-    dLongitude_focus_in: float = 0.0,
-    dLatitude_focus_in: float = 0.0,
+    dLongitude_focus_in: Optional[float] = None,
+    dLatitude_focus_in: Optional[float] = None,
     dZoom_factor: float = 0.7,
     iFlag_show_coastlines: bool = True,
     iFlag_show_graticule: bool = True,
-    sColormap: str = "viridis",
+    sColormap: Optional[str] = None,
     sCoastline_color: str = "black",
     dCoastline_width: float = 1.0,
     iFlag_verbose_in: bool = False,
@@ -81,6 +81,38 @@ def visualize_raster(
     if not self.aFilename_source_raster:
         logger.error("No source raster files available for visualization")
         return False
+
+    # Check defaults from workflow configuration if available
+    vis_cfg = (
+        getattr(self, "aConfig", {}).get("_visualization", {})
+        if hasattr(self, "aConfig")
+        else {}
+    )
+    focus_coords = vis_cfg.get("focus_coordinates")
+    default_lon = 0.0
+    default_lat = 0.0
+    if focus_coords and len(focus_coords) >= 2:
+        default_lon, default_lat = float(focus_coords[0]), float(focus_coords[1])
+    elif hasattr(self, "aExtent_rasters") and self.aExtent_rasters is not None:
+        default_lon = (self.aExtent_rasters[0] + self.aExtent_rasters[1]) / 2.0
+        default_lat = (self.aExtent_rasters[2] + self.aExtent_rasters[3]) / 2.0
+
+    if dLongitude_focus_in is None:
+        dLongitude_focus_in = default_lon
+    if dLatitude_focus_in is None:
+        dLatitude_focus_in = default_lat
+    if sColormap is None:
+        sColormap = vis_cfg.get("colormap", "viridis")
+    if sFilename_out is None and vis_cfg.get("raster_image"):
+        out_ws = (
+            getattr(self, "aConfig", {})
+            .get("_outputs", {})
+            .get("output_workspace", ".")
+        )
+        img_name = vis_cfg["raster_image"]
+        sFilename_out = (
+            img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+        )
 
     # Create configuration object
     config = VisualizationConfig(
@@ -242,9 +274,40 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
         - Wireframe mode is useful for examining mesh structure and topology
     """
     # Set defaults for all optional parameters
+    default_lon = 0.0
+    default_lat = 0.0
+
+    # 1. Check if focus coordinates were provided in workflow config
+    vis_cfg = (
+        getattr(self, "aConfig", {}).get("_visualization", {})
+        if hasattr(self, "aConfig")
+        else {}
+    )
+    focus_coords = vis_cfg.get("focus_coordinates")
+    if focus_coords and len(focus_coords) >= 2:
+        default_lon, default_lat = float(focus_coords[0]), float(focus_coords[1])
+    elif hasattr(self, "aExtent_rasters") and self.aExtent_rasters is not None:
+        default_lon = (self.aExtent_rasters[0] + self.aExtent_rasters[1]) / 2.0
+        default_lat = (self.aExtent_rasters[2] + self.aExtent_rasters[3]) / 2.0
+
+    # 2. Check if output filename was specified in workflow config
+    if sFilename_out is None and vis_cfg.get("source_mesh_image"):
+        out_ws = (
+            getattr(self, "aConfig", {})
+            .get("_outputs", {})
+            .get("output_workspace", ".")
+        )
+        img_name = vis_cfg["source_mesh_image"]
+        sFilename_out = (
+            img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+        )
+
+    if sFilename_out:
+        os.makedirs(os.path.dirname(os.path.abspath(sFilename_out)), exist_ok=True)
+
     defaults = {
-        "dLongitude_focus_in": 0.0,
-        "dLatitude_focus_in": 0.0,
+        "dLongitude_focus_in": default_lon,
+        "dLatitude_focus_in": default_lat,
         "dImage_scale_in": 1.0,
         "dZoom_factor": 0.7,
         "window_size_in": (800, 600),
@@ -456,21 +519,68 @@ def visualize_target_mesh(
         - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
     """
     # Set defaults for all optional parameters
+    default_lon = 0.0
+    default_lat = 0.0
+
+    # 1. Check if focus coordinates were provided in workflow config
+    vis_cfg = (
+        getattr(self, "aConfig", {}).get("_visualization", {})
+        if hasattr(self, "aConfig")
+        else {}
+    )
+    focus_coords = vis_cfg.get("focus_coordinates")
+    if focus_coords and len(focus_coords) >= 2:
+        default_lon, default_lat = float(focus_coords[0]), float(focus_coords[1])
+    elif hasattr(self, "aExtent_rasters") and self.aExtent_rasters is not None:
+        default_lon = (self.aExtent_rasters[0] + self.aExtent_rasters[1]) / 2.0
+        default_lat = (self.aExtent_rasters[2] + self.aExtent_rasters[3]) / 2.0
+
+    # 2. Check if output filename or colormap was specified in workflow config
+    is_anim = kwargs.get("iFlag_create_animation", False)
+    if sFilename_out is None:
+        out_ws = (
+            getattr(self, "aConfig", {})
+            .get("_outputs", {})
+            .get("output_workspace", ".")
+        )
+        if is_anim and vis_cfg.get("animation"):
+            img_name = vis_cfg["animation"]
+            sFilename_out = (
+                img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+            )
+        elif not is_anim and vis_cfg.get("target_mesh_image"):
+            img_name = vis_cfg["target_mesh_image"]
+            sFilename_out = (
+                img_name if os.path.isabs(img_name) else os.path.join(out_ws, img_name)
+            )
+
+    if sFilename_out:
+        os.makedirs(os.path.dirname(os.path.abspath(sFilename_out)), exist_ok=True)
+
+    default_colormap = vis_cfg.get("colormap", "viridis")
+    default_format = "mp4"
+    if sFilename_out and sFilename_out.lower().endswith(".gif"):
+        default_format = "gif"
+    elif vis_cfg.get("animation") and str(vis_cfg["animation"]).lower().endswith(
+        ".gif"
+    ):
+        default_format = "gif"
+
     defaults = {
-        "dLongitude_focus_in": 0.0,
-        "dLatitude_focus_in": 0.0,
+        "dLongitude_focus_in": default_lon,
+        "dLatitude_focus_in": default_lat,
         "dImage_scale_in": 1.0,
         "dZoom_factor": 0.7,
         "window_size_in": (800, 600),
         "iFlag_show_coastlines": True,
         "iFlag_show_graticule": True,
-        "sColormap": "viridis",
+        "sColormap": default_colormap,
         "sCoastline_color": "black",
         "dCoastline_width": 1.0,
         "iFlag_create_animation": False,
-        "iAnimation_frames": 36,
+        "iAnimation_frames": 360 if is_anim else 36,
         "dAnimation_speed": 1.0,
-        "sAnimation_format": "mp4",
+        "sAnimation_format": default_format,
         "iFlag_verbose_in": False,
         "show_edges": False,
         "edge_color": "black",
@@ -802,16 +912,25 @@ def _extract_target_mesh_data(
 
                         for iPart in range(nGeometryParts):
                             pPolygon_part = pGeometry.GetGeometryRef(iPart)
-                            if pPolygon_part is not None and pPolygon_part.IsValid():
-                                aData_list.append(dData_value)
-                                iValid_parts += 1
-                            else:
-                                pPolygon_part.FlattenTo2D()
-                                sWkt = pPolygon_part.ExportToWkt()
-                                logger.warning(
-                                    f"Invalid polygon part {iPart} in multipolygon feature {iFeature_count}: {sWkt} "
-                                )
-                                aData_list.append(np.nan)
+                            if pPolygon_part is not None:
+                                try:
+                                    aCoord_part = utility.get_geometry_coordinates(
+                                        pPolygon_part
+                                    )
+                                    if (
+                                        aCoord_part is not None
+                                        and len(aCoord_part) >= 3
+                                    ):
+                                        aData_list.append(dData_value)
+                                        iValid_parts += 1
+                                    else:
+                                        logger.warning(
+                                            f"Skipping empty polygon part {iPart} in multipolygon feature {iFeature_count}"
+                                        )
+                                except Exception:
+                                    logger.warning(
+                                        f"Skipping degenerate polygon part {iPart} in multipolygon feature {iFeature_count}"
+                                    )
 
                         if iValid_parts == 0:
                             logger.warning(

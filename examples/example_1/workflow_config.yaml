@@ -34,7 +34,8 @@ outputs:
 
 visualization:
   enabled: true                      # Set true to render visualizations
+  colormap: "terrain"                # Colormap for target mesh visualization
   source_mesh_image: "mesh.jpg"      # Input mesh visualization image
   target_mesh_image: "uraster.png"   # Remapped mesh visualization image
-  animation: "uraster.gif"           # 3D globe rotation animation
+  animation: "uraster.mp4"           # 3D globe rotation animation
   focus_coordinates: null            # Optional [lon, lat] focus center
