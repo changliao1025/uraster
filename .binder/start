@@ -7,5 +7,8 @@ if command -v Xvfb > /dev/null 2>&1; then
     export DISPLAY=:99
 fi
 
+# Configure PyVista to use jupyter-server-proxy on Binder/JupyterHub
+export PYVISTA_TRAME_SERVER_PROXY_ENABLED=true
+
 # Execute the container entrypoint command (starts Jupyter notebook server)
 exec "$@"

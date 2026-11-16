@@ -40,7 +40,7 @@ CRS = "EPSG:4326"
 
 
 def _ensure_display_environment() -> None:
-    """Ensure a virtual display (Xvfb) is running in headless Linux environments."""
+    """Ensure a virtual display (Xvfb) and Jupyter server proxy settings are configured."""
     if sys.platform == "linux" and not os.environ.get("DISPLAY"):
         try:
             import shutil
@@ -56,6 +56,23 @@ def _ensure_display_environment() -> None:
                 os.environ["DISPLAY"] = ":99"
         except Exception:
             pass
+
+    # In Jupyter/Binder/JupyterHub environments, configure PyVista to route Trame through jupyter-server-proxy
+    try:
+        import pyvista as pv
+
+        if hasattr(pv, "global_theme") and hasattr(pv.global_theme, "trame"):
+            is_remote_jupyter = (
+                "JUPYTERHUB_SERVICE_PREFIX" in os.environ
+                or "BINDER_SERVICE_PREFIX" in os.environ
+                or "JPY_PARENT_PID" in os.environ
+                or os.environ.get("PYVISTA_TRAME_SERVER_PROXY_ENABLED", "").lower()
+                in ("true", "1")
+            )
+            if is_remote_jupyter:
+                pv.global_theme.trame.server_proxy_enabled = True
+    except Exception:
+        pass
 
 
 _ensure_display_environment()

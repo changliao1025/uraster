@@ -58,8 +58,9 @@ notebook = [
     "trame-vtk>=2.0.0",
     "trame-vuetify>=2.0.0",
     "trame-pyvista>=0.1.0",
+    "trame-jupyter-extension>=2.0.0",
     "jupyter-server-proxy",
-    "nest-asyncio2",
+    "nest-asyncio",
 ]
 
 [project.urls]

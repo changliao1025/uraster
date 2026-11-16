@@ -19,6 +19,6 @@ dependencies:
   - trame-vtk
   - trame-vuetify
   - trame-pyvista
+  - trame-jupyter-extension
+  - nest-asyncio
   - pip
-  - pip:
-    - nest-asyncio2
