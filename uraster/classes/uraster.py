@@ -1417,24 +1417,9 @@ class URaster:
     def cleanup(self):
         """
         Comprehensive cleanup method to release spatial reference objects,
-        cached raster instances, active PyVista plotters, and other resources.
+        cached raster instances, and other resources.
         """
         try:
-            # Clean up active PyVista plotters and VTK resources
-            try:
-                import pyvista as pv
-
-                pv.close_all()
-            except Exception:
-                pass
-
-            try:
-                import gc
-
-                gc.collect()
-            except Exception:
-                pass
-
             # Clean up raster cache
             if hasattr(self, "_raster_cache") and self._raster_cache:
                 cache_count = len(self._raster_cache)
