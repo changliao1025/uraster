@@ -2032,6 +2032,95 @@ def get_cache_location() -> str:
     return DATA_FETCHER.path
 
 
+def get_safe_max_workers(
+    requested_workers: Optional[int] = None, n_tasks: int = 1
+) -> int:
+    """Determine a safe worker count for multiprocessing.
+
+    Prevents Out-Of-Memory (OOM) crashes in cloud/container environments
+    (such as MyBinder, JupyterHub, Kubernetes, and Docker) where os.cpu_count()
+    reports the host node's physical CPU cores (e.g. 48 or 64) rather than
+    the container's restricted cgroup quota and memory limits.
+
+    Args:
+        requested_workers: Explicit user-specified worker count, if any.
+        n_tasks: Total number of tasks to process.
+
+    Returns:
+        Safe integer number of workers (at least 1).
+    """
+    if requested_workers is not None and requested_workers > 0:
+        return min(requested_workers, max(1, n_tasks))
+
+    # Check environment variable override
+    env_override = os.environ.get("URASTER_MAX_WORKERS") or os.environ.get(
+        "MAX_WORKERS"
+    )
+    if env_override:
+        try:
+            return min(max(1, int(env_override)), max(1, n_tasks))
+        except ValueError:
+            pass
+
+    # Check cgroup CPU quota (Linux containers / Docker / Kubernetes)
+    cgroup_cpus: Optional[int] = None
+    # cgroup v2
+    try:
+        if os.path.exists("/sys/fs/cgroup/cpu.max"):
+            with open("/sys/fs/cgroup/cpu.max") as f:
+                parts = f.read().strip().split()
+                if len(parts) == 2 and parts[0] != "max":
+                    cgroup_cpus = max(1, int(int(parts[0]) / int(parts[1])))
+    except Exception:
+        pass
+
+    # cgroup v1
+    if cgroup_cpus is None:
+        try:
+            quota_file = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+            period_file = "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+            if os.path.exists(quota_file) and os.path.exists(period_file):
+                with open(quota_file) as f:
+                    cfs_quota = int(f.read().strip())
+                with open(period_file) as f:
+                    cfs_period = int(f.read().strip())
+                if cfs_quota > 0 and cfs_period > 0:
+                    cgroup_cpus = max(1, int(cfs_quota / cfs_period))
+        except Exception:
+            pass
+
+    # Process affinity (if restricted)
+    affinity_cpus = None
+    try:
+        if hasattr(os, "sched_getaffinity"):
+            affinity_cpus = len(os.sched_getaffinity(0))
+    except Exception:
+        pass
+
+    # Default physical cores
+    try:
+        from multiprocessing import cpu_count
+
+        raw_cpus = cpu_count()
+    except Exception:
+        raw_cpus = 1
+
+    detected = cgroup_cpus or affinity_cpus or raw_cpus or 1
+
+    # Check if running in a cloud/containerized notebook (Binder, JupyterHub)
+    is_remote_jupyter = (
+        "BINDER_SERVICE_PREFIX" in os.environ
+        or "JUPYTERHUB_SERVICE_PREFIX" in os.environ
+        or "BINDER_PORT" in os.environ
+    )
+    if is_remote_jupyter:
+        # Strict clamp for MyBinder (2GB RAM limit shared across all processes)
+        return min(detected, 2, max(1, n_tasks))
+
+    # General safety clamp to prevent spawning dozens of heavy GDAL processes
+    return min(detected, 8, max(1, n_tasks))
+
+
 def clear_cache() -> None:
     """
     Clear the Pooch cache directory.

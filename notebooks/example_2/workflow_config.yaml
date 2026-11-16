@@ -23,10 +23,11 @@ remap:
   method: "nearest"
   global: true
   polar: false
+  max_workers: 2
 
 outputs:
   output_workspace: "../../data/example_2/output"
-  target_mesh: "uraster.geojson"
+  target_mesh: "uraster.fgb"
 
 visualization:
   enabled: true

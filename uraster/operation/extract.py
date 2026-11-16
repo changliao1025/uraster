@@ -18,6 +18,7 @@ from pyearth.toolbox.management.raster.resample import resample_raster
 from uraster.classes.sraster import SRaster
 from uraster.utility import (
     get_polygon_list,
+    get_safe_max_workers,
     get_unique_values_from_rasters,
     setup_logger,
 )
@@ -1157,6 +1158,7 @@ def run_remap(
     iFlag_verbose_in=False,
     iFeature_parallel_threshold=10000,
     sField_unique_id="cellid",
+    n_workers=None,
 ):
     """
     Perform zonal statistics by clipping raster data to mesh polygons.
@@ -1508,9 +1510,9 @@ def run_remap(
         else:
             logger.info(f"Multiprocessing start method: {current_method}")
 
-    max_workers = min(cpu_count(), max(1, n_features))
+    max_workers = get_safe_max_workers(n_workers, n_features)
     logger.info(
-        f"Preparing to process {n_features} features (parallel threshold={iFeature_parallel_threshold})"
+        f"Preparing to process {n_features} features (parallel threshold={iFeature_parallel_threshold}, workers={max_workers})"
     )
 
     # Build ordered task list (keeps original order)
@@ -1532,11 +1534,14 @@ def run_remap(
             )
         )
 
-    # Choose serial or parallel processing based on threshold
-    if n_features <= iFeature_parallel_threshold:
-        logger.info(
-            f"Feature count ({n_features}) <= threshold ({iFeature_parallel_threshold}); using serial processing"
-        )
+    # Choose serial or parallel processing based on threshold and safe worker count
+    if n_features <= iFeature_parallel_threshold or max_workers <= 1:
+        if max_workers <= 1:
+            logger.info("Worker count is 1; using serial processing")
+        else:
+            logger.info(
+                f"Feature count ({n_features}) <= threshold ({iFeature_parallel_threshold}); using serial processing"
+            )
         for task in tasks:
             feature_idx, cellid, success, payload = _process_task(task)
             if not success:
