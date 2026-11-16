@@ -78,6 +78,46 @@ def _ensure_display_environment() -> None:
 _ensure_display_environment()
 
 
+def _is_in_notebook() -> bool:
+    """Check if code is running inside a Jupyter notebook / IPython kernel."""
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is None:
+            return False
+        shell_class = shell.__class__.__name__
+        return "ZMQInteractiveShell" in shell_class or "Shell" in shell_class
+    except Exception:
+        return False
+
+
+def _safe_map_single_frame(*args: Any, **kwargs: Any) -> Any:
+    """Wrap map_single_frame to preserve interactive Trame sessions in Jupyter notebooks.
+
+    In Jupyter notebooks, plotter.show() returns asynchronously while the Trame widget
+    is active. If plotter.close() is called immediately in a finally block, it wipes
+    all actors (view props) from the renderer and finalizes the window, causing an empty
+    white display in the notebook. This wrapper prevents plotter.close() from closing
+    the renderer during interactive notebook sessions.
+    """
+    sFilename_out = kwargs.get("sFilename_out")
+    if len(args) >= 7 and sFilename_out is None:
+        sFilename_out = args[6]
+
+    if sFilename_out is None and _is_in_notebook():
+        import pyvista as pv
+
+        orig_close = pv.Plotter.close
+        try:
+            pv.Plotter.close = lambda self, *a, **k: None  # type: ignore[assignment]
+            return map_single_frame(*args, **kwargs)
+        finally:
+            pv.Plotter.close = orig_close  # type: ignore[assignment]
+    else:
+        return map_single_frame(*args, **kwargs)
+
+
 def visualize_raster(
     self,
     sFilename_out: Optional[str] = None,
@@ -252,7 +292,7 @@ def visualize_raster(
         sUnit = ""
         style = "surface"
 
-        map_single_frame(
+        _safe_map_single_frame(
             pMesh_raster,
             aValid_cell_indices,
             config,
@@ -477,7 +517,7 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
             style = "surface"
             if config_static.verbose:
                 logger.info("Using surface visualization mode")
-        map_single_frame(
+        _safe_map_single_frame(
             pMesh_source,
             aValid_cell_indices,
             config_static,
@@ -795,7 +835,7 @@ def visualize_target_mesh(
                     orientation="vertical",
                     n_labels=5,
                 )
-            map_single_frame(
+            _safe_map_single_frame(
                 pMesh,
                 aValid_cell_indices,
                 config_static,
