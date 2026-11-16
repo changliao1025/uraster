@@ -305,6 +305,7 @@ def compile_remap_workflow(
         "dResolution_ratio_threshold": float(
             remap_sec.get("resolution_ratio_threshold", 3.0)
         ),
+        "n_workers": remap_sec.get("max_workers") or remap_sec.get("n_workers"),
         # Retain metadata and visualization sections for the workflow runner
         "_workflow": wf_sec,
         "_outputs": outputs_sec,

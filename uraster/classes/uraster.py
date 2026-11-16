@@ -69,6 +69,7 @@ class URaster:
         self.iFlag_discrete = aConfig.get(
             "iFlag_discrete", 0
         )  # Default to 0 (continuous)
+        self.n_workers = aConfig.get("n_workers", None)
 
         # Cell counts
         self.nCell = -1
@@ -1207,6 +1208,7 @@ class URaster:
                 sFolder_raster_out_in=sFolder_raster_out_in,
                 iFlag_verbose_in=iFlag_verbose_in,
                 sField_unique_id=self.sField_unique_id,
+                n_workers=self.n_workers,
             )
 
     def visualize_raster(self, sFilename_out=None, iFlag_verbose_in=False):
