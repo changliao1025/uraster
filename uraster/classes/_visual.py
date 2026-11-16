@@ -39,6 +39,28 @@ logger = setup_logger(__name__.split(".")[-1])
 CRS = "EPSG:4326"
 
 
+def _ensure_display_environment() -> None:
+    """Ensure a virtual display (Xvfb) is running in headless Linux environments."""
+    if sys.platform == "linux" and not os.environ.get("DISPLAY"):
+        try:
+            import shutil
+
+            if shutil.which("Xvfb"):
+                import subprocess
+
+                subprocess.Popen(
+                    ["Xvfb", ":99", "-screen", "0", "1024x768x24"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                os.environ["DISPLAY"] = ":99"
+        except Exception:
+            pass
+
+
+_ensure_display_environment()
+
+
 def visualize_raster(
     self,
     sFilename_out: Optional[str] = None,
@@ -78,6 +100,7 @@ def visualize_raster(
         - Converts raster data to mesh format for 3D visualization
         - Multiple rasters can be overlaid
     """
+    _ensure_display_environment()
     if not self.aFilename_source_raster:
         logger.error("No source raster files available for visualization")
         return False
@@ -274,6 +297,7 @@ def visualize_source_mesh(self, sFilename_out: Optional[str] = None, **kwargs) -
         - Wireframe mode is useful for examining mesh structure and topology
     """
     # Set defaults for all optional parameters
+    _ensure_display_environment()
     default_lon = 0.0
     default_lat = 0.0
 
@@ -519,6 +543,7 @@ def visualize_target_mesh(
         - Animation mode requires 'imageio' package for video creation: pip install imageio[ffmpeg]
     """
     # Set defaults for all optional parameters
+    _ensure_display_environment()
     default_lon = 0.0
     default_lat = 0.0
 
