@@ -57,7 +57,18 @@ def _ensure_display_environment() -> None:
         except Exception:
             pass
 
-    # In Jupyter/Binder/JupyterHub environments, configure PyVista to route Trame through jupyter-server-proxy
+    # Silence verbose third-party loggers that flood Jupyter IOPub channel
+    for noisy_logger in [
+        "trame",
+        "trame_server",
+        "trame_client",
+        "trame_rca",
+        "wslink",
+        "aiohttp",
+        "matplotlib",
+        "asyncio",
+    ]:
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
     try:
         import pyvista as pv
 
