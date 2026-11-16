@@ -97,6 +97,11 @@ def _ensure_display_environment() -> None:
             if is_remote_jupyter:
                 pv.global_theme.trame.server_proxy_enabled = True
 
+            # Default Trame view directly to client (Local) mode so the viewer does not start in
+            # Remote mode requiring manual toggle of the Remote/Local switch.
+            if hasattr(pv.global_theme.trame, "default_mode"):
+                pv.global_theme.trame.default_mode = "client"
+
         # In notebook environments, default to client-side WebGL rendering (VTK.js)
         # for fast, responsive 60 FPS local GPU interaction without streaming lag
         if _is_in_notebook() and hasattr(pv, "set_jupyter_backend"):
@@ -130,6 +135,10 @@ def _safe_map_single_frame(*args: Any, **kwargs: Any) -> Any:
             current_backend = getattr(pv.global_theme, "jupyter_backend", None)
             if current_backend is None or current_backend == "trame":
                 pv.set_jupyter_backend("client")
+
+        if hasattr(pv, "global_theme") and hasattr(pv.global_theme, "trame"):
+            if hasattr(pv.global_theme.trame, "default_mode"):
+                pv.global_theme.trame.default_mode = "client"
 
         current_backend = getattr(pv.global_theme, "jupyter_backend", None)
         if current_backend != "static":
