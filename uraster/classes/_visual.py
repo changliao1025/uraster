@@ -39,6 +39,20 @@ logger = setup_logger(__name__.split(".")[-1])
 CRS = "EPSG:4326"
 
 
+def _is_in_notebook() -> bool:
+    """Check if code is running inside a Jupyter notebook / IPython kernel."""
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is None:
+            return False
+        shell_class = shell.__class__.__name__
+        return "ZMQInteractiveShell" in shell_class or "Shell" in shell_class
+    except Exception:
+        return False
+
+
 def _ensure_display_environment() -> None:
     """Ensure a virtual display (Xvfb) and Jupyter server proxy settings are configured."""
     if sys.platform == "linux" and not os.environ.get("DISPLAY"):
@@ -82,25 +96,18 @@ def _ensure_display_environment() -> None:
             )
             if is_remote_jupyter:
                 pv.global_theme.trame.server_proxy_enabled = True
+
+        # In notebook environments, default to client-side WebGL rendering (VTK.js)
+        # for fast, responsive 60 FPS local GPU interaction without streaming lag
+        if _is_in_notebook() and hasattr(pv, "set_jupyter_backend"):
+            current_backend = getattr(pv.global_theme, "jupyter_backend", None)
+            if current_backend is None or current_backend == "trame":
+                pv.set_jupyter_backend("client")
     except Exception:
         pass
 
 
 _ensure_display_environment()
-
-
-def _is_in_notebook() -> bool:
-    """Check if code is running inside a Jupyter notebook / IPython kernel."""
-    try:
-        from IPython import get_ipython
-
-        shell = get_ipython()
-        if shell is None:
-            return False
-        shell_class = shell.__class__.__name__
-        return "ZMQInteractiveShell" in shell_class or "Shell" in shell_class
-    except Exception:
-        return False
 
 
 def _safe_map_single_frame(*args: Any, **kwargs: Any) -> Any:
@@ -118,6 +125,11 @@ def _safe_map_single_frame(*args: Any, **kwargs: Any) -> Any:
 
     if sFilename_out is None and _is_in_notebook():
         import pyvista as pv
+
+        if hasattr(pv, "set_jupyter_backend"):
+            current_backend = getattr(pv.global_theme, "jupyter_backend", None)
+            if current_backend is None or current_backend == "trame":
+                pv.set_jupyter_backend("client")
 
         orig_close = pv.Plotter.close
         try:
