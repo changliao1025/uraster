@@ -1211,6 +1211,52 @@ class URaster:
                 n_workers=self.n_workers,
             )
 
+    def extract_raster_data(
+        self,
+        sFilename_source_mesh_in=None,
+        aFilename_source_raster_in=None,
+        sField_unique_id=None,
+        iFlag_verbose_in=False,
+        n_workers=None,
+    ):
+        """
+        Extract raw clipped raster pixel data arrays for each polygon in the mesh.
+
+        Args:
+            sFilename_source_mesh_in (str, optional): Source mesh vector file path.
+            aFilename_source_raster_in (list, optional): Source raster file paths.
+            sField_unique_id (str, optional): Cell ID field name. Default is instance field ID.
+            iFlag_verbose_in (bool, optional): Verbose logging. Default is False.
+            n_workers (int, optional): Worker count for parallel processing.
+
+        Returns:
+            Dict[Union[int, str], np.ndarray]: Mapping from cell ID to 1D NumPy array of valid pixel values.
+        """
+        if aFilename_source_raster_in is None:
+            aFilename_source_raster = self.aFilename_source_raster
+        else:
+            aFilename_source_raster = aFilename_source_raster_in
+
+        if sFilename_source_mesh_in is None:
+            sFilename_source_mesh = self.sFilename_source_mesh
+        else:
+            sFilename_source_mesh = sFilename_source_mesh_in
+
+        field_id = (
+            sField_unique_id if sField_unique_id is not None else self.sField_unique_id
+        )
+        workers = n_workers if n_workers is not None else self.n_workers
+
+        return extract.extract_raster_by_mesh(
+            sFilename_source_mesh=sFilename_source_mesh,
+            aFilename_source_raster=aFilename_source_raster,
+            dArea_min=self.dArea_min,
+            iFlag_remap_method_in=self.iFlag_remap_method or 1,
+            sField_unique_id=field_id,
+            n_workers=workers,
+            iFlag_verbose_in=iFlag_verbose_in,
+        )
+
     def visualize_raster(self, sFilename_out=None, iFlag_verbose_in=False):
         """
         Visualize source raster data using GeoVista.
