@@ -1488,50 +1488,78 @@ def create_geometry_from_coordinates(
 # Data Download Utilities using Pooch
 # =============================================================================
 
-try:
-    import zipfile
+import zipfile
 
-    import pooch
+# GitHub release information
+GITHUB_ORG = "changliao1025"
+GITHUB_REPO = "uraster_data"
+RELEASE_TAG = "v0.1.6"
+BASE_URL = (
+    f"https://github.com/{GITHUB_ORG}/{GITHUB_REPO}/releases/download/{RELEASE_TAG}/"
+)
 
-    POOCH_AVAILABLE = True
-except ImportError:
-    POOCH_AVAILABLE = False
-    logger.warning("Pooch not available. Data download functionality will be disabled.")
+# Define which examples have multi-part archives
+MULTIPART_EXAMPLES = {
+    6: 4,  # Example 6 has 4 parts
+}
 
-if POOCH_AVAILABLE:
-    # GitHub release information
-    GITHUB_ORG = "changliao1025"
-    GITHUB_REPO = "uraster_data"
-    RELEASE_TAG = "v0.1.6"
-    BASE_URL = f"https://github.com/{GITHUB_ORG}/{GITHUB_REPO}/releases/download/{RELEASE_TAG}/"
+_DATA_FETCHER = None
 
-    # Define which examples have multi-part archives
-    MULTIPART_EXAMPLES = {
-        6: 4,  # Example 6 has 4 parts
-    }
 
-    # Define the Pooch instance for data management
-    DATA_FETCHER = pooch.create(
-        # Use the default cache directory
-        path=pooch.os_cache("uraster"),
-        base_url=BASE_URL,
-        # The registry will be populated dynamically or can be pre-defined
-        registry={
-            # Single zip files - hashes will be computed on first download
-            "example_1.zip": None,
-            "example_2.zip": None,
-            "example_3.zip": None,
-            "example_4.zip": None,
-            "example_5.zip": None,
-            "example_7.zip": None,
-            "example_8.zip": None,
-            "example_9.zip": None,
-            # Multi-part archives
-            "example_6_part_1.zip": None,
-            "example_6_part_2.zip": None,
-            "example_6_part_3.zip": None,
-        },
-    )
+def is_pooch_available() -> bool:
+    """Check if pooch is installed without printing warnings."""
+    try:
+        import pooch  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _get_pooch():
+    """Lazily import pooch when needed by example downloading functions."""
+    try:
+        import pooch
+
+        return pooch
+    except ImportError:
+        raise ImportError(
+            "Pooch is required for example data download. Install it with: pip install pooch"
+        )
+
+
+def _get_data_fetcher():
+    """Lazily initialize the Pooch instance on first example download."""
+    global _DATA_FETCHER
+    if _DATA_FETCHER is None:
+        pooch = _get_pooch()
+        _DATA_FETCHER = pooch.create(
+            path=pooch.os_cache("uraster"),
+            base_url=BASE_URL,
+            registry={
+                "example_1.zip": None,
+                "example_2.zip": None,
+                "example_3.zip": None,
+                "example_4.zip": None,
+                "example_5.zip": None,
+                "example_7.zip": None,
+                "example_8.zip": None,
+                "example_9.zip": None,
+                "example_6_part_1.zip": None,
+                "example_6_part_2.zip": None,
+                "example_6_part_3.zip": None,
+            },
+        )
+    return _DATA_FETCHER
+
+
+def __getattr__(name: str):
+    """Support lazy evaluation of module attributes like POOCH_AVAILABLE and DATA_FETCHER."""
+    if name == "POOCH_AVAILABLE":
+        return is_pooch_available()
+    if name == "DATA_FETCHER":
+        return _get_data_fetcher()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _has_tqdm() -> bool:
@@ -1564,10 +1592,7 @@ def download_multipart_example(
     str
         Path to the extracted example directory
     """
-    if not POOCH_AVAILABLE:
-        raise ImportError(
-            "Pooch is required for data download. Install it with: pip install pooch"
-        )
+    fetcher = _get_data_fetcher()
 
     print(
         f"Downloading example {example_number} data (multi-part archive with {num_parts} parts)..."
@@ -1581,12 +1606,12 @@ def download_multipart_example(
 
         try:
             # Download the part (no extraction yet)
-            file_path = DATA_FETCHER.fetch(filename, progressbar=_has_tqdm())
+            file_path = fetcher.fetch(filename, progressbar=_has_tqdm())
             part_files.append(file_path)
             print(f"  ✓ Downloaded: {filename}")
         except ValueError as e:
             if "tqdm" in str(e):
-                file_path = DATA_FETCHER.fetch(filename, progressbar=False)
+                file_path = fetcher.fetch(filename, progressbar=False)
                 part_files.append(file_path)
                 print(f"  ✓ Downloaded: {filename}")
             else:
@@ -1598,7 +1623,7 @@ def download_multipart_example(
 
     # Extract all parts to the same location
     if extract_dir is None:
-        extract_dir = os.path.join(DATA_FETCHER.path, f"example_{example_number}")
+        extract_dir = os.path.join(fetcher.path, f"example_{example_number}")
     else:
         extract_dir = os.path.join(extract_dir, f"example_{example_number}")
 
@@ -1666,10 +1691,8 @@ def download_example_data(
     >>> # Extract to a specific location
     >>> example_dir = download_example_data(1, extract_dir='./data')
     """
-    if not POOCH_AVAILABLE:
-        raise ImportError(
-            "Pooch is required for data download. Install it with: pip install pooch"
-        )
+    pooch = _get_pooch()
+    fetcher = _get_data_fetcher()
 
     # Check if this is a multi-part example
     if example_number in MULTIPART_EXAMPLES:
@@ -1685,14 +1708,14 @@ def download_example_data(
     try:
         # Fetch and extract the zip file
         try:
-            extracted_files = DATA_FETCHER.fetch(
+            extracted_files = fetcher.fetch(
                 filename,
                 progressbar=_has_tqdm(),
                 processor=pooch.Unzip(extract_dir=extract_dir),
             )
         except ValueError as e:
             if "tqdm" in str(e):
-                extracted_files = DATA_FETCHER.fetch(
+                extracted_files = fetcher.fetch(
                     filename,
                     progressbar=False,
                     processor=pooch.Unzip(extract_dir=extract_dir),
@@ -2025,11 +2048,8 @@ def get_cache_location() -> str:
     str
         Path to cache directory
     """
-    if not POOCH_AVAILABLE:
-        raise ImportError(
-            "Pooch is required for data download. Install it with: pip install pooch"
-        )
-    return DATA_FETCHER.path
+    fetcher = _get_data_fetcher()
+    return fetcher.path
 
 
 def get_safe_max_workers(
@@ -2127,11 +2147,6 @@ def clear_cache() -> None:
 
     This removes all downloaded files and forces fresh downloads.
     """
-    if not POOCH_AVAILABLE:
-        raise ImportError(
-            "Pooch is required for data download. Install it with: pip install pooch"
-        )
-
     import shutil
 
     cache_dir = get_cache_location()

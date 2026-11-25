@@ -15,6 +15,32 @@ gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from pyearth.toolbox.management.raster.resample import resample_raster
 
+try:
+    from pyearth.gis.spatialref.convert_between_degree_and_meter import (
+        degree_to_meter,
+        meter_to_degree,
+    )
+except ImportError:
+    try:
+        from pyearth.system.define_global_variables import earth_radius
+    except ImportError:
+        earth_radius = 6378137.0
+
+    def degree_to_meter(resolution_degree, latitude=0.0, **kwargs):
+        res_arr = np.asarray(resolution_degree, dtype=float)
+        lat_arr = np.asarray(latitude, dtype=float)
+        radius = earth_radius * np.cos(np.radians(lat_arr))
+        res_m = res_arr * (2.0 * np.pi * radius) / 360.0
+        return float(res_m) if np.ndim(res_m) == 0 else res_m
+
+    def meter_to_degree(resolution_meter, latitude=0.0, **kwargs):
+        res_arr = np.asarray(resolution_meter, dtype=float)
+        lat_arr = np.asarray(latitude, dtype=float)
+        radius = earth_radius * np.cos(np.radians(lat_arr))
+        res_deg = res_arr * 360.0 / (2.0 * np.pi * radius)
+        return float(res_deg) if np.ndim(res_deg) == 0 else res_deg
+
+
 from uraster.classes.sraster import SRaster
 from uraster.utility import (
     get_polygon_list,
@@ -74,6 +100,8 @@ def _determine_optimal_resampling(
     dPixelHeight: float,
     iFlag_verbose_in: bool = False,
     dResolution_ratio_threshold: float = 3.0,
+    is_geographic: bool = True,
+    dLinear_units: float = 1.0,
 ) -> Tuple[str, int]:
     """
     Determine optimal resampling method based on mesh and raster resolution comparison.
@@ -83,13 +111,17 @@ def _determine_optimal_resampling(
     averaging (when mesh and raster resolutions are comparable).
 
     Args:
-        dArea_mean (float): Mean area of mesh cells in square degrees
-        dPixelWidth (float): Raster pixel width in degrees
-        dPixelHeight (float): Raster pixel height in degrees (absolute value)
+        dArea_min (float): Minimum area of mesh cells in square meters (or CRS units squared)
+        dPixelWidth (float): Raster pixel width in degrees (or CRS units)
+        dPixelHeight (float): Raster pixel height in degrees (absolute value, or CRS units)
         iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
         dResolution_ratio_threshold (float, optional): Threshold ratio for switching
             to weighted averaging. Default is 3.0.
+        is_geographic (bool, optional): If True, raster coordinates are in degrees
+            and mesh area is in square meters. Default is True.
+        dLinear_units (float, optional): Linear units scale factor for projected raster
+            (meters per unit, e.g. 1.0 for meters, 0.3048 for feet). Default is 1.0.
 
     Returns:
         Tuple[str, int]: (resample_method_string, resample_method_code)
@@ -102,7 +134,7 @@ def _determine_optimal_resampling(
     """
     # Input validation
     if not isinstance(dArea_min, (int, float)) or dArea_min <= 0:
-        raise ValueError(f"dArea_mean must be a positive number, got {dArea_min}")
+        raise ValueError(f"dArea_min must be a positive number, got {dArea_min}")
 
     if not isinstance(dPixelWidth, (int, float)) or dPixelWidth == 0:
         raise ValueError(f"dPixelWidth must be a non-zero number, got {dPixelWidth}")
@@ -119,24 +151,37 @@ def _determine_optimal_resampling(
         )
 
     try:
-        # Estimate characteristic mesh cell dimension (approximate square root of mean area)
-        dMesh_characteristic_size = np.sqrt(dArea_min)
+        # Characteristic mesh cell dimension in meters (approximate square root of area)
+        dMesh_characteristic_size_m = np.sqrt(dArea_min)
 
         # Use the coarser of the two raster dimensions
         dRaster_resolution = max(abs(dPixelWidth), abs(dPixelHeight))
 
-        # Calculate resolution ratio (mesh size / raster size)
-        dResolution_ratio = dMesh_characteristic_size / dRaster_resolution
+        if is_geographic:
+            dRaster_resolution_m = degree_to_meter(dRaster_resolution)
+            dMesh_characteristic_size_deg = meter_to_degree(dMesh_characteristic_size_m)
+            dResolution_ratio = dMesh_characteristic_size_m / dRaster_resolution_m
+        else:
+            factor = dLinear_units if dLinear_units > 0 else 1.0
+            dRaster_resolution_m = dRaster_resolution * factor
+            dMesh_characteristic_size_deg = dMesh_characteristic_size_m / factor
+            dResolution_ratio = dMesh_characteristic_size_m / dRaster_resolution_m
 
         if iFlag_verbose_in:
             logger.info("=" * 60)
             logger.info("Resolution Comparison Analysis:")
-            logger.info(
-                f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution*111:.2f} km at equator)"
-            )
-            logger.info(
-                f"  Mean mesh cell size: {dMesh_characteristic_size:.6f} degrees ({dMesh_characteristic_size*111:.2f} km at equator)"
-            )
+            if is_geographic:
+                logger.info(
+                    f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution_m/1000.0:.2f} km at equator)"
+                )
+                logger.info(
+                    f"  Mesh characteristic size: {dMesh_characteristic_size_deg:.6f} degrees ({dMesh_characteristic_size_m/1000.0:.2f} km at equator)"
+                )
+            else:
+                logger.info(f"  Raster resolution: {dRaster_resolution:.2f} m")
+                logger.info(
+                    f"  Mesh characteristic size: {dMesh_characteristic_size_m:.2f} m"
+                )
             logger.info(f"  Resolution ratio (mesh/raster): {dResolution_ratio:.2f}")
             logger.info(
                 f"  Threshold for weighted averaging: {dResolution_ratio_threshold:.2f}"
@@ -180,45 +225,18 @@ def _determine_optimal_resampling(
         return "near", 1
 
 
-def _process_single_polygon(
+def _clip_single_polygon(
     iFeature_idx: int,
     iCellid: Union[int, str],
     sWkt: str,
     aFilename_source_raster: List[str],
     gdal_warp_options_base: Dict[str, Any],
     dMissing_value: float,
-    iFlag_discrete_in: bool = False,
     iFlag_verbose_in: bool = False,
-    aUnique_value: Optional[List[float]] = None,
-) -> Tuple[int, Union[int, str], bool, Union[Dict[str, Any], str]]:
+) -> Tuple[int, Union[int, str], bool, Union[np.ndarray, str]]:
     """
-    Process a single polygon with GDAL Warp operation and calculate statistics.
-
-    Args:
-        feature_idx (int): Index of the feature being processed
-        cellid (Union[int, str]): Cell identifier for logging and tracking
-        wkt (str): Well-Known Text representation of the polygon geometry to clip raster
-        aFilename_source_raster (List[str]): List of source raster filenames
-        gdal_warp_options_base (Dict[str, Any]): Base GDAL warp options dictionary
-        dMissing_value (float): NoData/missing value to exclude from statistics
-        iFlag_discrete_in (bool, optional): Flag for discrete data processing. Default is False.
-        iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
-            If False, only print error messages. Default is False.
-        aUnique_value (Optional[List[float]], optional): List of all unique values found across
-            the entire raster dataset. Required for consistent percentage calculations in discrete mode.
-
-    Returns:
-        Tuple[int, Union[int, str], bool, Union[Dict[str, float], str]]:
-            (feature_idx, cellid, success_flag, stats_dict_or_error_message)
-            - feature_idx: Original feature index
-            - cellid: Original cell identifier
-            - success_flag: True if processing succeeded, False otherwise
-            - stats_dict_or_error_message: Statistics dictionary on success, error message on failure
-
-    Raises:
-        ValueError: If input parameters are invalid
+    Clip raster to a single polygon geometry using GDAL Warp cutline and return valid 1D pixel array.
     """
-    # Input validation
     if not isinstance(sWkt, str) or not sWkt.strip():
         return iFeature_idx, iCellid, False, "Invalid WKT string provided"
 
@@ -228,7 +246,6 @@ def _process_single_polygon(
     if not isinstance(gdal_warp_options_base, dict):
         return iFeature_idx, iCellid, False, "Invalid GDAL warp options dictionary"
 
-    # Initialize cleanup variables
     pPolygonWKT_file = None
     srs_wgs84 = None
     pFeature_clip = None
@@ -238,11 +255,9 @@ def _process_single_polygon(
     polygon = None
 
     try:
-        # Create spatial reference system
         srs_wgs84 = osr.SpatialReference()
         srs_wgs84.ImportFromEPSG(4326)
 
-        # Create geometry from WKT with validation
         polygon = ogr.CreateGeometryFromWkt(sWkt)
         if polygon is None:
             return (
@@ -254,8 +269,8 @@ def _process_single_polygon(
 
         if not polygon.IsValid():
             logger.warning(f"Invalid geometry for feature {iCellid}, attempting to fix")
-            polygon = polygon.Buffer(0)  # Attempt to fix invalid geometry
-            if not polygon.IsValid():
+            polygon = polygon.Buffer(0)
+            if not polygon or not polygon.IsValid():
                 return (
                     iFeature_idx,
                     iCellid,
@@ -263,10 +278,7 @@ def _process_single_polygon(
                     f"Cannot fix invalid geometry for feature {iCellid}",
                 )
 
-        # Make a copy of the warp options to modify
         gdal_warp_options = gdal_warp_options_base.copy()
-
-        # Create temporary shapefile in memory
         pPolygonWKT_file = f"/vsimem/polygon_wkt_{iCellid}_{iFeature_idx}.shp"
         pDataset_clip = pDriver_shp.CreateDataSource(pPolygonWKT_file)
         if pDataset_clip is None:
@@ -295,7 +307,6 @@ def _process_single_polygon(
 
         gdal_warp_options["cutlineDSName"] = pPolygonWKT_file
 
-        # Run GDAL Warp with timing
         warp_start_time = time.time()
         pWrapOption = gdal.WarpOptions(**gdal_warp_options)
         gdal.PushErrorHandler(custom_error_handler)
@@ -318,116 +329,23 @@ def _process_single_polygon(
                 f"GDAL Warp completed for feature {iCellid} in {warp_duration:.2f} seconds"
             )
 
-        if aData_clip is None:
+        if aData_clip is None or aData_clip.size == 0:
             return (
                 iFeature_idx,
                 iCellid,
-                False,
-                f"GDAL Warp returned no data for feature {iCellid}",
+                True,
+                np.array([], dtype=np.float32),
             )
 
-        # Check for reasonable data dimensions
-        if aData_clip.size == 0:
-            logger.warning(f"Empty data array for feature {iCellid}")
-            return (
-                iFeature_idx,
-                iCellid,
-                False,
-                f"Empty data array for feature {iCellid}",
-            )
-
-        # Make a copy of the data to allow immediate dataset cleanup
         aData_clip_copy = aData_clip.copy()
 
-        # Calculate statistics with improved error handling
-        try:
-            # Filter out missing/nodata values with proper handling of different data types
-            if isinstance(dMissing_value, (int, float)) and np.isnan(dMissing_value):
-                valid_mask = ~np.isnan(aData_clip_copy)
-            else:
-                valid_mask = aData_clip_copy != dMissing_value
+        if isinstance(dMissing_value, (int, float)) and np.isnan(dMissing_value):
+            valid_mask = ~np.isnan(aData_clip_copy)
+        else:
+            valid_mask = aData_clip_copy != dMissing_value
 
-            valid_data = aData_clip_copy[valid_mask]
-
-            stats: Dict[str, Any]
-            if len(valid_data) == 0:
-                if iFlag_discrete_in == 1:
-                    # Handle case for discrete data with no valid pixels
-                    stats = {"mode": None, "count": 0}
-                else:
-                    # No valid pixels for this feature: not treated as an error
-                    stats = {
-                        "mean": None,
-                        "min": None,
-                        "max": None,
-                        "std": None,
-                        "count": 0,
-                    }
-                if iFlag_verbose_in:
-                    logger.info(f"No valid data found for feature {iCellid}")
-            else:
-                # Compute statistics on valid data with error handling
-                if iFlag_discrete_in:
-                    # Combine mode calculation and percentage calculation for discrete data
-                    local_values, local_counts = np.unique(
-                        valid_data, return_counts=True
-                    )
-                    mode_index = np.argmax(local_counts)
-
-                    stats = {
-                        "mode": local_values[mode_index],
-                        "count": int(len(valid_data)),
-                    }
-
-                    # Calculate percentages for ALL unique values (consistent across polygons)
-                    if aUnique_value is not None:
-                        total_valid_pixels = len(valid_data)
-                        for val in aUnique_value:
-                            # Check if this unique value exists in the current polygon
-                            val_idx = np.where(local_values == val)[0]
-                            if len(val_idx) > 0:
-                                # Value found in this polygon
-                                percentage = (
-                                    float(local_counts[val_idx[0]])
-                                    / total_valid_pixels
-                                    * 100.0
-                                )
-                            else:
-                                # Value not found in this polygon - 0%
-                                percentage = 0.0
-                            stats[f"percentage_{val}"] = percentage
-                    else:
-                        # Fallback: only calculate percentages for locally found values
-                        for val, cnt in zip(local_values, local_counts):
-                            stats[f"percentage_{val}"] = (
-                                float(cnt) / len(valid_data) * 100.0
-                            )
-                else:
-                    stats = {
-                        "mean": float(np.mean(valid_data)),
-                        "min": float(np.min(valid_data)),
-                        "max": float(np.max(valid_data)),
-                        "std": float(np.std(valid_data)),
-                        "count": int(len(valid_data)),
-                    }
-
-                if iFlag_verbose_in:
-                    logger.info(
-                        f"Computed stats for feature {iCellid}: {stats['count']} valid pixels"
-                    )
-
-        except Exception as stats_error:
-            logger.error(
-                f"Error computing statistics for feature {iCellid}: {stats_error}"
-            )
-            return (
-                iFeature_idx,
-                iCellid,
-                False,
-                f"Statistics computation failed: {str(stats_error)}",
-            )
-
-        return iFeature_idx, iCellid, True, stats
+        valid_data = aData_clip_copy[valid_mask]
+        return iFeature_idx, iCellid, True, valid_data
 
     except Exception as e:
         error_msg = f"Error processing feature {iCellid}: {str(e)}"
@@ -436,51 +354,134 @@ def _process_single_polygon(
         return iFeature_idx, iCellid, False, error_msg
 
     finally:
-        # Comprehensive cleanup with error handling
         try:
             if pDataset_warp is not None:
                 pDataset_warp = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up warp dataset for feature {iCellid}: {e}")
-
+        except Exception:
+            pass
         try:
             if pFeature_clip is not None:
                 pFeature_clip = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up feature for feature {iCellid}: {e}")
-
+        except Exception:
+            pass
         try:
             if pLayer_clip is not None:
                 pLayer_clip = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up layer for feature {iCellid}: {e}")
-
+        except Exception:
+            pass
         try:
             if pDataset_clip is not None:
                 pDataset_clip = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up dataset for feature {iCellid}: {e}")
-
+        except Exception:
+            pass
         try:
             if polygon is not None:
                 polygon = None
-        except Exception as e:
-            logger.warning(f"Error cleaning up geometry for feature {iCellid}: {e}")
-
+        except Exception:
+            pass
         try:
             if srs_wgs84 is not None:
                 srs_wgs84 = None
-        except Exception as e:
-            logger.warning(
-                f"Error cleaning up spatial reference for feature {iCellid}: {e}"
-            )
-
-        # Clean up temporary file
+        except Exception:
+            pass
         try:
             if pPolygonWKT_file is not None:
                 gdal.Unlink(pPolygonWKT_file)
-        except Exception as e:
-            logger.warning(f"Error cleaning up temporary file {pPolygonWKT_file}: {e}")
+        except Exception:
+            pass
+
+
+def _process_single_polygon(
+    iFeature_idx: int,
+    iCellid: Union[int, str],
+    sWkt: str,
+    aFilename_source_raster: List[str],
+    gdal_warp_options_base: Dict[str, Any],
+    dMissing_value: float,
+    iFlag_discrete_in: bool = False,
+    iFlag_verbose_in: bool = False,
+    aUnique_value: Optional[List[float]] = None,
+) -> Tuple[int, Union[int, str], bool, Union[Dict[str, Any], str]]:
+    """
+    Process a single polygon with GDAL Warp operation and calculate statistics.
+    """
+    feat_idx, cid, success, payload = _clip_single_polygon(
+        iFeature_idx,
+        iCellid,
+        sWkt,
+        aFilename_source_raster,
+        gdal_warp_options_base,
+        dMissing_value,
+        iFlag_verbose_in,
+    )
+    if not success or not isinstance(payload, np.ndarray):
+        return feat_idx, cid, False, str(payload)
+
+    valid_data: np.ndarray = payload
+    try:
+        stats: Dict[str, Any]
+        if len(valid_data) == 0:
+            if iFlag_discrete_in == 1:
+                stats = {"mode": None, "count": 0}
+            else:
+                stats = {
+                    "mean": None,
+                    "min": None,
+                    "max": None,
+                    "std": None,
+                    "count": 0,
+                }
+            if iFlag_verbose_in:
+                logger.info(f"No valid data found for feature {iCellid}")
+        else:
+            if iFlag_discrete_in:
+                local_values, local_counts = np.unique(valid_data, return_counts=True)
+                mode_index = np.argmax(local_counts)
+                stats = {
+                    "mode": local_values[mode_index],
+                    "count": int(len(valid_data)),
+                }
+                if aUnique_value is not None:
+                    total_valid_pixels = len(valid_data)
+                    for val in aUnique_value:
+                        val_idx = np.where(local_values == val)[0]
+                        if len(val_idx) > 0:
+                            percentage = (
+                                float(local_counts[val_idx[0]])
+                                / total_valid_pixels
+                                * 100.0
+                            )
+                        else:
+                            percentage = 0.0
+                        stats[f"percentage_{val}"] = percentage
+                else:
+                    for val, cnt in zip(local_values, local_counts):
+                        stats[f"percentage_{val}"] = (
+                            float(cnt) / len(valid_data) * 100.0
+                        )
+            else:
+                stats = {
+                    "mean": float(np.mean(valid_data)),
+                    "min": float(np.min(valid_data)),
+                    "max": float(np.max(valid_data)),
+                    "std": float(np.std(valid_data)),
+                    "count": int(len(valid_data)),
+                }
+            if iFlag_verbose_in:
+                logger.info(
+                    f"Computed stats for feature {iCellid}: {stats['count']} valid pixels"
+                )
+
+        return iFeature_idx, iCellid, True, stats
+
+    except Exception as stats_error:
+        logger.error(f"Error computing statistics for feature {iCellid}: {stats_error}")
+        return (
+            iFeature_idx,
+            iCellid,
+            False,
+            f"Statistics computation failed: {str(stats_error)}",
+        )
 
 
 def _merge_raster_parts(
@@ -1145,6 +1146,118 @@ def _process_task(
             logger.warning(f"Error cleaning up geometry for feature {cellid}: {e}")
 
 
+def _process_extract_task(
+    args: Tuple[
+        int,
+        Union[int, str],
+        str,
+        List[str],
+        Dict[str, Any],
+        float,
+        bool,
+    ],
+) -> Tuple[int, Union[int, str], bool, Union[np.ndarray, str]]:
+    """
+    Module-level worker function for multiprocessing raster extraction.
+    Clips raster to polygon and returns raw valid 1D pixel array.
+    """
+    try:
+        (
+            feature_idx,
+            cellid,
+            wkt,
+            aFilename_source_raster,
+            gdal_warp_options_base,
+            dMissing_value,
+            iFlag_verbose_in,
+        ) = args
+    except (ValueError, TypeError) as e:
+        logger.error(f"Invalid arguments passed to _process_extract_task: {e}")
+        return -1, "unknown", False, f"Invalid arguments: {str(e)}"
+
+    if not isinstance(wkt, str) or not wkt.strip():
+        return feature_idx, cellid, False, "Invalid WKT string provided"
+
+    if not isinstance(aFilename_source_raster, list) or not aFilename_source_raster:
+        return feature_idx, cellid, False, "Invalid or empty raster filename list"
+
+    pPolygon = None
+    try:
+        pPolygon = ogr.CreateGeometryFromWkt(wkt)
+        if pPolygon is None:
+            return (
+                feature_idx,
+                cellid,
+                False,
+                f"Failed to create geometry from WKT for feature {cellid}",
+            )
+
+        if not pPolygon.IsValid():
+            pPolygon = pPolygon.Buffer(0)
+            if pPolygon is None or not pPolygon.IsValid():
+                return (
+                    feature_idx,
+                    cellid,
+                    False,
+                    f"Cannot fix invalid geometry for feature {cellid}",
+                )
+
+        sGeometry_type = pPolygon.GetGeometryName()
+
+        if sGeometry_type == "POLYGON":
+            return _clip_single_polygon(
+                feature_idx,
+                cellid,
+                wkt,
+                aFilename_source_raster,
+                gdal_warp_options_base,
+                dMissing_value,
+                iFlag_verbose_in,
+            )
+        elif sGeometry_type == "MULTIPOLYGON":
+            merged_data, _ = _process_multipolygon_idl(
+                feature_idx,
+                cellid,
+                wkt,
+                aFilename_source_raster,
+                gdal_warp_options_base,
+                dMissing_value,
+                False,
+                iFlag_verbose_in,
+                None,
+            )
+            if merged_data is None:
+                return feature_idx, cellid, True, np.array([], dtype=np.float32)
+
+            if isinstance(dMissing_value, (int, float)) and np.isnan(dMissing_value):
+                valid_mask = ~np.isnan(merged_data)
+            else:
+                valid_mask = merged_data != dMissing_value
+
+            valid_data = merged_data[valid_mask]
+            return feature_idx, cellid, True, valid_data
+        else:
+            return _clip_single_polygon(
+                feature_idx,
+                cellid,
+                wkt,
+                aFilename_source_raster,
+                gdal_warp_options_base,
+                dMissing_value,
+                iFlag_verbose_in,
+            )
+    except Exception as e:
+        error_msg = f"Error extracting feature {cellid}: {str(e)}"
+        logger.error(error_msg)
+        return feature_idx, cellid, False, error_msg
+    finally:
+        try:
+            if pPolygon is not None:
+                pPolygon = None
+        except Exception:
+            pass
+
+
 def run_remap(
     sFilename_target_mesh,
     sFilename_source_mesh,
@@ -1265,8 +1378,43 @@ def run_remap(
             sRaster_source_srs = pRaster.pSpatialRef_wkt
         dMissing_value = pRaster.dNoData
 
-    if sRaster_source_srs is None:
-        sRaster_source_srs = "EPSG:4326"
+    pSpatialRef_raster = osr.SpatialReference()
+    if sRaster_source_srs is not None:
+        if sRaster_source_srs.startswith("GEOGCS") or sRaster_source_srs.startswith(
+            "PROJCS"
+        ):
+            try:
+                pSpatialRef_raster.ImportFromWkt(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+        else:
+            try:
+                pSpatialRef_raster.SetFromUserInput(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+    else:
+        pSpatialRef_raster.ImportFromEPSG(4326)
+
+    try:
+        sRaster_source_srs = pSpatialRef_raster.ExportToWkt()
+    except Exception:
+        pass
+
+    is_raster_geographic = True
+    if hasattr(pSpatialRef_raster, "IsGeographic"):
+        try:
+            is_raster_geographic = bool(pSpatialRef_raster.IsGeographic())
+        except Exception:
+            is_raster_geographic = True
+
+    raster_linear_units = 1.0
+    if hasattr(pSpatialRef_raster, "GetLinearUnits"):
+        try:
+            units = pSpatialRef_raster.GetLinearUnits()
+            if units > 0:
+                raster_linear_units = float(units)
+        except Exception:
+            raster_linear_units = 1.0
 
     if iFlag_verbose_in:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
@@ -1287,17 +1435,32 @@ def run_remap(
             dArea_min = 1.0
 
     pSpatialRef_target = osr.SpatialReference()
-    pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+    if sProjection_source_wkt:
+        pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+    else:
+        pSpatialRef_target.ImportFromEPSG(4326)
 
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
-        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose_in
+        dArea_min,
+        dPixelWidth,
+        abs(pPixelHeight),
+        iFlag_verbose_in,
+        is_geographic=is_raster_geographic,
+        dLinear_units=raster_linear_units,
     )
 
     # Use automatically determined method if it's more conservative than user setting
     # Priority: weighted averaging > nearest neighbor (except for discrete data)
-    if iRemap_method_auto == 3 and iFlag_remap_method != 3 and not iFlag_discrete_in:
+    # Note: Do not override if multiple tiles are provided, as average resampling across
+    # tile seams in GDAL Warp can produce boundary artifacts.
+    if (
+        iRemap_method_auto == 3
+        and iFlag_remap_method != 3
+        and not iFlag_discrete_in
+        and len(aFilename_source_raster) == 1
+    ):
         logger.warning(
             f"Overriding user remap method ({iFlag_remap_method}) with automatic selection (3 - weighted average)"
         )
@@ -1311,6 +1474,8 @@ def run_remap(
             sRemap_method = "near"
         elif iFlag_remap_method == 3:
             sRemap_method = "average"
+        else:
+            sRemap_method = "near"
         if iFlag_verbose_in:
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
@@ -1321,21 +1486,46 @@ def run_remap(
     dMesh_characteristic_size = np.sqrt(dArea_min)
     dRaster_resolution = max(abs(dPixelWidth), abs(pPixelHeight))
 
+    if is_raster_geographic:
+        dRaster_resolution_meter = degree_to_meter(dRaster_resolution)
+        dMesh_characteristic_size_units = meter_to_degree(dMesh_characteristic_size)
+    else:
+        dRaster_resolution_meter = dRaster_resolution * raster_linear_units
+        dMesh_characteristic_size_units = (
+            dMesh_characteristic_size / raster_linear_units
+        )
+
     aFilename_to_process = list(aFilename_source_raster)
     aTemporary_resampled_files = []
 
-    if dRaster_resolution > dMesh_characteristic_size:
-        dTarget_res = min(
-            abs(dPixelWidth), abs(pPixelHeight), dMesh_characteristic_size / 2.0
-        )
+    if dRaster_resolution_meter > dMesh_characteristic_size:
+        if is_raster_geographic:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                meter_to_degree(dMesh_characteristic_size / 2.0),
+            )
+        else:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                (dMesh_characteristic_size / 2.0) / raster_linear_units,
+            )
 
         sResample_alg = "near"
 
         if iFlag_verbose_in:
-            logger.info(
-                f"Raster resolution ({dRaster_resolution:.6f}) is coarser than mesh ({dMesh_characteristic_size:.6f}). "
-                f"Resampling source raster to {dTarget_res:.6f} via pyearth.resample_raster before remapping..."
-            )
+            if is_raster_geographic:
+                logger.info(
+                    f"Raster resolution ({dRaster_resolution:.6f} deg / {dRaster_resolution_meter:.1f} m) "
+                    f"is coarser than mesh ({dMesh_characteristic_size_units:.6f} deg / {dMesh_characteristic_size:.1f} m). "
+                    f"Resampling source raster to {dTarget_res:.6f} degrees via pyearth.resample_raster before remapping..."
+                )
+            else:
+                logger.info(
+                    f"Raster resolution ({dRaster_resolution:.2f} units / {dRaster_resolution_meter:.1f} m) is coarser than mesh ({dMesh_characteristic_size_units:.2f} units / {dMesh_characteristic_size:.1f} m). "
+                    f"Resampling source raster to {dTarget_res:.2f} units via pyearth.resample_raster before remapping..."
+                )
 
         aFilename_to_process = []
         base_dir = os.path.dirname(os.path.abspath(sFilename_target_mesh))
@@ -1356,6 +1546,9 @@ def run_remap(
             dNoData_src = (
                 pRaster_src.dNoData if pRaster_src.dNoData is not None else -9999.0
             )
+
+            if dMissing_value is None and dNoData_src is not None:
+                dMissing_value = dNoData_src
 
             resample_raster(
                 sFilename_r,
@@ -1702,3 +1895,380 @@ def run_remap(
                 )
 
     return
+
+
+def extract_raster_by_polygon(
+    wkt: str,
+    aFilename_source_raster: List[str],
+    sProjection_target_wkt: str = "EPSG:4326",
+    dMissing_value: Optional[float] = None,
+    iFlag_verbose_in: bool = False,
+) -> np.ndarray:
+    """
+    Extract raw valid raster pixel data array for a single polygon WKT.
+
+    Parameters
+    ----------
+    wkt : str
+        Well-Known Text geometry of the polygon.
+    aFilename_source_raster : List[str]
+        List of raster file paths.
+    sProjection_target_wkt : str
+        Spatial reference WKT or EPSG string for cutline. Default is "EPSG:4326".
+    dMissing_value : Optional[float]
+        NoData value to mask out. If None, read from raster metadata.
+    iFlag_verbose_in : bool
+        Verbose logging flag.
+
+    Returns
+    -------
+    np.ndarray
+        1D NumPy array of valid pixels falling within the polygon.
+    """
+    if not isinstance(aFilename_source_raster, list):
+        aFilename_source_raster = [aFilename_source_raster]
+
+    pRaster = SRaster(sFilename_in=aFilename_source_raster[0])
+    pRaster.read_metadata()
+    dPixelWidth = pRaster.dResolution_x
+    pPixelHeight = pRaster.dResolution_y
+    sRaster_source_srs = pRaster.pSpatialRef_wkt or "EPSG:4326"
+    if dMissing_value is None:
+        dMissing_value = pRaster.dNoData if pRaster.dNoData is not None else -9999.0
+
+    gdal_warp_options = {
+        "cropToCutline": True,
+        "xRes": dPixelWidth,
+        "yRes": abs(pPixelHeight),
+        "dstSRS": sRaster_source_srs,
+        "format": "MEM",
+        "resampleAlg": "near",
+        "srcSRS": sRaster_source_srs,
+        "cutlineSRS": sProjection_target_wkt,
+        "warpOptions": ["CUTLINE_ALL_TOUCHED=TRUE"],
+    }
+
+    _, _, success, res = _clip_single_polygon(
+        0,
+        0,
+        wkt,
+        aFilename_source_raster,
+        gdal_warp_options,
+        dMissing_value,
+        iFlag_verbose_in,
+    )
+    if success and isinstance(res, np.ndarray):
+        return res
+    return np.array([], dtype=np.float32)
+
+
+def extract_raster_by_mesh(
+    sFilename_source_mesh: str,
+    aFilename_source_raster: List[str],
+    dArea_min: Optional[float] = None,
+    iFlag_remap_method_in: int = 1,
+    sField_unique_id: str = "cellid",
+    n_workers: Optional[int] = None,
+    iFeature_parallel_threshold: int = 10000,
+    iFlag_verbose_in: bool = False,
+) -> Dict[Union[int, str], np.ndarray]:
+    """
+    Extract raw valid raster pixel arrays for each polygon in the mesh.
+
+    Parameters
+    ----------
+    sFilename_source_mesh : str
+        Input mesh polygon file (GeoJSON, FlatGeobuf, Shapefile, etc.).
+    aFilename_source_raster : List[str]
+        List of source raster filenames (e.g. DEM GeoTIFFs).
+    dArea_min : Optional[float]
+        Minimum polygon area in square degrees. If None, computed from mesh.
+    iFlag_remap_method_in : int
+        Remap method (1=nearest, 2=bilinear, 3=average). Default is 1.
+    sField_unique_id : str
+        Unique identifier field for each mesh cell. Default is "cellid".
+    n_workers : Optional[int]
+        Number of parallel workers. If None, auto-detected safely.
+    iFeature_parallel_threshold : int
+        Threshold number of features to trigger multiprocessing. Default is 10000.
+    iFlag_verbose_in : bool
+        Verbose logging flag.
+
+    Returns
+    -------
+    Dict[Union[int, str], np.ndarray]
+        Mapping from cell ID to 1D NumPy array of valid pixel values inside each polygon.
+    """
+    if iFlag_remap_method_in not in [1, 2, 3]:
+        logger.error(
+            "Invalid remap method specified. Must be 1 (nearest), 2 (bilinear), or 3 (weighted average)."
+        )
+        return {}
+
+    iFlag_remap_method = iFlag_remap_method_in
+
+    for idx, sFilename_raster in enumerate(aFilename_source_raster):
+        if not os.path.exists(sFilename_raster):
+            logger.error(f"The raster file does not exist: {sFilename_raster}")
+            return {}
+
+    if not os.path.exists(sFilename_source_mesh):
+        logger.error(f"The vector mesh file does not exist: {sFilename_source_mesh}")
+        return {}
+
+    dPixelWidth: Optional[float] = None
+    pPixelHeight: Optional[float] = None
+    sRaster_source_srs: Optional[str] = None
+    dMissing_value: Optional[float] = None
+    for sFilename_raster in aFilename_source_raster:
+        pRaster = SRaster(sFilename_in=sFilename_raster)
+        pRaster.read_metadata()
+        if pRaster.dResolution_x is not None:
+            if dPixelWidth is None or pRaster.dResolution_x < dPixelWidth:
+                dPixelWidth = pRaster.dResolution_x
+        if pRaster.dResolution_y is not None:
+            if pPixelHeight is None or abs(pRaster.dResolution_y) < abs(pPixelHeight):
+                pPixelHeight = pRaster.dResolution_y
+        if sRaster_source_srs is None and pRaster.pSpatialRef_wkt:
+            sRaster_source_srs = pRaster.pSpatialRef_wkt
+        if pRaster.dNoData is not None:
+            dMissing_value = pRaster.dNoData
+
+    pSpatialRef_raster = osr.SpatialReference()
+    if sRaster_source_srs is not None:
+        if sRaster_source_srs.startswith("GEOGCS") or sRaster_source_srs.startswith(
+            "PROJCS"
+        ):
+            try:
+                pSpatialRef_raster.ImportFromWkt(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+        else:
+            try:
+                pSpatialRef_raster.SetFromUserInput(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+    else:
+        pSpatialRef_raster.ImportFromEPSG(4326)
+
+    try:
+        sRaster_source_srs = pSpatialRef_raster.ExportToWkt()
+    except Exception:
+        pass
+
+    is_raster_geographic = True
+    if hasattr(pSpatialRef_raster, "IsGeographic"):
+        try:
+            is_raster_geographic = bool(pSpatialRef_raster.IsGeographic())
+        except Exception:
+            is_raster_geographic = True
+
+    raster_linear_units = 1.0
+    if hasattr(pSpatialRef_raster, "GetLinearUnits"):
+        try:
+            units = pSpatialRef_raster.GetLinearUnits()
+            if units > 0:
+                raster_linear_units = float(units)
+        except Exception:
+            raster_linear_units = 1.0
+
+    if dPixelWidth is None or pPixelHeight is None:
+        logger.error("Could not determine raster pixel resolution")
+        return {}
+
+    dMissing_value_val: float = (
+        float(dMissing_value) if dMissing_value is not None else -9999.0
+    )
+
+    polygon_data = get_polygon_list(
+        sFilename_source_mesh, iFlag_verbose_in, sField_unique_id
+    )
+    if polygon_data is None:
+        logger.error("Failed to load polygon features from mesh dataset")
+        return {}
+
+    aPolygon, aArea, sProjection_source_wkt = polygon_data
+    if len(aPolygon) == 0:
+        logger.error("Failed to load polygon features from mesh dataset")
+        return {}
+
+    if dArea_min is None or dArea_min <= 0:
+        valid_areas = [a for a in aArea if a > 0]
+        if valid_areas:
+            dArea_min = float(min(valid_areas))
+        else:
+            dArea_min = 1.0
+
+    pSpatialRef_target = osr.SpatialReference()
+    if sProjection_source_wkt:
+        pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+    else:
+        pSpatialRef_target.ImportFromEPSG(4326)
+
+    sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
+        dArea_min,
+        dPixelWidth,
+        abs(pPixelHeight),
+        iFlag_verbose_in,
+        is_geographic=is_raster_geographic,
+        dLinear_units=raster_linear_units,
+    )
+
+    if (
+        iRemap_method_auto == 3
+        and iFlag_remap_method != 3
+        and len(aFilename_source_raster) == 1
+    ):
+        sRemap_method = sRemap_method_auto
+    else:
+        if iFlag_remap_method in (1, 2):
+            sRemap_method = "near"
+        elif iFlag_remap_method == 3:
+            sRemap_method = "average"
+        else:
+            sRemap_method = "near"
+
+    dMesh_characteristic_size = np.sqrt(dArea_min)
+    dRaster_resolution = max(abs(dPixelWidth), abs(pPixelHeight))
+
+    if is_raster_geographic:
+        dRaster_resolution_meter = degree_to_meter(dRaster_resolution)
+        dMesh_characteristic_size_units = meter_to_degree(dMesh_characteristic_size)
+    else:
+        dRaster_resolution_meter = dRaster_resolution * raster_linear_units
+        dMesh_characteristic_size_units = (
+            dMesh_characteristic_size / raster_linear_units
+        )
+
+    aFilename_to_process = list(aFilename_source_raster)
+    aTemporary_resampled_files = []
+
+    if dRaster_resolution_meter > dMesh_characteristic_size:
+        if is_raster_geographic:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                meter_to_degree(dMesh_characteristic_size / 2.0),
+            )
+        else:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                (dMesh_characteristic_size / 2.0) / raster_linear_units,
+            )
+        sResample_alg = "near"
+        base_dir = os.path.dirname(os.path.abspath(sFilename_source_mesh))
+
+        for idx_r, sFilename_r in enumerate(aFilename_source_raster):
+            base_name = os.path.splitext(os.path.basename(sFilename_r))[0]
+            sFilename_resampled = os.path.join(
+                base_dir, f"_temp_resampled_{base_name}_{idx_r}_{os.getpid()}.tif"
+            )
+            pRaster_src = SRaster(sFilename_in=sFilename_r)
+            pRaster_src.read_metadata()
+            iData_type = (
+                pRaster_src.eType if pRaster_src.eType is not None else gdal.GDT_Float32
+            )
+            dNoData_src = (
+                pRaster_src.dNoData if pRaster_src.dNoData is not None else -9999.0
+            )
+            if dMissing_value is None and dNoData_src is not None:
+                dMissing_value = dNoData_src
+                dMissing_value_val = float(dNoData_src)
+            resample_raster(
+                sFilename_r,
+                sFilename_resampled,
+                abs(dTarget_res),
+                abs(dTarget_res),
+                pProjection_target_in=sRaster_source_srs,
+                iData_type=iData_type,
+                sResampleAlg=sResample_alg,
+                dMissing_value_source=dNoData_src,
+                dMissing_value_target=dNoData_src,
+                iFlag_overwrite=True,
+                iFlag_verbose=iFlag_verbose_in,
+            )
+            aFilename_to_process.append(sFilename_resampled)
+            aTemporary_resampled_files.append(sFilename_resampled)
+
+        dPixelWidth = dTarget_res
+        pPixelHeight = dTarget_res
+
+    gdal_warp_options_base = {
+        "cropToCutline": True,
+        "xRes": dPixelWidth,
+        "yRes": abs(pPixelHeight),
+        "dstSRS": sRaster_source_srs,
+        "format": "MEM",
+        "resampleAlg": sRemap_method,
+        "srcSRS": sRaster_source_srs,
+        "cutlineSRS": pSpatialRef_target.ExportToWkt(),
+        "warpOptions": ["CUTLINE_ALL_TOUCHED=TRUE"],
+    }
+
+    gdal_warp_options_serial = gdal_warp_options_base.copy()
+    for key in ["dstSRS", "srcSRS", "cutlineSRS"]:
+        if key in gdal_warp_options_serial and hasattr(
+            gdal_warp_options_serial[key], "ExportToWkt"
+        ):
+            try:
+                gdal_warp_options_serial[key] = gdal_warp_options_serial[
+                    key
+                ].ExportToWkt()
+            except Exception:
+                gdal_warp_options_serial[key] = str(gdal_warp_options_serial[key])
+
+    n_features = len(aPolygon)
+    max_workers = get_safe_max_workers(n_workers, n_features)
+
+    tasks: List[
+        Tuple[
+            int,
+            Union[int, str],
+            str,
+            List[str],
+            Dict[str, Any],
+            float,
+            bool,
+        ]
+    ] = []
+    for idx, (cellid, wkt) in enumerate(aPolygon):
+        tasks.append(
+            (
+                idx,
+                cellid,
+                wkt,
+                aFilename_to_process,
+                gdal_warp_options_serial,
+                dMissing_value_val,
+                iFlag_verbose_in,
+            )
+        )
+
+    results_dict: Dict[Union[int, str], np.ndarray] = {}
+
+    try:
+        if n_features <= iFeature_parallel_threshold or max_workers <= 1:
+            for task in tasks:
+                _, cellid, success, payload = _process_extract_task(task)
+                if success and isinstance(payload, np.ndarray):
+                    results_dict[cellid] = payload
+                else:
+                    results_dict[cellid] = np.array([], dtype=np.float32)
+        else:
+            with ProcessPoolExecutor(max_workers=max_workers) as exe:
+                for result in exe.map(_process_extract_task, tasks):
+                    _, cellid, success, payload = result
+                    if success and isinstance(payload, np.ndarray):
+                        results_dict[cellid] = payload
+                    else:
+                        results_dict[cellid] = np.array([], dtype=np.float32)
+    finally:
+        for sTempFile in aTemporary_resampled_files:
+            if os.path.exists(sTempFile):
+                try:
+                    os.remove(sTempFile)
+                except OSError:
+                    pass
+
+    return results_dict

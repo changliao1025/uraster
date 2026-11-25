@@ -36,10 +36,13 @@ from .config import (
     dump_workflow_config,
     load_workflow_config,
 )
+from .operation.extract import extract_raster_by_mesh, extract_raster_by_polygon
 
 __all__ = [
     "URaster",
     "SRaster",
+    "extract_raster_by_mesh",
+    "extract_raster_by_polygon",
     "URasterWorkflow",
     "URasterWorkflowSpec",
     "create_workflow",

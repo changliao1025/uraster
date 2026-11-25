@@ -58,7 +58,7 @@ If you want to run the example notebook in this repository, the input data will 
 
 If you want to run the example Python code in this repository, you then need to download the input data from the data repository and update the file paths in the code accordingly.
 
-Tutorials are also provided through the GitHub repository: [URaster Tutorials on GitHub](https://github.com/changliao1025/uraster_tutorials).
+Tutorials are also provided through the GitHub repository: [URaster Tutorials on GitHub](https://github.com/changliao1025/uraster_tutorial).
 
 ## 📚 Documentation
 
@@ -101,9 +101,12 @@ The model described in this repository was supported by the following:
 
 * the Earth System Model Development and Regional and Global Model Analysis program areas of the U.S. Department of Energy, Office of Science, Biological and Environmental Research program as part of the multi-program, collaborative Interdisciplinary Research for Arctic Coastal Environments (InteRFACE) project.
 
-A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
+* the National Key Research and Development Program of China (2024YFF0809000).
 
+A portion of this research was performed using PNNL Research Computing at Pacific Northwest National Laboratory.
 PNNL is operated for DOE by Battelle Memorial Institute under contract DE-AC05-76RL01830.
+
+A portion of this research was performed using `Earth System Numerical Simulation Facility` Research Computing at Institute of Atmospheric Physics, Chinese Academy of Sciences.
 
 ## 🤝 Contributing & License
 
