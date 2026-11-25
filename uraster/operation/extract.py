@@ -15,6 +15,32 @@ gdal.UseExceptions()
 from pyearth.gis.gdal.gdal_vector_format_support import get_vector_driver_from_filename
 from pyearth.toolbox.management.raster.resample import resample_raster
 
+try:
+    from pyearth.gis.spatialref.convert_between_degree_and_meter import (
+        degree_to_meter,
+        meter_to_degree,
+    )
+except ImportError:
+    try:
+        from pyearth.system.define_global_variables import earth_radius
+    except ImportError:
+        earth_radius = 6378137.0
+
+    def degree_to_meter(resolution_degree, latitude=0.0, **kwargs):
+        res_arr = np.asarray(resolution_degree, dtype=float)
+        lat_arr = np.asarray(latitude, dtype=float)
+        radius = earth_radius * np.cos(np.radians(lat_arr))
+        res_m = res_arr * (2.0 * np.pi * radius) / 360.0
+        return float(res_m) if np.ndim(res_m) == 0 else res_m
+
+    def meter_to_degree(resolution_meter, latitude=0.0, **kwargs):
+        res_arr = np.asarray(resolution_meter, dtype=float)
+        lat_arr = np.asarray(latitude, dtype=float)
+        radius = earth_radius * np.cos(np.radians(lat_arr))
+        res_deg = res_arr * 360.0 / (2.0 * np.pi * radius)
+        return float(res_deg) if np.ndim(res_deg) == 0 else res_deg
+
+
 from uraster.classes.sraster import SRaster
 from uraster.utility import (
     get_polygon_list,
@@ -74,6 +100,8 @@ def _determine_optimal_resampling(
     dPixelHeight: float,
     iFlag_verbose_in: bool = False,
     dResolution_ratio_threshold: float = 3.0,
+    is_geographic: bool = True,
+    dLinear_units: float = 1.0,
 ) -> Tuple[str, int]:
     """
     Determine optimal resampling method based on mesh and raster resolution comparison.
@@ -83,13 +111,17 @@ def _determine_optimal_resampling(
     averaging (when mesh and raster resolutions are comparable).
 
     Args:
-        dArea_mean (float): Mean area of mesh cells in square degrees
-        dPixelWidth (float): Raster pixel width in degrees
-        dPixelHeight (float): Raster pixel height in degrees (absolute value)
+        dArea_min (float): Minimum area of mesh cells in square meters (or CRS units squared)
+        dPixelWidth (float): Raster pixel width in degrees (or CRS units)
+        dPixelHeight (float): Raster pixel height in degrees (absolute value, or CRS units)
         iFlag_verbose_in (bool, optional): If True, print detailed progress messages.
             If False, only print error messages. Default is False.
         dResolution_ratio_threshold (float, optional): Threshold ratio for switching
             to weighted averaging. Default is 3.0.
+        is_geographic (bool, optional): If True, raster coordinates are in degrees
+            and mesh area is in square meters. Default is True.
+        dLinear_units (float, optional): Linear units scale factor for projected raster
+            (meters per unit, e.g. 1.0 for meters, 0.3048 for feet). Default is 1.0.
 
     Returns:
         Tuple[str, int]: (resample_method_string, resample_method_code)
@@ -102,7 +134,7 @@ def _determine_optimal_resampling(
     """
     # Input validation
     if not isinstance(dArea_min, (int, float)) or dArea_min <= 0:
-        raise ValueError(f"dArea_mean must be a positive number, got {dArea_min}")
+        raise ValueError(f"dArea_min must be a positive number, got {dArea_min}")
 
     if not isinstance(dPixelWidth, (int, float)) or dPixelWidth == 0:
         raise ValueError(f"dPixelWidth must be a non-zero number, got {dPixelWidth}")
@@ -119,24 +151,37 @@ def _determine_optimal_resampling(
         )
 
     try:
-        # Estimate characteristic mesh cell dimension (approximate square root of mean area)
-        dMesh_characteristic_size = np.sqrt(dArea_min)
+        # Characteristic mesh cell dimension in meters (approximate square root of area)
+        dMesh_characteristic_size_m = np.sqrt(dArea_min)
 
         # Use the coarser of the two raster dimensions
         dRaster_resolution = max(abs(dPixelWidth), abs(dPixelHeight))
 
-        # Calculate resolution ratio (mesh size / raster size)
-        dResolution_ratio = dMesh_characteristic_size / dRaster_resolution
+        if is_geographic:
+            dRaster_resolution_m = degree_to_meter(dRaster_resolution)
+            dMesh_characteristic_size_deg = meter_to_degree(dMesh_characteristic_size_m)
+            dResolution_ratio = dMesh_characteristic_size_m / dRaster_resolution_m
+        else:
+            factor = dLinear_units if dLinear_units > 0 else 1.0
+            dRaster_resolution_m = dRaster_resolution * factor
+            dMesh_characteristic_size_deg = dMesh_characteristic_size_m / factor
+            dResolution_ratio = dMesh_characteristic_size_m / dRaster_resolution_m
 
         if iFlag_verbose_in:
             logger.info("=" * 60)
             logger.info("Resolution Comparison Analysis:")
-            logger.info(
-                f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution*111:.2f} km at equator)"
-            )
-            logger.info(
-                f"  Mean mesh cell size: {dMesh_characteristic_size:.6f} degrees ({dMesh_characteristic_size*111:.2f} km at equator)"
-            )
+            if is_geographic:
+                logger.info(
+                    f"  Raster resolution: {dRaster_resolution:.6f} degrees ({dRaster_resolution_m/1000.0:.2f} km at equator)"
+                )
+                logger.info(
+                    f"  Mesh characteristic size: {dMesh_characteristic_size_deg:.6f} degrees ({dMesh_characteristic_size_m/1000.0:.2f} km at equator)"
+                )
+            else:
+                logger.info(f"  Raster resolution: {dRaster_resolution:.2f} m")
+                logger.info(
+                    f"  Mesh characteristic size: {dMesh_characteristic_size_m:.2f} m"
+                )
             logger.info(f"  Resolution ratio (mesh/raster): {dResolution_ratio:.2f}")
             logger.info(
                 f"  Threshold for weighted averaging: {dResolution_ratio_threshold:.2f}"
@@ -1333,8 +1378,43 @@ def run_remap(
             sRaster_source_srs = pRaster.pSpatialRef_wkt
         dMissing_value = pRaster.dNoData
 
-    if sRaster_source_srs is None:
-        sRaster_source_srs = "EPSG:4326"
+    pSpatialRef_raster = osr.SpatialReference()
+    if sRaster_source_srs is not None:
+        if sRaster_source_srs.startswith("GEOGCS") or sRaster_source_srs.startswith(
+            "PROJCS"
+        ):
+            try:
+                pSpatialRef_raster.ImportFromWkt(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+        else:
+            try:
+                pSpatialRef_raster.SetFromUserInput(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+    else:
+        pSpatialRef_raster.ImportFromEPSG(4326)
+
+    try:
+        sRaster_source_srs = pSpatialRef_raster.ExportToWkt()
+    except Exception:
+        pass
+
+    is_raster_geographic = True
+    if hasattr(pSpatialRef_raster, "IsGeographic"):
+        try:
+            is_raster_geographic = bool(pSpatialRef_raster.IsGeographic())
+        except Exception:
+            is_raster_geographic = True
+
+    raster_linear_units = 1.0
+    if hasattr(pSpatialRef_raster, "GetLinearUnits"):
+        try:
+            units = pSpatialRef_raster.GetLinearUnits()
+            if units > 0:
+                raster_linear_units = float(units)
+        except Exception:
+            raster_linear_units = 1.0
 
     if iFlag_verbose_in:
         logger.info("run_remap: Opening mesh dataset and analyzing features...")
@@ -1355,17 +1435,32 @@ def run_remap(
             dArea_min = 1.0
 
     pSpatialRef_target = osr.SpatialReference()
-    pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+    if sProjection_source_wkt:
+        pSpatialRef_target.ImportFromWkt(sProjection_source_wkt)
+    else:
+        pSpatialRef_target.ImportFromEPSG(4326)
 
     # Determine optimal resampling method based on resolution comparison
     # This will override iFlag_remap_method if mesh resolution is too coarse
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
-        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose_in
+        dArea_min,
+        dPixelWidth,
+        abs(pPixelHeight),
+        iFlag_verbose_in,
+        is_geographic=is_raster_geographic,
+        dLinear_units=raster_linear_units,
     )
 
     # Use automatically determined method if it's more conservative than user setting
     # Priority: weighted averaging > nearest neighbor (except for discrete data)
-    if iRemap_method_auto == 3 and iFlag_remap_method != 3 and not iFlag_discrete_in:
+    # Note: Do not override if multiple tiles are provided, as average resampling across
+    # tile seams in GDAL Warp can produce boundary artifacts.
+    if (
+        iRemap_method_auto == 3
+        and iFlag_remap_method != 3
+        and not iFlag_discrete_in
+        and len(aFilename_source_raster) == 1
+    ):
         logger.warning(
             f"Overriding user remap method ({iFlag_remap_method}) with automatic selection (3 - weighted average)"
         )
@@ -1379,6 +1474,8 @@ def run_remap(
             sRemap_method = "near"
         elif iFlag_remap_method == 3:
             sRemap_method = "average"
+        else:
+            sRemap_method = "near"
         if iFlag_verbose_in:
             logger.info(f"Using user-specified remap method: {sRemap_method}")
 
@@ -1389,21 +1486,46 @@ def run_remap(
     dMesh_characteristic_size = np.sqrt(dArea_min)
     dRaster_resolution = max(abs(dPixelWidth), abs(pPixelHeight))
 
+    if is_raster_geographic:
+        dRaster_resolution_meter = degree_to_meter(dRaster_resolution)
+        dMesh_characteristic_size_units = meter_to_degree(dMesh_characteristic_size)
+    else:
+        dRaster_resolution_meter = dRaster_resolution * raster_linear_units
+        dMesh_characteristic_size_units = (
+            dMesh_characteristic_size / raster_linear_units
+        )
+
     aFilename_to_process = list(aFilename_source_raster)
     aTemporary_resampled_files = []
 
-    if dRaster_resolution > dMesh_characteristic_size:
-        dTarget_res = min(
-            abs(dPixelWidth), abs(pPixelHeight), dMesh_characteristic_size / 2.0
-        )
+    if dRaster_resolution_meter > dMesh_characteristic_size:
+        if is_raster_geographic:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                meter_to_degree(dMesh_characteristic_size / 2.0),
+            )
+        else:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                (dMesh_characteristic_size / 2.0) / raster_linear_units,
+            )
 
         sResample_alg = "near"
 
         if iFlag_verbose_in:
-            logger.info(
-                f"Raster resolution ({dRaster_resolution:.6f}) is coarser than mesh ({dMesh_characteristic_size:.6f}). "
-                f"Resampling source raster to {dTarget_res:.6f} via pyearth.resample_raster before remapping..."
-            )
+            if is_raster_geographic:
+                logger.info(
+                    f"Raster resolution ({dRaster_resolution:.6f} deg / {dRaster_resolution_meter:.1f} m) "
+                    f"is coarser than mesh ({dMesh_characteristic_size_units:.6f} deg / {dMesh_characteristic_size:.1f} m). "
+                    f"Resampling source raster to {dTarget_res:.6f} degrees via pyearth.resample_raster before remapping..."
+                )
+            else:
+                logger.info(
+                    f"Raster resolution ({dRaster_resolution:.2f} units / {dRaster_resolution_meter:.1f} m) is coarser than mesh ({dMesh_characteristic_size_units:.2f} units / {dMesh_characteristic_size:.1f} m). "
+                    f"Resampling source raster to {dTarget_res:.2f} units via pyearth.resample_raster before remapping..."
+                )
 
         aFilename_to_process = []
         base_dir = os.path.dirname(os.path.abspath(sFilename_target_mesh))
@@ -1424,6 +1546,9 @@ def run_remap(
             dNoData_src = (
                 pRaster_src.dNoData if pRaster_src.dNoData is not None else -9999.0
             )
+
+            if dMissing_value is None and dNoData_src is not None:
+                dMissing_value = dNoData_src
 
             resample_raster(
                 sFilename_r,
@@ -1909,8 +2034,43 @@ def extract_raster_by_mesh(
         if pRaster.dNoData is not None:
             dMissing_value = pRaster.dNoData
 
-    if sRaster_source_srs is None:
-        sRaster_source_srs = "EPSG:4326"
+    pSpatialRef_raster = osr.SpatialReference()
+    if sRaster_source_srs is not None:
+        if sRaster_source_srs.startswith("GEOGCS") or sRaster_source_srs.startswith(
+            "PROJCS"
+        ):
+            try:
+                pSpatialRef_raster.ImportFromWkt(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+        else:
+            try:
+                pSpatialRef_raster.SetFromUserInput(sRaster_source_srs)
+            except Exception:
+                pSpatialRef_raster.ImportFromEPSG(4326)
+    else:
+        pSpatialRef_raster.ImportFromEPSG(4326)
+
+    try:
+        sRaster_source_srs = pSpatialRef_raster.ExportToWkt()
+    except Exception:
+        pass
+
+    is_raster_geographic = True
+    if hasattr(pSpatialRef_raster, "IsGeographic"):
+        try:
+            is_raster_geographic = bool(pSpatialRef_raster.IsGeographic())
+        except Exception:
+            is_raster_geographic = True
+
+    raster_linear_units = 1.0
+    if hasattr(pSpatialRef_raster, "GetLinearUnits"):
+        try:
+            units = pSpatialRef_raster.GetLinearUnits()
+            if units > 0:
+                raster_linear_units = float(units)
+        except Exception:
+            raster_linear_units = 1.0
 
     if dPixelWidth is None or pPixelHeight is None:
         logger.error("Could not determine raster pixel resolution")
@@ -1946,10 +2106,19 @@ def extract_raster_by_mesh(
         pSpatialRef_target.ImportFromEPSG(4326)
 
     sRemap_method_auto, iRemap_method_auto = _determine_optimal_resampling(
-        dArea_min, dPixelWidth, abs(pPixelHeight), iFlag_verbose_in
+        dArea_min,
+        dPixelWidth,
+        abs(pPixelHeight),
+        iFlag_verbose_in,
+        is_geographic=is_raster_geographic,
+        dLinear_units=raster_linear_units,
     )
 
-    if iRemap_method_auto == 3 and iFlag_remap_method != 3:
+    if (
+        iRemap_method_auto == 3
+        and iFlag_remap_method != 3
+        and len(aFilename_source_raster) == 1
+    ):
         sRemap_method = sRemap_method_auto
     else:
         if iFlag_remap_method in (1, 2):
@@ -1962,13 +2131,31 @@ def extract_raster_by_mesh(
     dMesh_characteristic_size = np.sqrt(dArea_min)
     dRaster_resolution = max(abs(dPixelWidth), abs(pPixelHeight))
 
+    if is_raster_geographic:
+        dRaster_resolution_meter = degree_to_meter(dRaster_resolution)
+        dMesh_characteristic_size_units = meter_to_degree(dMesh_characteristic_size)
+    else:
+        dRaster_resolution_meter = dRaster_resolution * raster_linear_units
+        dMesh_characteristic_size_units = (
+            dMesh_characteristic_size / raster_linear_units
+        )
+
     aFilename_to_process = list(aFilename_source_raster)
     aTemporary_resampled_files = []
 
-    if dRaster_resolution > dMesh_characteristic_size:
-        dTarget_res = min(
-            abs(dPixelWidth), abs(pPixelHeight), dMesh_characteristic_size / 2.0
-        )
+    if dRaster_resolution_meter > dMesh_characteristic_size:
+        if is_raster_geographic:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                meter_to_degree(dMesh_characteristic_size / 2.0),
+            )
+        else:
+            dTarget_res = min(
+                abs(dPixelWidth),
+                abs(pPixelHeight),
+                (dMesh_characteristic_size / 2.0) / raster_linear_units,
+            )
         sResample_alg = "near"
         base_dir = os.path.dirname(os.path.abspath(sFilename_source_mesh))
 
@@ -1985,6 +2172,9 @@ def extract_raster_by_mesh(
             dNoData_src = (
                 pRaster_src.dNoData if pRaster_src.dNoData is not None else -9999.0
             )
+            if dMissing_value is None and dNoData_src is not None:
+                dMissing_value = dNoData_src
+                dMissing_value_val = float(dNoData_src)
             resample_raster(
                 sFilename_r,
                 sFilename_resampled,
