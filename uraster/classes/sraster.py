@@ -15,6 +15,7 @@ from pyearth.gis.gdal.gdal_vector_format_support import (
     get_vector_driver_from_filename,
     has_parquet_support,
 )
+from pyearth.gis.gdal.read.raster import gdal_read_raster_file
 from pyearth.toolbox.management.raster.reproject import reproject_raster
 from pyearth.toolbox.management.raster.resample import resample_raster
 
@@ -110,137 +111,105 @@ class SRaster:
 
     def read_metadata(self):
         """
-        Read raster metadata from the given filename using GDAL.
+        Read raster metadata from the given filename using GDAL via pyearth.
         """
         pSpatialRef_wgs84 = osr.SpatialReference()
         pSpatialRef_wgs84.ImportFromEPSG(4326)
         wkt_wgs84 = pSpatialRef_wgs84.ExportToWkt()
         pSpatialRef_wgs84 = None  # Clean up
-        # check if file exists
+
         sFilename = self.sFilename
         if not os.path.isfile(sFilename):
             raise FileNotFoundError(f"File does not exist: {sFilename}")
 
-        pDataset = None
+        dataset = gdal_read_raster_file(sFilename, metadata_only=True)
+
         try:
-            pDataset = gdal.Open(sFilename)
-            if pDataset is None:
-                raise RuntimeError(f"Unable to open file: {sFilename}")
+            pDriver = get_raster_driver_from_filename(sFilename)
+            self.sDriver = pDriver.ShortName if pDriver is not None else None
+        except Exception:
+            self.sDriver = None
 
-            pDriver = pDataset.GetDriver()
-            if pDriver is not None:
-                self.sDriver = pDriver.ShortName
+        self.ncolumn = dataset.ncolumn
+        self.nrow = dataset.nrow
+        self.iBandCount = dataset.nband
+        self.eType = dataset.data_type
+        self.sDtype = (
+            gdal.GetDataTypeName(self.eType) if self.eType is not None else None
+        )
+        self.pTransform = dataset.geotransform
+        self.dResolution_x = dataset.pixel_width
+        self.dResolution_y = -dataset.pixel_height
+        self.dNoData = dataset.missing_value
 
-            self.sCrs = pDataset.GetProjection()
-            if self.sCrs:
-                self.pSpatialRef.ImportFromWkt(self.sCrs)
-                self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt()
-            else:
-                self.pSpatialRef_wkt = None
+        self.sCrs = dataset.projection_wkt
+        if self.sCrs:
+            self.pSpatialRef.ImportFromWkt(self.sCrs)
+            self.pSpatialRef_wkt = self.pSpatialRef.ExportToWkt()
+        else:
+            self.pSpatialRef_wkt = None
 
-            self.ncolumn = pDataset.RasterXSize
-            self.nrow = pDataset.RasterYSize
-            self.iBandCount = pDataset.RasterCount
-            self.eType = (
-                pDataset.GetRasterBand(1).DataType if self.iBandCount > 0 else None
-            )
-            self.sDtype = (
-                gdal.GetDataTypeName(self.eType) if self.iBandCount > 0 else None
-            )
-            self.pTransform = pDataset.GetGeoTransform()
-            self.dResolution_x = self.pTransform[1]
-            self.dResolution_y = -self.pTransform[5]
-            self.dNoData = (
-                pDataset.GetRasterBand(1).GetNoDataValue()
-                if self.iBandCount > 0
-                else None
-            )
+        # Calculate the actual spatial extent (minX, minY, maxX, maxY)
+        minX = self.pTransform[0]
+        maxY = self.pTransform[3]
+        maxX = minX + (self.ncolumn * self.pTransform[1])
+        minY = maxY + (self.nrow * self.pTransform[5])  # pTransform[5] is negative
+        self.aExtent = (minX, minY, maxX, maxY)
 
-            # Calculate the actual spatial extent (minX, minY, maxX, maxY)
-            minX = self.pTransform[0]
-            maxY = self.pTransform[3]
-            maxX = minX + (self.ncolumn * self.pTransform[1])
-            minY = maxY + (self.nrow * self.pTransform[5])  # pTransform[5] is negative
-            self.aExtent = (minX, minY, maxX, maxY)
+        # If the spatial reference is not in WGS84, transform the extent to WGS84
+        if self.pSpatialRef_wkt != wkt_wgs84:
+            pSpatialRef_wgs84_target = None
+            transform = None
+            try:
+                pSpatialRef_wgs84_target = osr.SpatialReference()
+                pSpatialRef_wgs84_target.ImportFromEPSG(4326)
+                transform = osr.CoordinateTransformation(
+                    self.pSpatialRef, pSpatialRef_wgs84_target
+                )
 
-            # If the spatial reference is not in WGS84, transform the extent to WGS84
-            if self.pSpatialRef_wkt != wkt_wgs84:
-                pSpatialRef_wgs84_target = None
-                transform = None
-                try:
-                    pSpatialRef_wgs84_target = osr.SpatialReference()
-                    pSpatialRef_wgs84_target.ImportFromEPSG(4326)
-                    transform = osr.CoordinateTransformation(
-                        self.pSpatialRef, pSpatialRef_wgs84_target
-                    )
+                # Transform all 4 corners to handle rotated rasters
+                x1, y1, _ = transform.TransformPoint(minX, minY)  # Lower-left
+                x2, y2, _ = transform.TransformPoint(maxX, minY)  # Lower-right
+                x3, y3, _ = transform.TransformPoint(maxX, maxY)  # Upper-right
+                x4, y4, _ = transform.TransformPoint(minX, maxY)  # Upper-left
 
-                    # Transform all 4 corners to handle rotated rasters
-                    x1, y1, _ = transform.TransformPoint(minX, minY)  # Lower-left
-                    x2, y2, _ = transform.TransformPoint(maxX, minY)  # Lower-right
-                    x3, y3, _ = transform.TransformPoint(maxX, maxY)  # Upper-right
-                    x4, y4, _ = transform.TransformPoint(minX, maxY)  # Upper-left
+                # Get the bounding box of all transformed corners
+                all_x = [x1, x2, x3, x4]
+                all_y = [y1, y2, y3, y4]
+                self.aExtent_wgs84 = (
+                    min(all_x),
+                    min(all_y),
+                    max(all_x),
+                    max(all_y),
+                )
 
-                    # Get the bounding box of all transformed corners
-                    all_x = [x1, x2, x3, x4]
-                    all_y = [y1, y2, y3, y4]
-                    self.aExtent_wgs84 = (
-                        min(all_x),
-                        min(all_y),
-                        max(all_x),
-                        max(all_y),
-                    )
-
-                except Exception as e:
-                    print(f"Warning: Failed to transform extent to WGS84: {e}")
-                    self.aExtent_wgs84 = self.aExtent
-                finally:
-                    # Clean up spatial reference and transformation objects
-                    if pSpatialRef_wgs84_target is not None:
-                        pSpatialRef_wgs84_target = None
-                    if transform is not None:
-                        transform = None
-            else:
+            except Exception as e:
+                print(f"Warning: Failed to transform extent to WGS84: {e}")
                 self.aExtent_wgs84 = self.aExtent
+            finally:
+                # Clean up spatial reference and transformation objects
+                if pSpatialRef_wgs84_target is not None:
+                    pSpatialRef_wgs84_target = None
+                if transform is not None:
+                    transform = None
+        else:
+            self.aExtent_wgs84 = self.aExtent
 
-            self.dLongitude_left = self.aExtent_wgs84[0]
-            self.dLongitude_right = self.aExtent_wgs84[2]
-            self.dLatitude_bottom = self.aExtent_wgs84[1]
-            self.dLatitude_top = self.aExtent_wgs84[3]
-
-        finally:
-            # Ensure dataset is properly closed
-            if pDataset is not None:
-                pDataset = None
-
+        self.dLongitude_left = self.aExtent_wgs84[0]
+        self.dLongitude_right = self.aExtent_wgs84[2]
+        self.dLatitude_bottom = self.aExtent_wgs84[1]
+        self.dLatitude_top = self.aExtent_wgs84[3]
         return
 
     def read_data(self, iBand=1):
         """
-        Read raster data from the specified band.
+        Read raster data from the specified band using GDAL via pyearth.
         """
-        # Check if file exists
         if not os.path.isfile(self.sFilename):
             raise FileNotFoundError(f"File does not exist: {self.sFilename}")
 
-        pDataset = None
-        array = None
-        try:
-            pDataset = gdal.Open(self.sFilename)
-            if pDataset is None:
-                raise RuntimeError(f"Unable to open file: {self.sFilename}")
-
-            if iBand < 1 or iBand > pDataset.RasterCount:
-                raise ValueError(f"Invalid band index: {iBand}")
-
-            pBand = pDataset.GetRasterBand(iBand)
-            array = pBand.ReadAsArray()
-
-        finally:
-            # Ensure dataset is properly closed
-            if pDataset is not None:
-                pDataset = None
-
-        return array
+        dataset = gdal_read_raster_file(self.sFilename, band=iBand)
+        return dataset.data
 
     def print_info(self):
         """
@@ -465,35 +434,14 @@ class SRaster:
         Performance note: For large rasters, this method uses a set-based approach
         which is much faster than np.unique() because it avoids sorting overhead.
         """
-        # Check if file exists
-        if not os.path.isfile(self.sFilename):
-            raise FileNotFoundError(f"File does not exist: {self.sFilename}")
+        array = self.read_data(iBand=band_index)
+        if array is None:
+            return []
 
-        pDataset = None
-        unique_values = set()
-        try:
-            pDataset = gdal.Open(self.sFilename)
-            if pDataset is None:
-                raise RuntimeError(f"Unable to open file: {self.sFilename}")
+        unique_values = set(array.flat)
 
-            if band_index < 1 or band_index > pDataset.RasterCount:
-                raise ValueError(f"Invalid band index: {band_index}")
-
-            pBand = pDataset.GetRasterBand(band_index)
-            array = pBand.ReadAsArray()
-
-            # Use set() directly on flattened array - much faster than np.unique()
-            # This avoids the O(n log n) sorting overhead
-            # Convert to Python set via flat iterator
-            unique_values = set(array.flat)
-
-            # Filter out missing value if specified
-            if dMissing_value is not None:
-                unique_values.discard(dMissing_value)
-
-        finally:
-            # Ensure dataset is properly closed
-            if pDataset is not None:
-                pDataset = None
+        # Filter out missing value if specified
+        if dMissing_value is not None:
+            unique_values.discard(dMissing_value)
 
         return sorted(list(unique_values))

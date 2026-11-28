@@ -61,3 +61,21 @@ def test_resample_resolution_and_values(make_raster, tmp_path):
     assert r_high.nrow == 16
     data = r_high.read_data()
     assert np.allclose(data, 15.0)
+
+
+def test_get_unique_values(make_raster, tmp_path):
+    values = np.array([[1, 2], [2, 3]], dtype=np.int32)
+    path = make_raster(
+        tmp_path / "unique.tif",
+        values=values,
+        bbox=(0.0, 0.0, 2.0, 2.0),
+        epsg=4326,
+        nodata=-9999,
+    )
+    r = SRaster(sFilename_in=path)
+    r.read_metadata()
+    uv = r.get_unique_values()
+    assert uv == [1, 2, 3]
+
+    uv_no_2 = r.get_unique_values(dMissing_value=2)
+    assert uv_no_2 == [1, 3]
